@@ -4,10 +4,10 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "node:sqlite": path.resolve(__dirname, "test/sqlite.ts")
-    }
+      "node:sqlite": path.resolve(__dirname, "test/sqlite.ts"),
+    },
   },
   test: {
-    include: ["test/**/*.test.ts"]
-  }
+    include: ["test/**/*.test.ts"],
+  },
 });

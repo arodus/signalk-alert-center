@@ -1,4 +1,10 @@
-export const severities = ["normal", "warn", "alert", "alarm", "emergency"] as const;
+export const severities = [
+  "normal",
+  "warn",
+  "alert",
+  "alarm",
+  "emergency",
+] as const;
 export type Severity = (typeof severities)[number];
 
 export type AlertState = "active" | "cleared";
@@ -52,4 +58,5 @@ export interface NormalizedAlert {
   sourcePayload?: unknown;
 }
 
-export const severityRank = (severity: Severity): number => severities.indexOf(severity);
+export const severityRank = (severity: Severity): number =>
+  severities.indexOf(severity);

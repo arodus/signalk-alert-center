@@ -25,12 +25,16 @@ describe("AlertLifecycle", () => {
       state: "active",
       message: "High water",
       sourcePayload: { state: "alarm" },
-      ...overrides
+      ...overrides,
     };
   }
 
   it("creates an alert and one pending delivery per transport on first ingest", () => {
-    const { database, lifecycle } = createLifecycle(["ntfy-main", "pagerduty-critical", "discord-boat"]);
+    const { database, lifecycle } = createLifecycle([
+      "ntfy-main",
+      "pagerduty-critical",
+      "discord-boat",
+    ]);
     const ingestedAt = new Date("2026-09-05T10:00:00.000Z");
 
     const record = lifecycle.ingest(alert(), ingestedAt);
@@ -39,14 +43,29 @@ describe("AlertLifecycle", () => {
       sourceKey: "notifications.bilge.highWater",
       currentState: "active",
       currentSeverity: "alarm",
-      maxSeverity: "alarm"
+      maxSeverity: "alarm",
     });
     expect(record.firstSeenAt).toEqual(ingestedAt);
     expect(record.lastSeenAt).toEqual(ingestedAt);
     expect(database.listDeliveries()).toMatchObject([
-      { alertId: record.id, transportInstanceId: "ntfy-main", state: "pending", attemptCount: 0 },
-      { alertId: record.id, transportInstanceId: "pagerduty-critical", state: "pending", attemptCount: 0 },
-      { alertId: record.id, transportInstanceId: "discord-boat", state: "pending", attemptCount: 0 }
+      {
+        alertId: record.id,
+        transportInstanceId: "ntfy-main",
+        state: "pending",
+        attemptCount: 0,
+      },
+      {
+        alertId: record.id,
+        transportInstanceId: "pagerduty-critical",
+        state: "pending",
+        attemptCount: 0,
+      },
+      {
+        alertId: record.id,
+        transportInstanceId: "discord-boat",
+        state: "pending",
+        attemptCount: 0,
+      },
     ]);
   });
 
@@ -56,7 +75,10 @@ describe("AlertLifecycle", () => {
     const updatedAt = new Date("2026-09-05T10:05:00.000Z");
 
     const first = lifecycle.ingest(alert({ severity: "warn" }), firstSeenAt);
-    const second = lifecycle.ingest(alert({ severity: "emergency", message: "More water" }), updatedAt);
+    const second = lifecycle.ingest(
+      alert({ severity: "emergency", message: "More water" }),
+      updatedAt,
+    );
 
     expect(second.id).toBe(first.id);
     expect(second.firstSeenAt).toEqual(firstSeenAt);
@@ -67,12 +89,18 @@ describe("AlertLifecycle", () => {
   });
 
   it("retains a cleared alert and its pending delivery when it clears before delivery", () => {
-    const { database, lifecycle } = createLifecycle(["ntfy-main", "discord-boat"]);
+    const { database, lifecycle } = createLifecycle([
+      "ntfy-main",
+      "discord-boat",
+    ]);
     const raisedAt = new Date("2026-09-05T10:00:00.000Z");
     const clearedAt = new Date("2026-09-05T10:17:00.000Z");
 
     const raised = lifecycle.ingest(alert({ severity: "emergency" }), raisedAt);
-    const cleared = lifecycle.ingest(alert({ state: "cleared", severity: "normal" }), clearedAt);
+    const cleared = lifecycle.ingest(
+      alert({ state: "cleared", severity: "normal" }),
+      clearedAt,
+    );
 
     expect(cleared.id).toBe(raised.id);
     expect(cleared.currentState).toBe("cleared");
@@ -80,6 +108,33 @@ describe("AlertLifecycle", () => {
     expect(cleared.maxSeverity).toBe("emergency");
     expect(cleared.clearedAt).toEqual(clearedAt);
     expect(database.listDeliveries()).toHaveLength(2);
-    expect(database.listDeliveries().every((delivery) => delivery.state === "pending")).toBe(true);
+    expect(
+      database
+        .listDeliveries()
+        .every((delivery) => delivery.state === "pending"),
+    ).toBe(true);
+  });
+
+  it("records lifecycle changes for an existing alert", () => {
+    const { database, lifecycle } = createLifecycle(["ntfy-main"]);
+    const raisedAt = new Date("2026-09-05T10:00:00.000Z");
+    const changedAt = new Date("2026-09-05T10:05:00.000Z");
+    const clearedAt = new Date("2026-09-05T10:17:00.000Z");
+
+    lifecycle.ingest(alert({ severity: "warn" }), raisedAt);
+    lifecycle.ingest(alert({ severity: "emergency" }), changedAt);
+    lifecycle.ingest(
+      alert({ severity: "normal", state: "cleared" }),
+      clearedAt,
+    );
+
+    const events = database.db
+      .prepare("SELECT event_type FROM alert_events ORDER BY id")
+      .all() as Array<{ event_type: string }>;
+    expect(events.map((event) => event.event_type)).toEqual([
+      "raised",
+      "severity_changed",
+      "cleared",
+    ]);
   });
 });
