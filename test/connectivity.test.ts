@@ -5,6 +5,8 @@ import {
 } from "../src/connectivity/manager";
 import { AlertDatabase } from "../src/storage/db";
 import { AlertLifecycle } from "../src/alerts/lifecycle";
+import { createInternetProbe } from "../src/connectivity/internet";
+import { vi } from "vitest";
 
 class FakeSwitch implements SwitchAdapter {
   state: boolean | undefined = false;
@@ -112,5 +114,21 @@ describe("connectivity ownership and durable wake requests", () => {
     expect(database.listWakeRequests()).toEqual([
       { alertId: alert.id, dueAt: firstDueAt },
     ]);
+  });
+
+  it("returns Internet readiness from the configured HTTP probe", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const probe = createInternetProbe({
+      url: "https://probe.example",
+      timeoutMs: 100,
+    });
+
+    await expect(probe()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://probe.example",
+      expect.objectContaining({ method: "HEAD" }),
+    );
+    vi.unstubAllGlobals();
   });
 });

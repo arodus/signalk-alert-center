@@ -39,7 +39,10 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
       "onValue": 1,
       "offValue": 0
     },
-    "idleCooldownSeconds": 300
+    "idleCooldownSeconds": 300,
+    "bootTimeoutSeconds": 240,
+    "internetCheckIntervalSeconds": 5,
+    "probe": { "url": "https://example.com/generate_204", "timeoutSeconds": 10 }
   }
 }
 ```
@@ -56,6 +59,10 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 Signal K protects these routes with its normal plugin authentication. The status response includes queue counts, connectivity state, switch state, ownership, and the last connectivity error.
 
 The included operational dashboard is served by Signal K at `/signalk-persistent-notifier`. It shows active alerts, cleared-alert history, per-transport delivery state, connectivity ownership, refresh status, and a manual retry action.
+
+When connectivity is enabled, the plugin waits for the configured probe to return a successful HTTP response before entering `ONLINE`. It retries until `bootTimeoutSeconds` and enters `FAULT` without deleting queued alerts if readiness never arrives.
+
+Docker-backed HTTP integration tests are available with `npm run test:integration`. They start a local mock service and exercise ntfy, PagerDuty, and Discord transport requests without sending data to external services. Docker and Docker Compose are required; the normal `npm test` suite remains self-contained.
 
 ## Development
 

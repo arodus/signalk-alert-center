@@ -11,6 +11,7 @@ import { ConnectivityManager } from "./connectivity/manager";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { matchRules } from "./alerts/rules";
 import { registerRoutes } from "./api/routes";
+import { createInternetProbe } from "./connectivity/internet";
 
 export = function persistentNotifier(app: any) {
   let database: AlertDatabase | undefined;
@@ -89,6 +90,15 @@ export = function persistentNotifier(app: any) {
             switchConfig.offValue,
           ),
           (options.connectivity.idleCooldownSeconds ?? 300) * 1000,
+          options.connectivity.probe
+            ? createInternetProbe({
+                url: options.connectivity.probe.url,
+                timeoutMs:
+                  (options.connectivity.probe.timeoutSeconds ?? 10) * 1000,
+              })
+            : undefined,
+          (options.connectivity.bootTimeoutSeconds ?? 240) * 1000,
+          (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
         );
       scheduleNextWake();
       const handler = async (delta: any) => {

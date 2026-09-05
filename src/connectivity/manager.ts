@@ -25,6 +25,8 @@ export class ConnectivityManager {
     private readonly adapter: SwitchAdapter,
     private readonly cooldownMs = 300_000,
     private readonly internetReady: () => Promise<boolean> = async () => true,
+    private readonly bootTimeoutMs = 240_000,
+    private readonly checkIntervalMs = 5_000,
   ) {}
 
   async requestWake(): Promise<void> {
@@ -85,7 +87,17 @@ export class ConnectivityManager {
 
   private async waitForInternet(): Promise<void> {
     this.state = "WAITING_FOR_INTERNET";
-    if (await this.internetReady()) this.state = "ONLINE";
+    const deadline = Date.now() + this.bootTimeoutMs;
+    while (Date.now() <= deadline) {
+      if (await this.internetReady()) {
+        this.state = "ONLINE";
+        return;
+      }
+      if (Date.now() + this.checkIntervalMs > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, this.checkIntervalMs));
+    }
+    this.state = "FAULT";
+    this.lastError = "Internet readiness probe timed out";
   }
 
   beginCooldown(): void {

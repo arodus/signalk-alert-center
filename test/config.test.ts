@@ -27,5 +27,13 @@ describe("validateConfig", () => {
     expect(() => validateConfig({ connectivity: { enabled: true } })).toThrow(
       "switch configuration",
     );
+    expect(() =>
+      validateConfig({
+        connectivity: {
+          enabled: true,
+          switch: { path: "switch", onValue: 1, offValue: 0 },
+        },
+      }),
+    ).toThrow("Internet probe");
   });
 });

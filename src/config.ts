@@ -25,6 +25,9 @@ export interface PluginConfig {
   connectivity?: {
     enabled?: boolean;
     switch?: { path: string; onValue: unknown; offValue: unknown };
+    probe?: { url: string; timeoutSeconds?: number };
+    bootTimeoutSeconds?: number;
+    internetCheckIntervalSeconds?: number;
     idleCooldownSeconds?: number;
   };
 }
@@ -71,6 +74,24 @@ export function validateConfig(config: PluginConfig): void {
   }
   if (config.connectivity?.enabled && !config.connectivity.switch)
     throw new Error("Enabled connectivity requires a switch configuration");
+  if (config.connectivity?.enabled && !config.connectivity.probe)
+    throw new Error("Enabled connectivity requires an Internet probe");
+  if (config.connectivity?.probe) {
+    requireString(
+      config.connectivity.probe.url,
+      "Connectivity probe requires a URL",
+    );
+    requireUrl(
+      config.connectivity.probe.url,
+      "Connectivity probe has an invalid URL",
+    );
+    if ((config.connectivity.probe.timeoutSeconds ?? 10) <= 0)
+      throw new Error("Connectivity probe timeout must be positive");
+  }
+  if ((config.connectivity?.bootTimeoutSeconds ?? 240) <= 0)
+    throw new Error("bootTimeoutSeconds must be positive");
+  if ((config.connectivity?.internetCheckIntervalSeconds ?? 5) <= 0)
+    throw new Error("internetCheckIntervalSeconds must be positive");
   if ((config.connectivity?.idleCooldownSeconds ?? 0) < 0)
     throw new Error("idleCooldownSeconds must be non-negative");
 }
