@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS deliveries (
   UNIQUE(alert_id, transport_instance_id)
 );
 CREATE INDEX IF NOT EXISTS deliveries_due_idx ON deliveries(state, next_attempt_at);
+CREATE TABLE IF NOT EXISTS wake_requests (
+  alert_id TEXT PRIMARY KEY REFERENCES alerts(id) ON DELETE CASCADE,
+  wake_due_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS connectivity_sessions (
   id INTEGER PRIMARY KEY CHECK (id = 1), started_at TEXT, started_by_plugin INTEGER,
   state TEXT NOT NULL, observed_switch_on INTEGER, wake_due_at TEXT, last_error TEXT, updated_at TEXT NOT NULL

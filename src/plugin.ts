@@ -10,12 +10,28 @@ import { PagerDutyTransport } from "./transports/pagerduty";
 import { ConnectivityManager } from "./connectivity/manager";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { matchRules } from "./alerts/rules";
+import { registerRoutes } from "./api/routes";
 
 export = function persistentNotifier(app: any) {
   let database: AlertDatabase | undefined;
   let scheduler: DeliveryScheduler | undefined;
   let connectivity: ConnectivityManager | undefined;
   let unsubscribe: (() => void) | undefined;
+  const status = () => ({
+    connectivity: connectivity
+      ? {
+          state: connectivity.state,
+          switchOn: connectivity.switchOn,
+          ownedByPlugin: connectivity.ownedByPlugin,
+          lastError: connectivity.lastError,
+        }
+      : { state: "OFF", switchOn: undefined, ownedByPlugin: false },
+    alerts: {
+      total: database?.listAlerts().length ?? 0,
+      pendingDelivery: database?.pendingDeliveryCount() ?? 0,
+    },
+    deliveries: database?.listDeliveries() ?? [],
+  });
   return {
     id: "signalk-persistent-notifier",
     name: "Persistent notifier",
@@ -58,6 +74,9 @@ export = function persistentNotifier(app: any) {
           ),
           (options.connectivity.idleCooldownSeconds ?? 300) * 1000,
         );
+      for (const request of database.listWakeRequests()) {
+        if (connectivity) connectivity.scheduleWakeAt(request.dueAt);
+      }
       const handler = async (delta: any) => {
         const pathValue = delta?.updates?.[0]?.values?.[0]?.path ?? delta?.path;
         const value = delta?.updates?.[0]?.values?.[0]?.value ?? delta?.value;
@@ -69,8 +88,18 @@ export = function persistentNotifier(app: any) {
           record.maxSeverity,
           options.rules ?? [],
         );
-        if (connectivity && matched.connectivity.mode === "wake")
-          await connectivity.requestWake();
+        if (record.currentState === "cleared") {
+          database?.clearWakeDue(record.id);
+        } else if (matched.connectivity.mode === "wake") {
+          database?.setWakeDue(record.id, new Date());
+          if (connectivity) await connectivity.requestWake();
+        } else if (matched.connectivity.mode === "wake_after") {
+          const dueAt = new Date(
+            Date.now() + matched.connectivity.delaySeconds * 1000,
+          );
+          database?.setWakeDue(record.id, dueAt);
+          connectivity?.scheduleWakeAt(dueAt);
+        }
         void scheduler?.runOnce();
       };
       if (app.subscriptionmanager?.subscribe) {
@@ -85,6 +114,35 @@ export = function persistentNotifier(app: any) {
       }
       void scheduler.runOnce();
       return { status: "started" };
+    },
+    status,
+    registerWithRouter(router: Parameters<typeof registerRoutes>[0]) {
+      registerRoutes(
+        router,
+        () => database,
+        status,
+        () => scheduler?.runOnce() ?? Promise.resolve(),
+      );
+    },
+    getOpenApi() {
+      return {
+        openapi: "3.0.0",
+        info: { title: "Persistent notifier", version: "0.1.0" },
+        paths: {
+          "/status": {
+            get: { responses: { "200": { description: "Plugin status" } } },
+          },
+          "/alerts": {
+            get: { responses: { "200": { description: "Stored alerts" } } },
+          },
+          "/deliveries": {
+            get: { responses: { "200": { description: "Delivery records" } } },
+          },
+          "/retry": {
+            post: { responses: { "200": { description: "Retry scheduled" } } },
+          },
+        },
+      };
     },
     stop() {
       unsubscribe?.();

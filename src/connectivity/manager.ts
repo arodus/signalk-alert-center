@@ -18,6 +18,8 @@ export class ConnectivityManager {
   ownedByPlugin = false;
   lastError?: string;
   private cooldownTimer?: ReturnType<typeof setTimeout>;
+  private wakeTimer?: ReturnType<typeof setTimeout>;
+  private wakeDueAt?: Date;
 
   constructor(
     private readonly adapter: SwitchAdapter,
@@ -26,6 +28,16 @@ export class ConnectivityManager {
   ) {}
 
   async requestWake(): Promise<void> {
+    if (
+      this.switchOn === true &&
+      (this.state === "POWERED" ||
+        this.state === "WAITING_FOR_INTERNET" ||
+        this.state === "ONLINE" ||
+        this.state === "IDLE_COOLDOWN")
+    ) {
+      this.cancelCooldown();
+      return;
+    }
     const observed = await this.adapter.getState();
     this.switchOn = observed;
     if (observed === true) {
@@ -51,6 +63,18 @@ export class ConnectivityManager {
       this.state = "FAULT";
       this.lastError = error instanceof Error ? error.message : String(error);
     }
+  }
+
+  scheduleWakeAt(dueAt: Date): void {
+    if (this.wakeDueAt && this.wakeDueAt <= dueAt) return;
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
+    this.wakeDueAt = dueAt;
+    const delay = Math.max(0, dueAt.getTime() - Date.now());
+    this.wakeTimer = setTimeout(() => {
+      this.wakeTimer = undefined;
+      this.wakeDueAt = undefined;
+      void this.requestWake();
+    }, delay);
   }
 
   private async waitForInternet(): Promise<void> {
@@ -99,5 +123,7 @@ export class ConnectivityManager {
 
   stop(): void {
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
+    this.wakeDueAt = undefined;
   }
 }

@@ -30,6 +30,10 @@ export class AlertDatabase {
     now = new Date(),
   ): AlertRecord {
     const timestamp = now.toISOString();
+    const sourcePayload =
+      alert.sourcePayload === undefined
+        ? null
+        : JSON.stringify(alert.sourcePayload);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const existing = this.db
@@ -61,7 +65,7 @@ export class AlertDatabase {
             alert.severity,
             maxSeverity,
             alert.message ?? null,
-            JSON.stringify(alert.sourcePayload),
+            sourcePayload,
             timestamp,
             id,
           );
@@ -104,7 +108,7 @@ export class AlertDatabase {
             alert.severity,
             maxSeverity,
             alert.message ?? null,
-            JSON.stringify(alert.sourcePayload),
+            sourcePayload,
             timestamp,
             timestamp,
           );
@@ -116,7 +120,7 @@ export class AlertDatabase {
             id,
             alert.state === "cleared" ? "cleared" : "raised",
             timestamp,
-            JSON.stringify(alert.sourcePayload),
+            sourcePayload,
           );
       }
       for (const transportId of transportIds) {
@@ -157,6 +161,50 @@ export class AlertDatabase {
       )
       .get() as AlertRow;
     return Number(row.count);
+  }
+
+  retryFailedDeliveries(): void {
+    this.db
+      .prepare(
+        "UPDATE deliveries SET state='pending', next_attempt_at=NULL, updated_at=? WHERE state IN ('failed_retryable', 'failed_terminal')",
+      )
+      .run(new Date().toISOString());
+  }
+
+  setWakeDue(alertId: string, dueAt: Date, now = new Date()): void {
+    this.db
+      .prepare(
+        "INSERT INTO wake_requests (alert_id, wake_due_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(alert_id) DO UPDATE SET wake_due_at=excluded.wake_due_at, updated_at=excluded.updated_at",
+      )
+      .run(alertId, dueAt.toISOString(), now.toISOString());
+  }
+
+  clearWakeDue(alertId: string): void {
+    this.db.prepare("DELETE FROM wake_requests WHERE alert_id=?").run(alertId);
+  }
+
+  listWakeDue(now = new Date()): Array<{ alertId: string; dueAt: Date }> {
+    const rows = this.db
+      .prepare(
+        "SELECT alert_id, wake_due_at FROM wake_requests WHERE wake_due_at <= ? ORDER BY wake_due_at",
+      )
+      .all(now.toISOString()) as AlertRow[];
+    return rows.map((row) => ({
+      alertId: String(row.alert_id),
+      dueAt: new Date(String(row.wake_due_at)),
+    }));
+  }
+
+  listWakeRequests(): Array<{ alertId: string; dueAt: Date }> {
+    const rows = this.db
+      .prepare(
+        "SELECT alert_id, wake_due_at FROM wake_requests ORDER BY wake_due_at",
+      )
+      .all() as AlertRow[];
+    return rows.map((row) => ({
+      alertId: String(row.alert_id),
+      dueAt: new Date(String(row.wake_due_at)),
+    }));
   }
 
   recoverSending(now = new Date()): void {

@@ -44,8 +44,17 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
 }
 ```
 
-Repeated updates coalesce by notification path. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
+Repeated updates coalesce by notification path. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
+
+The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifier`:
+
+- `GET /status`
+- `GET /alerts`
+- `GET /deliveries`
+- `POST /retry`
+
+Signal K protects these routes with its normal plugin authentication. The status response includes queue counts, connectivity state, switch state, ownership, and the last connectivity error.
 
 ## Development
 
-`npm test` runs the lifecycle tests. `npm run build` performs the strict TypeScript build. The current plugin entry point wires the Signal K subscription and delivery engine; route/status integration and durable wake-after timestamps remain planned follow-up work.
+`npm test` runs the lifecycle and connectivity tests. `npm run format:check`, `npm run lint`, and `npm run build` are the required quality checks. The plugin entry point wires the Signal K subscription, durable delivery engine, connectivity manager, and authenticated plugin routes.
