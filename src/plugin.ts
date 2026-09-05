@@ -32,6 +32,12 @@ export = function persistentNotifier(app: any) {
     },
     deliveries: database?.listDeliveries() ?? [],
   });
+  const runScheduler = async () => {
+    await scheduler?.runOnce();
+    if (connectivity && database?.pendingDeliveryCount() === 0) {
+      connectivity.beginCooldown();
+    }
+  };
   return {
     id: "signalk-persistent-notifier",
     name: "Persistent notifier",
@@ -100,7 +106,7 @@ export = function persistentNotifier(app: any) {
           database?.setWakeDue(record.id, dueAt);
           connectivity?.scheduleWakeAt(dueAt);
         }
-        void scheduler?.runOnce();
+        void runScheduler();
       };
       if (app.subscriptionmanager?.subscribe) {
         app.subscriptionmanager.subscribe(
@@ -112,17 +118,12 @@ export = function persistentNotifier(app: any) {
         );
         unsubscribe = () => undefined;
       }
-      void scheduler.runOnce();
+      void runScheduler();
       return { status: "started" };
     },
     status,
     registerWithRouter(router: Parameters<typeof registerRoutes>[0]) {
-      registerRoutes(
-        router,
-        () => database,
-        status,
-        () => scheduler?.runOnce() ?? Promise.resolve(),
-      );
+      registerRoutes(router, () => database, status, runScheduler);
     },
     getOpenApi() {
       return {
