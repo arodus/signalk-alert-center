@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Persistent Notifier</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Signal K operations</p>
+          <h1>Persistent Notifier</h1>
+          <p class="lede">Alert delivery across intermittent connectivity.</p>
+        </div>
+        <div class="actions">
+          <span id="updated" class="updated">Loading...</span>
+          <button id="refresh" class="button button-quiet" type="button">
+            Refresh
+          </button>
+          <button id="retry" class="button button-primary" type="button">
+            Retry pending
+          </button>
+        </div>
+      </header>
+
+      <section class="summary-grid" aria-label="System summary">
+        <article class="summary-card summary-card-live">
+          <span class="summary-label">Active alerts</span>
+          <strong id="active-count">--</strong>
+          <span class="summary-note">currently raised</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Pending deliveries</span>
+          <strong id="pending-count">--</strong>
+          <span class="summary-note">across all transports</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Connectivity</span>
+          <strong id="connectivity-state">--</strong>
+          <span id="connectivity-note" class="summary-note"
+            >checking switch state</span
+          >
+        </article>
+      </section>
+
+      <section class="workspace">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Alert stream</p>
+            <h2>Current and historical alerts</h2>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Alert views">
+            <button
+              class="tab is-selected"
+              data-view="active"
+              role="tab"
+              aria-selected="true"
+              type="button"
+            >
+              Active
+            </button>
+            <button
+              class="tab"
+              data-view="history"
+              role="tab"
+              aria-selected="false"
+              type="button"
+            >
+              History
+            </button>
+          </div>
+        </div>
+        <div id="alert-list" class="alert-list" aria-live="polite"></div>
+      </section>
+
+      <section class="workspace delivery-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Transport health</p>
+            <h2>Delivery queue</h2>
+          </div>
+        </div>
+        <div id="delivery-list" class="delivery-list" aria-live="polite"></div>
+      </section>
+
+      <p id="error" class="error" role="alert" hidden></p>
+    </main>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

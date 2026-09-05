@@ -55,6 +55,8 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 
 Signal K protects these routes with its normal plugin authentication. The status response includes queue counts, connectivity state, switch state, ownership, and the last connectivity error.
 
+The included operational dashboard is served by Signal K at `/signalk-persistent-notifier`. It shows active alerts, cleared-alert history, per-transport delivery state, connectivity ownership, refresh status, and a manual retry action.
+
 ## Development
 
 `npm test` runs the lifecycle and connectivity tests. `npm run format:check`, `npm run lint`, and `npm run build` are the required quality checks. The plugin entry point wires the Signal K subscription, durable delivery engine, connectivity manager, and authenticated plugin routes.
