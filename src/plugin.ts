@@ -38,6 +38,11 @@ export = function persistentNotifier(app: any) {
       connectivity.beginCooldown();
     }
   };
+  const scheduleNextWake = () => {
+    const nextWake = database?.listWakeRequests()[0];
+    connectivity?.cancelScheduledWake();
+    if (nextWake) connectivity?.scheduleWakeAt(nextWake.dueAt);
+  };
   return {
     id: "signalk-persistent-notifier",
     name: "Persistent notifier",
@@ -68,7 +73,12 @@ export = function persistentNotifier(app: any) {
           transports.set(id, new DiscordTransport(String(config.webhookUrl)));
       }
       const lifecycle = new AlertLifecycle(database, [...transports.keys()]);
-      scheduler = new DeliveryScheduler(database, transports);
+      scheduler = new DeliveryScheduler(database, transports, {
+        initialSeconds: options.retry?.initialSeconds ?? 10,
+        maxSeconds: options.retry?.maxSeconds ?? 1800,
+        multiplier: options.retry?.multiplier ?? 2,
+        jitter: options.retry?.jitter ?? 0.2,
+      });
       const switchConfig = options.connectivity?.switch;
       if (options.connectivity?.enabled && switchConfig)
         connectivity = new ConnectivityManager(
@@ -80,22 +90,21 @@ export = function persistentNotifier(app: any) {
           ),
           (options.connectivity.idleCooldownSeconds ?? 300) * 1000,
         );
-      for (const request of database.listWakeRequests()) {
-        if (connectivity) connectivity.scheduleWakeAt(request.dueAt);
-      }
+      scheduleNextWake();
       const handler = async (delta: any) => {
         const pathValue = delta?.updates?.[0]?.values?.[0]?.path ?? delta?.path;
         const value = delta?.updates?.[0]?.values?.[0]?.value ?? delta?.value;
         if (typeof pathValue !== "string") return;
         const normalized = normalizeNotification(pathValue, value);
-        const record = lifecycle.ingest(normalized);
         const matched = matchRules(
-          record.path,
-          record.maxSeverity,
+          normalized.path,
+          normalized.severity,
           options.rules ?? [],
         );
+        const record = lifecycle.ingest(normalized, matched.notifiers);
         if (record.currentState === "cleared") {
           database?.clearWakeDue(record.id);
+          scheduleNextWake();
         } else if (matched.connectivity.mode === "wake") {
           database?.setWakeDue(record.id, new Date());
           if (connectivity) await connectivity.requestWake();
@@ -145,9 +154,9 @@ export = function persistentNotifier(app: any) {
         },
       };
     },
-    stop() {
+    async stop() {
       unsubscribe?.();
-      scheduler?.stop();
+      await scheduler?.stop();
       connectivity?.stop();
       database?.close();
       database = undefined;

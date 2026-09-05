@@ -92,4 +92,25 @@ describe("connectivity ownership and durable wake requests", () => {
       { alertId: alert.id, dueAt },
     ]);
   });
+
+  it("keeps the original wake-after deadline when an alert is updated", () => {
+    const database = new AlertDatabase();
+    databases.push(database);
+    const lifecycle = new AlertLifecycle(database, ["ntfy-main"]);
+    const alert = lifecycle.ingest({
+      sourceKey: "notifications.engine.overheat",
+      path: "notifications.engine.overheat",
+      severity: "alarm",
+      state: "active",
+    });
+    const firstDueAt = new Date("2026-09-05T10:10:00.000Z");
+    const laterDueAt = new Date("2026-09-05T10:20:00.000Z");
+
+    database.setWakeDue(alert.id, firstDueAt);
+    database.setWakeDue(alert.id, laterDueAt);
+
+    expect(database.listWakeRequests()).toEqual([
+      { alertId: alert.id, dueAt: firstDueAt },
+    ]);
+  });
 });

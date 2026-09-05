@@ -5,6 +5,8 @@ import { nextRetry, RetryPolicy } from "./retry";
 
 export class DeliveryScheduler {
   private running = false;
+  private stopped = false;
+  private activeRun?: Promise<void>;
   constructor(
     private readonly database: AlertDatabase,
     private readonly transports: Map<string, NotificationTransport>,
@@ -17,14 +19,17 @@ export class DeliveryScheduler {
   ) {
     this.database.recoverSending();
   }
-  stop(): void {
+  async stop(): Promise<void> {
+    this.stopped = true;
     this.running = false;
+    await this.activeRun;
   }
   async runOnce(now = new Date()): Promise<void> {
-    if (this.running) return;
+    if (this.stopped || this.running) return this.activeRun;
     this.running = true;
-    try {
+    const run = (async () => {
       for (const delivery of this.database.listDeliveries()) {
+        if (this.stopped) break;
         if (
           delivery.state === "delivered" ||
           delivery.state === "failed_terminal"
@@ -42,6 +47,7 @@ export class DeliveryScheduler {
           );
           continue;
         }
+        // Claim and commit before leaving the database for an external HTTP call.
         this.database.claimDelivery(delivery.id, now);
         const alert = this.database.getAlert(delivery.alertId);
         const result = await transport.send(alert, delivery, {
@@ -64,8 +70,13 @@ export class DeliveryScheduler {
             now,
           );
       }
+    })();
+    this.activeRun = run;
+    try {
+      await run;
     } finally {
       this.running = false;
+      this.activeRun = undefined;
     }
   }
 }

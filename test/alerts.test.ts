@@ -69,6 +69,20 @@ describe("AlertLifecycle", () => {
     ]);
   });
 
+  it("creates deliveries only for the rule-matched transports", () => {
+    const { database, lifecycle } = createLifecycle([
+      "ntfy-main",
+      "pagerduty-critical",
+    ]);
+
+    const record = lifecycle.ingest(alert(), ["ntfy-main"]);
+
+    expect(database.listDeliveries()).toMatchObject([
+      { alertId: record.id, transportInstanceId: "ntfy-main" },
+    ]);
+    expect(database.listDeliveries()).toHaveLength(1);
+  });
+
   it("coalesces duplicate active updates and retains the highest severity", () => {
     const { database, lifecycle } = createLifecycle(["ntfy-main"]);
     const firstSeenAt = new Date("2026-09-05T10:00:00.000Z");

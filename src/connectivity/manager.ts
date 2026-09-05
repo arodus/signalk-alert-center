@@ -77,6 +77,12 @@ export class ConnectivityManager {
     }, delay);
   }
 
+  cancelScheduledWake(): void {
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
+    this.wakeTimer = undefined;
+    this.wakeDueAt = undefined;
+  }
+
   private async waitForInternet(): Promise<void> {
     this.state = "WAITING_FOR_INTERNET";
     if (await this.internetReady()) this.state = "ONLINE";
@@ -123,7 +129,6 @@ export class ConnectivityManager {
 
   stop(): void {
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
-    if (this.wakeTimer) clearTimeout(this.wakeTimer);
-    this.wakeDueAt = undefined;
+    this.cancelScheduledWake();
   }
 }

@@ -34,6 +34,7 @@ export class AlertDatabase {
       alert.sourcePayload === undefined
         ? null
         : JSON.stringify(alert.sourcePayload);
+    // Alert state and its delivery rows must commit together before any send.
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const existing = this.db
@@ -174,7 +175,7 @@ export class AlertDatabase {
   setWakeDue(alertId: string, dueAt: Date, now = new Date()): void {
     this.db
       .prepare(
-        "INSERT INTO wake_requests (alert_id, wake_due_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(alert_id) DO UPDATE SET wake_due_at=excluded.wake_due_at, updated_at=excluded.updated_at",
+        "INSERT INTO wake_requests (alert_id, wake_due_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(alert_id) DO NOTHING",
       )
       .run(alertId, dueAt.toISOString(), now.toISOString());
   }
