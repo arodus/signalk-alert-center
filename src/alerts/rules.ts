@@ -14,6 +14,7 @@ export function matchRules(
   const notifiers = new Set<string>();
   let connectivity: ConnectivityMode = { mode: "queue" };
   for (const rule of rules) {
+    if (rule.enabled === false) continue;
     if (
       picomatch(rule.match)(path) &&
       severityRank(severity) >= severityRank(rule.minSeverity)

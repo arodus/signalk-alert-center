@@ -18,6 +18,24 @@ export class AlertDatabase {
   constructor(filename = ":memory:") {
     this.db = new DatabaseSync(filename);
     this.db.exec(schema);
+    this.migrateAlerts();
+  }
+
+  private migrateAlerts(): void {
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(alerts)").all() as AlertRow[]).map(
+        (row) => String(row.name),
+      ),
+    );
+    for (const [name, definition] of [
+      ["fire_count", "INTEGER NOT NULL DEFAULT 0"],
+      ["last_fired_at", "TEXT"],
+      ["removed_at", "TEXT"],
+    ] as const) {
+      if (!columns.has(name)) {
+        this.db.exec(`ALTER TABLE alerts ADD COLUMN ${name} ${definition}`);
+      }
+    }
   }
 
   close(): void {
@@ -54,19 +72,23 @@ export class AlertDatabase {
       const previousSeverity = existing?.current_severity as
         AlertRecord["currentSeverity"] | undefined;
       const clearedAt = alert.state === "cleared" ? timestamp : null;
+      const fired = alert.state === "active" && previousState !== "active";
       if (existing) {
         this.db
           .prepare(
-            `UPDATE alerts SET last_seen_at=?, cleared_at=?, current_state=?, current_severity=?, max_severity=?, message=?, source_payload_json=?, updated_at=? WHERE id=?`,
+            `UPDATE alerts SET last_seen_at=?, cleared_at=?, current_state=?, current_severity=?, max_severity=?, message=?, source_payload_json=?, fire_count=fire_count+?, last_fired_at=CASE WHEN ? THEN ? ELSE last_fired_at END, updated_at=? WHERE id=?`,
           )
           .run(
             timestamp,
-            clearedAt ?? existing.cleared_at ?? null,
+            clearedAt,
             alert.state,
             alert.severity,
             maxSeverity,
             alert.message ?? null,
             sourcePayload,
+            fired ? 1 : 0,
+            fired ? 1 : 0,
+            fired ? timestamp : null,
             timestamp,
             id,
           );
@@ -79,7 +101,7 @@ export class AlertDatabase {
               id,
               alert.state === "cleared" ? "cleared" : "raised",
               timestamp,
-              JSON.stringify(alert.sourcePayload),
+              sourcePayload,
             );
         } else if (previousSeverity !== alert.severity) {
           this.db
@@ -96,7 +118,7 @@ export class AlertDatabase {
       } else {
         this.db
           .prepare(
-            `INSERT INTO alerts (id,source_key,path,first_seen_at,last_seen_at,cleared_at,current_state,current_severity,max_severity,message,source_payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO alerts (id,source_key,path,first_seen_at,last_seen_at,cleared_at,current_state,current_severity,max_severity,message,source_payload_json,fire_count,last_fired_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           )
           .run(
             id,
@@ -110,6 +132,8 @@ export class AlertDatabase {
             maxSeverity,
             alert.message ?? null,
             sourcePayload,
+            alert.state === "active" ? 1 : 0,
+            alert.state === "active" ? timestamp : null,
             timestamp,
             timestamp,
           );
@@ -231,6 +255,9 @@ export class AlertDatabase {
       firstSeenAt: new Date(String(row.first_seen_at)),
       lastSeenAt: new Date(String(row.last_seen_at)),
       clearedAt: date(row.cleared_at),
+      lastFiredAt: date(row.last_fired_at),
+      fireCount: Number(row.fire_count ?? 0),
+      removedAt: date(row.removed_at),
       currentState: row.current_state as AlertRecord["currentState"],
       currentSeverity: row.current_severity as AlertRecord["currentSeverity"],
       maxSeverity: row.max_severity as AlertRecord["maxSeverity"],
@@ -239,6 +266,12 @@ export class AlertDatabase {
         ? JSON.parse(String(row.source_payload_json))
         : undefined,
     };
+  }
+
+  removeAlert(id: string, now = new Date()): void {
+    this.db
+      .prepare("UPDATE alerts SET removed_at=?, updated_at=? WHERE id=?")
+      .run(now.toISOString(), now.toISOString(), id);
   }
 
   listDeliveries(): DeliveryRecord[] {

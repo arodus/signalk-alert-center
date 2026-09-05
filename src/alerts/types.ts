@@ -20,6 +20,9 @@ export interface AlertRecord {
   firstSeenAt: Date;
   lastSeenAt: Date;
   clearedAt?: Date;
+  lastFiredAt?: Date;
+  fireCount: number;
+  removedAt?: Date;
   currentState: AlertState;
   currentSeverity: Severity;
   maxSeverity: Severity;

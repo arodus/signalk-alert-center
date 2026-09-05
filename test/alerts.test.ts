@@ -151,4 +151,30 @@ describe("AlertLifecycle", () => {
       "cleared",
     ]);
   });
+
+  it("tracks the last fire and fire count across alert occurrences", () => {
+    const { database, lifecycle } = createLifecycle([]);
+    const firstRaised = new Date("2026-09-05T10:00:00.000Z");
+    const cleared = new Date("2026-09-05T10:05:00.000Z");
+    const secondRaised = new Date("2026-09-05T10:20:00.000Z");
+
+    lifecycle.ingest(alert(), firstRaised);
+    lifecycle.ingest(alert({ state: "cleared", severity: "normal" }), cleared);
+    const second = lifecycle.ingest(alert(), secondRaised);
+
+    expect(second.fireCount).toBe(2);
+    expect(second.lastFiredAt).toEqual(secondRaised);
+    expect(second.clearedAt).toBeUndefined();
+    expect(database.getAlert(second.id).fireCount).toBe(2);
+  });
+
+  it("soft-removes an alert without deleting its delivery history", () => {
+    const { database, lifecycle } = createLifecycle(["ntfy-main"]);
+    const record = lifecycle.ingest(alert());
+
+    database.removeAlert(record.id);
+
+    expect(database.getAlert(record.id).removedAt).toBeInstanceOf(Date);
+    expect(database.listDeliveries()).toHaveLength(1);
+  });
 });

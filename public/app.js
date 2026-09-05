@@ -1,7 +1,7 @@
 const apiBase = "/plugins/signalk-persistent-notifier";
 let alerts = [];
 let deliveries = [];
-let activeView = "active";
+let activeView = "all";
 
 const elements = {
   activeCount: document.querySelector("#active-count"),
@@ -34,11 +34,11 @@ function duration(alert) {
 }
 
 function renderAlerts() {
-  const visible = alerts.filter((alert) =>
-    activeView === "active"
-      ? alert.currentState === "active"
-      : alert.currentState === "cleared",
-  );
+  const visible = alerts.filter((alert) => {
+    if (activeView === "active") return alert.currentState === "active";
+    if (activeView === "history") return alert.currentState === "cleared";
+    return true;
+  });
   if (!visible.length) {
     elements.alertList.innerHTML = `<div class="empty">${activeView === "active" ? "No active alerts." : "No alert history yet."}</div>`;
     return;
@@ -49,15 +49,38 @@ function renderAlerts() {
     <article class="alert-card">
       <span class="alert-stripe ${alert.maxSeverity}" aria-hidden="true"></span>
       <div class="alert-content">
-        <h3 class="alert-title">${escapeHtml(alert.path)}</h3>
-        <p class="alert-message">${escapeHtml(alert.message || "No message provided")}</p>
-        <div class="alert-meta">Occurred ${formatDate(alert.firstSeenAt)} · ${duration(alert)}</div>
+        <h3 class="alert-title">${escapeHtml(alert.name)}</h3>
+        <p class="alert-message">${escapeHtml(alert.message || alert.pathPattern)}</p>
+        <div class="alert-meta">${alert.zone ? `${escapeHtml(alert.zone)} · ` : ""}${alert.configured ? "Configured" : "Recognized automatically"} · ${alert.firstSeenAt ? `First seen ${formatDate(alert.firstSeenAt)} · ` : "Never fired · "}${alert.lastFiredAt ? `Last fired ${formatDate(alert.lastFiredAt)} · ` : ""}${alert.fireCount} fire${alert.fireCount === 1 ? "" : "s"}${alert.clearedAt ? ` · ${duration(alert)}` : ""}</div>
       </div>
-      <span class="alert-severity ${alert.maxSeverity}">${escapeHtml(alert.maxSeverity)}</span>
+      <div class="alert-side">
+        <span class="alert-severity ${alert.maxSeverity || "normal"}">${escapeHtml(alert.maxSeverity || "not fired")}</span>
+        ${alert.oneTime && alert.alertId ? `<button class="remove-alert" data-id="${escapeHtml(alert.alertId)}" type="button">Remove</button>` : ""}
+      </div>
     </article>
   `,
     )
     .join("");
+  document
+    .querySelectorAll(".remove-alert")
+    .forEach((button) =>
+      button.addEventListener("click", () => removeAlert(button.dataset.id)),
+    );
+}
+
+async function removeAlert(id) {
+  try {
+    const response = await fetch(
+      `${apiBase}/alerts/${encodeURIComponent(id)}/remove`,
+      { method: "POST" },
+    );
+    if (!response.ok) throw new Error("Only one-time alerts can be removed.");
+    await load();
+  } catch (error) {
+    elements.error.textContent =
+      error instanceof Error ? error.message : "Unable to remove alert.";
+    elements.error.hidden = false;
+  }
 }
 
 function renderDeliveries() {

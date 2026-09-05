@@ -7,6 +7,10 @@ export interface NotifierConfig {
 }
 export interface RuleConfig {
   id?: string;
+  name?: string;
+  zone?: string;
+  oneTime?: boolean;
+  enabled?: boolean;
   match: string;
   minSeverity: Severity;
   connectivity: ConnectivityMode;

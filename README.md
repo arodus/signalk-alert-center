@@ -26,6 +26,11 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
   },
   "rules": [
     {
+      "id": "bilge-high-water",
+      "name": "Bilge high water",
+      "zone": "Bilge",
+      "oneTime": false,
+      "enabled": true,
       "match": "notifications.bilge.*",
       "minSeverity": "alarm",
       "connectivity": { "mode": "wake" },
@@ -59,6 +64,8 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 Signal K protects these routes with its normal plugin authentication. The status response includes queue counts, connectivity state, switch state, ownership, and the last connectivity error.
 
 The included operational dashboard is served by Signal K at `/signalk-persistent-notifier`. It shows active alerts, cleared-alert history, per-transport delivery state, connectivity ownership, refresh status, and a manual retry action.
+
+The dashboard alert catalog includes every configured rule, including rules that have never fired, plus recognized notifications that do not match a configured rule. Each entry shows its zone, current state, first seen time, last fired time, fire count, and delivery context. Configured `oneTime` alerts can be soft-removed from the dashboard without deleting their audit or delivery history.
 
 When connectivity is enabled, the plugin waits for the configured probe to return a successful HTTP response before entering `ONLINE`. It retries until `bootTimeoutSeconds` and enters `FAULT` without deleting queued alerts if readiness never arrives.
 

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { PluginConfig, validateConfig } from "./config";
+import { PluginConfig, RuleConfig, validateConfig } from "./config";
 import { AlertLifecycle } from "./alerts/lifecycle";
 import { normalizeNotification } from "./alerts/normalize";
 import { AlertDatabase } from "./storage/db";
@@ -12,12 +12,14 @@ import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { matchRules } from "./alerts/rules";
 import { registerRoutes } from "./api/routes";
 import { createInternetProbe } from "./connectivity/internet";
+import { buildAlertCatalog } from "./alerts/catalog";
 
 export = function persistentNotifier(app: any) {
   let database: AlertDatabase | undefined;
   let scheduler: DeliveryScheduler | undefined;
   let connectivity: ConnectivityManager | undefined;
   let unsubscribe: (() => void) | undefined;
+  let configuredRules: RuleConfig[] = [];
   const status = () => ({
     connectivity: connectivity
       ? {
@@ -51,6 +53,7 @@ export = function persistentNotifier(app: any) {
     schema: { type: "object", additionalProperties: true },
     start(options: PluginConfig = {}) {
       validateConfig(options);
+      configuredRules = options.rules ?? [];
       const dataDir = app.getDataDirPath?.() ?? ".";
       database = new AlertDatabase(
         options.storage?.path ??
@@ -142,7 +145,22 @@ export = function persistentNotifier(app: any) {
     },
     status,
     registerWithRouter(router: Parameters<typeof registerRoutes>[0]) {
-      registerRoutes(router, () => database, status, runScheduler);
+      registerRoutes(
+        router,
+        () => database,
+        status,
+        runScheduler,
+        () => buildAlertCatalog(database?.listAlerts() ?? [], configuredRules),
+        (id) => {
+          const entry = buildAlertCatalog(
+            database?.listAlerts() ?? [],
+            configuredRules,
+          ).find((item) => item.alertId === id);
+          if (!entry?.oneTime || !database) return false;
+          database.removeAlert(id);
+          return true;
+        },
+      );
     },
     getOpenApi() {
       return {
@@ -154,6 +172,11 @@ export = function persistentNotifier(app: any) {
           },
           "/alerts": {
             get: { responses: { "200": { description: "Stored alerts" } } },
+          },
+          "/alerts/{id}/remove": {
+            post: {
+              responses: { "200": { description: "One-time alert removed" } },
+            },
           },
           "/deliveries": {
             get: { responses: { "200": { description: "Delivery records" } } },
