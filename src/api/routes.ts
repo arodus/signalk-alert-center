@@ -1,24 +1,478 @@
 import { AlertDatabase } from "../storage/db";
 
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+export interface DefinitionQuery {
+  limit: number;
+  cursor?: string;
+  zone?: string;
+  sourceType?: "rule" | "zone" | "recognized";
+  enabled?: boolean;
+}
+export interface OccurrenceQuery {
+  limit: number;
+  cursor?: string;
+  definitionId?: string;
+  state?: "active" | "cleared";
+  severity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  dismissed?: boolean;
+  from?: Date;
+  to?: Date;
+}
+export interface EventQuery {
+  limit: number;
+  cursor?: string;
+  eventType?: string;
+}
+export interface AlertPolicyPatch {
+  enabled?: boolean;
+  oneTime?: boolean;
+  rearmAfterSeconds?: number | null;
+  notifierIds?: string[];
+  activationDelaySeconds?: number;
+  minimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  connectivity?:
+    { mode: "queue" | "wake" } | { mode: "wake_after"; delaySeconds: number };
+}
+export interface ActionResult {
+  status: "dismissed" | "acknowledged" | "silenced";
+  upstream?: "applied" | "unsupported" | "failed" | "not_requested";
+  message?: string;
+}
+type MaybePromise<T> = T | Promise<T>;
+
+/** Storage-agnostic callback surface for the alert-center API. */
+export interface AlertCenterRepository {
+  listDefinitions(query: DefinitionQuery): MaybePromise<Page<unknown>>;
+  getDefinition(id: string): MaybePromise<unknown | undefined>;
+  updatePolicy(
+    id: string,
+    patch: AlertPolicyPatch,
+  ): MaybePromise<unknown | undefined>;
+  listOccurrences(query: OccurrenceQuery): MaybePromise<Page<unknown>>;
+  getOccurrence(id: string): MaybePromise<unknown | undefined>;
+  listOccurrenceEvents(
+    id: string,
+    query: EventQuery,
+  ): MaybePromise<Page<unknown> | undefined>;
+  dismissOccurrence(id: string): MaybePromise<ActionResult | false | undefined>;
+  acknowledgeOccurrence(
+    id: string,
+  ): MaybePromise<ActionResult | false | undefined>;
+  silenceOccurrence(id: string): MaybePromise<ActionResult | false | undefined>;
+}
+
 interface ResponseLike {
   status(code: number): ResponseLike;
   json(value: unknown): void;
 }
-
-interface RouterLike {
-  get(
-    path: string,
-    handler: (request: unknown, response: ResponseLike) => void,
-  ): void;
-  post(
-    path: string,
-    handler: (request: unknown, response: ResponseLike) => void,
-  ): void;
+type Handler = (request: RequestLike, response: ResponseLike) => void;
+export interface RouterLike {
+  get: (...args: unknown[]) => void;
+  post: (...args: unknown[]) => void;
+  patch?: (...args: unknown[]) => void;
+  access?: (
+    level: "readonly" | "readwrite",
+  ) => Pick<RouterLike, "get" | "post" | "patch">;
 }
 interface RequestLike {
-  params?: Record<string, string>;
+  params?: Record<string, string | undefined>;
+  query?: Record<string, unknown>;
+  body?: unknown;
+}
+export interface AlertCenterDependencies {
+  repository: () => AlertCenterRepository | undefined;
+  listNotifiers?: () => MaybePromise<unknown[]>;
 }
 
+class ApiError extends Error {
+  constructor(
+    readonly statusCode: number,
+    readonly code: string,
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+  }
+}
+const fail = (
+  response: ResponseLike,
+  status: number,
+  code: string,
+  message: string,
+  details?: unknown,
+) =>
+  response.status(status).json({
+    error: { code, message, ...(details === undefined ? {} : { details }) },
+  });
+const wrap =
+  (
+    handler: (
+      request: RequestLike,
+      response: ResponseLike,
+    ) => MaybePromise<void>,
+  ): Handler =>
+  (request, response) =>
+    void Promise.resolve(handler(request, response)).catch((error: unknown) => {
+      if (error instanceof ApiError)
+        return fail(
+          response,
+          error.statusCode,
+          error.code,
+          error.message,
+          error.details,
+        );
+      fail(
+        response,
+        500,
+        "INTERNAL_ERROR",
+        "The request could not be completed",
+      );
+    });
+
+function addRoute(
+  router: RouterLike,
+  method: "get" | "post" | "patch",
+  path: string,
+  access: "readonly" | "readwrite",
+  handler: Handler,
+): void {
+  const target = router.access?.(access) ?? router;
+  const registrar = target[method];
+  if (!registrar)
+    throw new Error(`Router does not support ${method.toUpperCase()}`);
+  registrar.call(target, path, handler);
+}
+const textParam = (value: unknown, name: string): string | undefined => {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (Array.isArray(value) || typeof value !== "string")
+    throw new ApiError(400, "INVALID_QUERY", `${name} must be a string`);
+  return value;
+};
+const enumParam = <T extends string>(
+  value: unknown,
+  name: string,
+  allowed: readonly T[],
+): T | undefined => {
+  const parsed = textParam(value, name);
+  if (parsed === undefined) return undefined;
+  if (!allowed.includes(parsed as T))
+    throw new ApiError(400, "INVALID_QUERY", `${name} is invalid`, {
+      field: name,
+      allowed,
+    });
+  return parsed as T;
+};
+const boolParam = (value: unknown, name: string): boolean | undefined => {
+  const parsed = textParam(value, name);
+  if (parsed === undefined) return undefined;
+  if (parsed === "true") return true;
+  if (parsed === "false") return false;
+  throw new ApiError(400, "INVALID_QUERY", `${name} must be true or false`);
+};
+const dateParam = (value: unknown, name: string): Date | undefined => {
+  const parsed = textParam(value, name);
+  if (!parsed) return undefined;
+  const result = new Date(parsed);
+  if (Number.isNaN(result.getTime()))
+    throw new ApiError(
+      400,
+      "INVALID_QUERY",
+      `${name} must be an ISO date-time`,
+    );
+  return result;
+};
+function pagination(query: Record<string, unknown>) {
+  const raw = textParam(query.limit, "limit");
+  const limit = raw === undefined ? 30 : Number(raw);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new ApiError(
+      400,
+      "INVALID_QUERY",
+      "limit must be an integer from 1 to 100",
+    );
+  const cursor = textParam(query.cursor, "cursor");
+  if (cursor && cursor.length > 512)
+    throw new ApiError(400, "INVALID_QUERY", "cursor is too long");
+  return { limit, cursor };
+}
+const repository = (factory: () => AlertCenterRepository | undefined) => {
+  const result = factory();
+  if (!result)
+    throw new ApiError(503, "PLUGIN_NOT_STARTED", "Plugin is not started");
+  return result;
+};
+function parseDefinitions(request: RequestLike): DefinitionQuery {
+  const q = request.query ?? {};
+  return {
+    ...pagination(q),
+    zone: textParam(q.zone, "zone"),
+    sourceType: enumParam(q.sourceType, "sourceType", [
+      "rule",
+      "zone",
+      "recognized",
+    ] as const),
+    enabled: boolParam(q.enabled, "enabled"),
+  };
+}
+function parseOccurrences(request: RequestLike): OccurrenceQuery {
+  const q = request.query ?? {};
+  const from = dateParam(q.from, "from");
+  const to = dateParam(q.to, "to");
+  if (from && to && from > to)
+    throw new ApiError(400, "INVALID_QUERY", "from must not be after to");
+  return {
+    ...pagination(q),
+    definitionId: textParam(q.definitionId, "definitionId"),
+    state: enumParam(q.state, "state", ["active", "cleared"] as const),
+    severity: enumParam(q.severity, "severity", [
+      "normal",
+      "warn",
+      "alert",
+      "alarm",
+      "emergency",
+    ] as const),
+    dismissed: boolParam(q.dismissed, "dismissed"),
+    from,
+    to,
+  };
+}
+function parsePolicy(body: unknown): AlertPolicyPatch {
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new ApiError(400, "INVALID_BODY", "Request body must be an object");
+  const value = body as Record<string, unknown>;
+  const allowed = new Set([
+    "enabled",
+    "oneTime",
+    "rearmAfterSeconds",
+    "notifierIds",
+    "activationDelaySeconds",
+    "minimumSeverity",
+    "connectivity",
+  ]);
+  const extra = Object.keys(value).filter((key) => !allowed.has(key));
+  if (extra.length)
+    throw new ApiError(400, "INVALID_BODY", "Request body has unknown fields", {
+      fields: extra,
+    });
+  const patch: AlertPolicyPatch = {};
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled !== "boolean")
+      throw new ApiError(400, "INVALID_BODY", "enabled must be boolean");
+    patch.enabled = value.enabled;
+  }
+  if (value.oneTime !== undefined) {
+    if (typeof value.oneTime !== "boolean")
+      throw new ApiError(400, "INVALID_BODY", "oneTime must be boolean");
+    patch.oneTime = value.oneTime;
+  }
+  if (value.rearmAfterSeconds !== undefined) {
+    const rearm = value.rearmAfterSeconds;
+    if (
+      rearm !== null &&
+      (!Number.isInteger(rearm) ||
+        Number(rearm) < 0 ||
+        Number(rearm) > 31536000)
+    )
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "rearmAfterSeconds must be null or an integer from 0 to 31536000",
+      );
+    patch.rearmAfterSeconds = rearm === null ? null : Number(rearm);
+  }
+  if (value.notifierIds !== undefined) {
+    if (
+      !Array.isArray(value.notifierIds) ||
+      value.notifierIds.some((id) => typeof id !== "string" || !id.trim())
+    )
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "notifierIds must contain non-empty strings",
+      );
+    patch.notifierIds = [...new Set(value.notifierIds as string[])];
+  }
+  const delay = value.activationDelaySeconds;
+  if (delay !== undefined) {
+    if (!Number.isInteger(delay) || Number(delay) < 0 || Number(delay) > 604800)
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "activationDelaySeconds must be an integer from 0 to 604800",
+      );
+    patch.activationDelaySeconds = Number(delay);
+  }
+  if (value.minimumSeverity !== undefined) {
+    if (
+      !["normal", "warn", "alert", "alarm", "emergency"].includes(
+        String(value.minimumSeverity),
+      )
+    )
+      throw new ApiError(400, "INVALID_BODY", "minimumSeverity is invalid");
+    patch.minimumSeverity =
+      value.minimumSeverity as AlertPolicyPatch["minimumSeverity"];
+  }
+  if (value.connectivity !== undefined) {
+    if (!value.connectivity || typeof value.connectivity !== "object")
+      throw new ApiError(400, "INVALID_BODY", "connectivity must be an object");
+    const c = value.connectivity as Record<string, unknown>;
+    if (c.mode === "queue" || c.mode === "wake")
+      patch.connectivity = { mode: c.mode };
+    else if (
+      c.mode === "wake_after" &&
+      Number.isInteger(c.delaySeconds) &&
+      Number(c.delaySeconds) >= 0 &&
+      Number(c.delaySeconds) <= 604800
+    )
+      patch.connectivity = {
+        mode: "wake_after",
+        delaySeconds: Number(c.delaySeconds),
+      };
+    else throw new ApiError(400, "INVALID_BODY", "connectivity is invalid");
+  }
+  if (!Object.keys(patch).length)
+    throw new ApiError(
+      400,
+      "INVALID_BODY",
+      "At least one policy field is required",
+    );
+  return patch;
+}
+
+export function registerAlertCenterRoutes(
+  router: RouterLike,
+  dependencies: AlertCenterDependencies,
+): void {
+  const repo = () => repository(dependencies.repository);
+  addRoute(
+    router,
+    "get",
+    "/definitions",
+    "readonly",
+    wrap(async (req, res) =>
+      res.json(await repo().listDefinitions(parseDefinitions(req))),
+    ),
+  );
+  addRoute(
+    router,
+    "get",
+    "/definitions/:id",
+    "readonly",
+    wrap(async (req, res) => {
+      const result = await repo().getDefinition(req.params?.id ?? "");
+      if (result === undefined)
+        throw new ApiError(404, "NOT_FOUND", "Alert definition was not found");
+      res.json(result);
+    }),
+  );
+  addRoute(
+    router,
+    "patch",
+    "/definitions/:id/policy",
+    "readwrite",
+    wrap(async (req, res) => {
+      const patch = parsePolicy(req.body);
+      if (patch.notifierIds && dependencies.listNotifiers) {
+        const known = new Set(
+          (await dependencies.listNotifiers()).map((item) =>
+            typeof item === "string"
+              ? item
+              : String((item as { id?: unknown }).id),
+          ),
+        );
+        const missing = patch.notifierIds.filter((id) => !known.has(id));
+        if (missing.length)
+          throw new ApiError(
+            400,
+            "UNKNOWN_NOTIFIER",
+            "One or more notifier ids are unknown",
+            { ids: missing },
+          );
+      }
+      const result = await repo().updatePolicy(req.params?.id ?? "", patch);
+      if (result === undefined)
+        throw new ApiError(404, "NOT_FOUND", "Alert definition was not found");
+      res.json(result);
+    }),
+  );
+  addRoute(
+    router,
+    "get",
+    "/notifiers",
+    "readonly",
+    wrap(async (_req, res) =>
+      res.json({
+        items: dependencies.listNotifiers
+          ? await dependencies.listNotifiers()
+          : [],
+      }),
+    ),
+  );
+  addRoute(
+    router,
+    "get",
+    "/occurrences",
+    "readonly",
+    wrap(async (req, res) =>
+      res.json(await repo().listOccurrences(parseOccurrences(req))),
+    ),
+  );
+  addRoute(
+    router,
+    "get",
+    "/occurrences/:id",
+    "readonly",
+    wrap(async (req, res) => {
+      const result = await repo().getOccurrence(req.params?.id ?? "");
+      if (result === undefined)
+        throw new ApiError(404, "NOT_FOUND", "Alert occurrence was not found");
+      res.json(result);
+    }),
+  );
+  addRoute(
+    router,
+    "get",
+    "/occurrences/:id/events",
+    "readonly",
+    wrap(async (req, res) => {
+      const q = req.query ?? {};
+      const result = await repo().listOccurrenceEvents(req.params?.id ?? "", {
+        ...pagination(q),
+        eventType: textParam(q.eventType, "eventType"),
+      });
+      if (result === undefined)
+        throw new ApiError(404, "NOT_FOUND", "Alert occurrence was not found");
+      res.json(result);
+    }),
+  );
+  const actions = {
+    dismiss: (id: string) => repo().dismissOccurrence(id),
+    acknowledge: (id: string) => repo().acknowledgeOccurrence(id),
+    silence: (id: string) => repo().silenceOccurrence(id),
+  };
+  for (const action of Object.keys(actions) as Array<keyof typeof actions>)
+    addRoute(
+      router,
+      "post",
+      `/occurrences/:id/${action}`,
+      "readwrite",
+      wrap(async (req, res) => {
+        const result = await actions[action](req.params?.id ?? "");
+        if (!result)
+          throw new ApiError(
+            404,
+            "NOT_FOUND",
+            "Alert occurrence was not found",
+          );
+        res.json(result);
+      }),
+    );
+}
+
+/** Legacy status/queue endpoints retained during the schema migration. */
 export function registerRoutes(
   router: RouterLike,
   database: () => AlertDatabase | undefined,
@@ -29,45 +483,44 @@ export function registerRoutes(
   acknowledgeAlert: (id: string) => boolean,
   silenceAlert: (id: string) => boolean,
 ): void {
-  router.get("/status", (_request, response) => {
-    response.json(status());
-  });
-  router.get("/alerts", (_request, response) => response.json(catalog()));
-  router.post("/alerts/:id/remove", (request, response) => {
-    const id = (request as RequestLike).params?.id;
-    if (!id || !removeAlert(id)) {
-      response.status(404).json({ error: "One-time alert was not found" });
-      return;
-    }
-    response.json({ status: "removed" });
-  });
-  router.post("/alerts/:id/acknowledge", (request, response) => {
-    const id = (request as RequestLike).params?.id;
-    if (!id || !acknowledgeAlert(id)) {
-      response.status(404).json({ error: "Alert was not found" });
-      return;
-    }
-    response.json({ status: "acknowledged" });
-  });
-  router.post("/alerts/:id/silence", (request, response) => {
-    const id = (request as RequestLike).params?.id;
-    if (!id || !silenceAlert(id)) {
-      response.status(404).json({ error: "Alert was not found" });
-      return;
-    }
-    response.json({ status: "silenced" });
-  });
-  router.get("/deliveries", (_request, response) =>
-    response.json(database()?.listDeliveries() ?? []),
+  addRoute(router, "get", "/status", "readonly", (_req, res) =>
+    res.json(status()),
   );
-  router.post("/retry", async (_request, response) => {
-    const current = database();
-    if (!current) {
-      response.status(503).json({ error: "Plugin is not started" });
-      return;
-    }
-    current.retryFailedDeliveries();
-    await runScheduler();
-    response.json({ status: "scheduled" });
-  });
+  addRoute(router, "get", "/alerts", "readonly", (_req, res) =>
+    res.json(catalog()),
+  );
+  for (const [action, callback] of [
+    ["remove", removeAlert],
+    ["acknowledge", acknowledgeAlert],
+    ["silence", silenceAlert],
+  ] as const)
+    addRoute(
+      router,
+      "post",
+      `/alerts/:id/${action}`,
+      "readwrite",
+      (req, res) => {
+        const id = req.params?.id;
+        if (!id || !callback(id))
+          return fail(res, 404, "NOT_FOUND", "Alert was not found");
+        res.json({ status: action === "remove" ? "removed" : `${action}d` });
+      },
+    );
+  addRoute(router, "get", "/deliveries", "readonly", (_req, res) =>
+    res.json(database()?.listDeliveries() ?? []),
+  );
+  addRoute(
+    router,
+    "post",
+    "/retry",
+    "readwrite",
+    wrap(async (_req, res) => {
+      const current = database();
+      if (!current)
+        throw new ApiError(503, "PLUGIN_NOT_STARTED", "Plugin is not started");
+      current.retryFailedDeliveries();
+      await runScheduler();
+      res.json({ status: "scheduled" });
+    }),
+  );
 }

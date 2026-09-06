@@ -11,15 +11,14 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Signal K operations</p>
-          <h1>Persistent Notifier</h1>
-          <p class="lede">Alert delivery across intermittent connectivity.</p>
+          <h1>Alert center</h1>
+          <p class="lede">Persistent history and deliberate delivery.</p>
         </div>
         <div class="actions">
-          <span id="updated" class="updated">Loading...</span>
-          <button id="refresh" class="button button-quiet" type="button">
-            Refresh
-          </button>
-          <button id="retry" class="button button-primary" type="button">
+          <span id="updated" class="updated">Loading…</span
+          ><button id="refresh" class="button button-quiet" type="button">
+            Refresh</button
+          ><button id="retry" class="button button-primary" type="button">
             Retry pending
           </button>
         </div>
@@ -27,20 +26,20 @@
 
       <section class="summary-grid" aria-label="System summary">
         <article class="summary-card summary-card-live">
-          <span class="summary-label">Active alerts</span>
-          <strong id="active-count">--</strong>
-          <span class="summary-note">currently raised</span>
+          <span class="summary-label">Needs attention</span
+          ><strong id="active-count">--</strong
+          ><span class="summary-note">active and not dismissed</span>
         </article>
         <article class="summary-card">
-          <span class="summary-label">Pending deliveries</span>
-          <strong id="pending-count">--</strong>
-          <span class="summary-note">across all transports</span>
+          <span class="summary-label">Known alerts</span
+          ><strong id="definition-count">--</strong
+          ><span class="summary-note">rules, zones, and discovered</span>
         </article>
         <article class="summary-card">
-          <span class="summary-label">Connectivity</span>
-          <strong id="connectivity-state">--</strong>
-          <span id="connectivity-note" class="summary-note"
-            >checking switch state</span
+          <span class="summary-label">Pending deliveries</span
+          ><strong id="pending-count">--</strong
+          ><span id="connectivity-note" class="summary-note"
+            >checking queue</span
           >
         </article>
       </section>
@@ -48,46 +47,61 @@
       <section class="workspace">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Alert stream</p>
-            <h2>Current and historical alerts</h2>
-          </div>
-          <div class="tabs" role="tablist" aria-label="Alert views">
-            <button
-              class="tab is-selected"
-              data-view="all"
-              role="tab"
-              aria-selected="true"
-              type="button"
-            >
-              All
-            </button>
-            <button
-              class="tab"
-              data-view="active"
-              role="tab"
-              aria-selected="false"
-              type="button"
-            >
-              Active
-            </button>
-            <button
-              class="tab"
-              data-view="history"
-              role="tab"
-              aria-selected="false"
-              type="button"
-            >
-              History
-            </button>
+            <p class="eyebrow">Definitions</p>
+            <h2>Configured and discovered alerts</h2>
           </div>
         </div>
         <div class="filter-row">
-          <label class="zone-filter-label" for="zone-filter">Zone</label>
-          <select id="zone-filter" class="zone-filter">
-            <option value="all">All zones</option>
+          <label for="zone-filter">Zone</label
+          ><select id="zone-filter">
+            <option value="">All zones</option>
           </select>
         </div>
-        <div id="alert-list" class="alert-list" aria-live="polite"></div>
+        <div
+          id="definition-list"
+          class="definition-grid"
+          aria-live="polite"
+        ></div>
+      </section>
+
+      <section class="workspace">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Occurrences</p>
+            <h2>Attention and history</h2>
+          </div>
+        </div>
+        <form id="history-filters" class="filter-row">
+          <label for="state-filter">State</label
+          ><select id="state-filter" name="state">
+            <option value="">All</option>
+            <option value="active">Active</option>
+            <option value="cleared">Cleared</option>
+          </select>
+          <label for="severity-filter">Severity</label
+          ><select id="severity-filter" name="severity">
+            <option value="">All</option>
+            <option>emergency</option>
+            <option>alarm</option>
+            <option>alert</option>
+            <option>warn</option>
+            <option>normal</option>
+          </select>
+          <label class="check-label"
+            ><input id="dismissed-filter" type="checkbox" /> Include
+            dismissed</label
+          >
+          <button class="button button-quiet" type="submit">Apply</button>
+        </form>
+        <div id="occurrence-list" class="alert-list" aria-live="polite"></div>
+        <button
+          id="history-more"
+          class="button button-quiet load-more"
+          type="button"
+          hidden
+        >
+          Load more
+        </button>
       </section>
 
       <section class="workspace delivery-section">
@@ -99,9 +113,119 @@
         </div>
         <div id="delivery-list" class="delivery-list" aria-live="polite"></div>
       </section>
-
       <p id="error" class="error" role="alert" hidden></p>
+      <a id="login" class="login button button-primary" href="/login" hidden
+        >Sign in to Signal K</a
+      >
     </main>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside
+      id="detail-drawer"
+      class="drawer"
+      aria-labelledby="drawer-title"
+      aria-hidden="true"
+      tabindex="-1"
+    >
+      <div class="drawer-header">
+        <div>
+          <p class="eyebrow">Alert detail</p>
+          <h2 id="drawer-title">History</h2>
+        </div>
+        <button
+          id="drawer-close"
+          class="icon-button"
+          type="button"
+          aria-label="Close alert detail"
+        >
+          ×
+        </button>
+      </div>
+      <div id="drawer-body"></div>
+      <div id="event-list" class="event-list" aria-live="polite"></div>
+      <button
+        id="events-more"
+        class="button button-quiet load-more"
+        type="button"
+        hidden
+      >
+        Older events
+      </button>
+    </aside>
+
+    <dialog id="policy-dialog" aria-labelledby="policy-title">
+      <form id="policy-form" method="dialog">
+        <div class="drawer-header">
+          <div>
+            <p class="eyebrow">Delivery settings</p>
+            <h2 id="policy-title">Alert policy</h2>
+          </div>
+          <button
+            id="policy-close"
+            class="icon-button"
+            type="button"
+            aria-label="Close settings"
+          >
+            ×
+          </button>
+        </div>
+        <input id="policy-definition-id" type="hidden" />
+        <label class="form-field"
+          ><span>Activation delay (seconds)</span
+          ><input
+            id="activation-delay"
+            type="number"
+            min="0"
+            max="604800"
+            required
+        /></label>
+        <label class="form-field"
+          ><span>Minimum severity</span
+          ><select id="minimum-severity">
+            <option>normal</option>
+            <option>warn</option>
+            <option>alert</option>
+            <option>alarm</option>
+            <option>emergency</option>
+          </select></label
+        >
+        <label class="check-label"
+          ><input id="policy-one-time" type="checkbox" /> Treat as one-time
+          alert</label
+        >
+        <label class="form-field"
+          ><span>Rearm after (seconds, blank disables)</span
+          ><input id="rearm-after" type="number" min="0" max="31536000"
+        /></label>
+        <fieldset>
+          <legend>Notifiers</legend>
+          <div id="notifier-options"></div>
+        </fieldset>
+        <label class="form-field"
+          ><span>Connectivity</span
+          ><select id="connectivity-mode">
+            <option value="queue">Queue only</option>
+            <option value="wake">Wake immediately</option>
+            <option value="wake_after">Wake after delay</option>
+          </select></label
+        >
+        <label id="wake-delay-field" class="form-field" hidden
+          ><span>Wake delay (seconds)</span
+          ><input id="wake-delay" type="number" min="0" max="604800"
+        /></label>
+        <label class="check-label"
+          ><input id="policy-enabled" type="checkbox" /> Delivery enabled</label
+        >
+        <p id="policy-result" class="form-result" role="status"></p>
+        <div class="dialog-actions">
+          <button id="policy-cancel" class="button button-quiet" type="button">
+            Cancel</button
+          ><button id="policy-save" class="button button-primary" type="submit">
+            Save policy
+          </button>
+        </div>
+      </form>
+    </dialog>
     <script src="./app.js" defer></script>
   </body>
 </html>
