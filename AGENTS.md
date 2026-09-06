@@ -42,6 +42,69 @@ and acceptance scenarios in [IMPLEMENTATION_BRIEF.md](IMPLEMENTATION_BRIEF.md#pr
   changes outside the user's request. For documentation-only tasks, update docs
   and agent guidance only; report implementation gaps without fixing code.
 
+## Notification-center product rules
+
+The dashboard must be an alert center, not just a delivery-queue view.
+
+- Show every configured delivery rule and every Signal K path with `meta.zones`,
+  including definitions that have never fired. Keep these definitions separate
+  from live or historical occurrences.
+- Show each current occurrence independently. A wildcard rule or zone summary may
+  group occurrences for navigation, but it must never hide paths or sources.
+- Keep one-time occurrences visible until an operator dismisses them. The UI may
+  label this action "Delete", but storage and API semantics are soft dismissal:
+  retain the occurrence, events, and delivery work in history.
+- Clicking a definition or occurrence must open its recent chronological history,
+  including raise, meaningful updates, clear, acknowledge, silence, dismissal,
+  activation-delay decisions, and notifier attempts/outcomes.
+- Allow an operator to configure each alert definition from the UI. At minimum,
+  policy includes enabled state, selected notifier instances, minimum severity,
+  connectivity behavior, one-time/rearm semantics, and activation delay. Store
+  dynamic per-definition overrides separately from immutable Signal K zone
+  metadata and separately from occurrence state.
+- Resolve policy predictably: an explicit per-definition override wins over a
+  matching configured rule, which wins over plugin defaults. Expose the effective
+  policy and where each value came from.
+- Policy edits apply to future occurrences by default. Do not silently add or
+  cancel delivery work for an occurrence already in progress; any explicit
+  "apply to current occurrence" operation must be auditable and idempotent.
+
+`activationDelaySeconds` means that external delivery is eligible only after the
+same occurrence has remained active continuously for that duration. Persist the
+deadline. If the condition clears first, record `suppressed_before_activation`
+and create no remote delivery, while retaining the occurrence in history. Recheck
+the persisted deadline and active state after restart. Do not implement this as an
+in-memory timer, and do not confuse it with `wake_after`, which controls when to
+power connectivity after delivery has already become eligible.
+
+## Signal K integration rules
+
+- Follow the current legacy alarm contract: subscribe to `notifications.*`, treat
+  a null value as a clear/removal, retain the delta timestamp and `$source`, and
+  preserve the original notification value. Do not silently reinterpret unknown
+  states without recording the original value and a documented mapping.
+- Reconcile the current `notifications` subtree at startup as well as subscribing
+  to deltas. Make snapshot/subscription processing idempotent so startup neither
+  loses an update nor creates a duplicate historical occurrence.
+- Discover zone definitions from `meta.zones` throughout the self-vessel model.
+  A zone on `environment.depth.belowKeel` corresponds to the generated notification
+  path `notifications.environment.depth.belowKeel`; zone discovery itself must not
+  fabricate a fired occurrence.
+- Use `app.notifications` for supported acknowledge, silence, and clear operations.
+  Read capability flags first, await/handle the real result where supported, and
+  distinguish confirmed upstream actions from local-only operator annotations.
+- Type the plugin with `@signalk/server-api` instead of growing new `any`-shaped
+  server interfaces. Verify lifecycle, schema, subscription, and router behavior
+  against the supported server version.
+- Register read APIs with the least required router access and mutations with
+  read-write/admin access. Standalone web requests must include the Signal K
+  session cookie and handle authentication failure explicitly.
+- Keep a complete OpenAPI definition for all plugin routes, including filters,
+  pagination, mutation bodies, success responses, and error responses.
+- Signal K Notification Player is a behavior reference for definition discovery,
+  history drill-down, and per-path controls. Do not copy its synchronous JSON log,
+  GET-based mutations, global mutable state, or legacy untyped architecture.
+
 ## Core reliability invariants
 
 These invariants are mandatory and take precedence over convenience:
