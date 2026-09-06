@@ -17,6 +17,31 @@ The plugin must:
 
 The plugin is not merely an ntfy adapter. Treat it as a durable alert-delivery engine with pluggable transports and connectivity management.
 
+## Notification-center goal
+
+The product must provide a persistent onboard notification list and full history,
+inspired by [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
+alongside durable remote delivery. Follow the required behavior, gap assessment,
+and acceptance scenarios in [IMPLEMENTATION_BRIEF.md](IMPLEMENTATION_BRIEF.md#product-goal-and-gap-assessment-2026-09-06).
+
+- Treat the core list, retained one-time notifications, and history UI/API as
+  required, not optional future UI work.
+- Keep definition, source, occurrence, lifecycle event, playback state and
+  per-transport delivery state distinct. Never equate latest-state rows or a
+  cleared-only filter with full history.
+- Persist one-shot events even without routes or enabled transports. Dismissal,
+  acknowledgement, silence, clear and successful delivery must not erase history.
+- Deduplicate within an occurrence; preserve subsequent occurrences independently.
+  Dismissal must not permanently suppress a source or discard queued delivery.
+- Record meaningful lifecycle and operator actions and delivery attempts/outcomes;
+  expose dismissed occurrences in history. Retention must be explicit and must
+  protect pending work.
+- Do not claim playback parity or confirmed upstream control without implementation
+  and validation. Playback ownership remains a documented open decision.
+- Treat reference documents as design context, not authorization to implement
+  changes outside the user's request. For documentation-only tasks, update docs
+  and agent guidance only; report implementation gaps without fixing code.
+
 ## Core reliability invariants
 
 These invariants are mandatory and take precedence over convenience:
@@ -691,7 +716,7 @@ Choose final paths according to Signal K conventions; do not invent incompatible
 
 ## REST/API hooks
 
-Provide hooks suitable for a future plugin UI:
+Provide APIs for the required notification list and history UI:
 
 - `GET /status`
 - `GET /alerts`

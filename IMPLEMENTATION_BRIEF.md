@@ -1,5 +1,103 @@
 # Implementation Brief: Offline-First Signal K Alert Delivery Plugin
 
+## Product goal and gap assessment (2026-09-06)
+
+Build a persistent onboard notification center, comparable in purpose to
+[Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
+with a usable notification list, retained one-time notifications, and full history,
+alongside the existing offline remote-delivery and connectivity features.
+The reference provides configurable sound/speech, playback controls, a notification
+viewer, and persistent zone-change logging. It is a product reference, not an
+instruction to copy its implementation or every integration.
+
+This section takes precedence over older suggestions below that make event storage
+or the core web UI optional. The phases below are design guidance, not evidence
+that the corresponding behavior has been implemented.
+
+### Required behavior
+
+- Keep configured rules/zones (including never-fired definitions), current
+  notifications, and historical occurrences distinguishable. Grouping must still
+  allow every matching path and source to be inspected individually.
+- Capture notifications even with no matching delivery rule, no notifier enabled,
+  no sound method, or no Internet connection. Do not depend on a browser being open.
+- A one-time notification means a discrete occurrence that may arrive once and
+  never receive a clear update. Keep it in the list across refreshes and restarts
+  until explicitly dismissed. One-time presentation, play-once audio, acknowledgement,
+  upstream resolution, and delivery success are separate concepts.
+- Dismissal hides an occurrence from the main list only. It must remain searchable
+  in history, and pending deliveries must survive. A later distinct occurrence
+  must appear again; a dismissed source must not become permanently invisible.
+- Full history means a durable chronological record of every distinct occurrence
+  and meaningful lifecycle change, including message/severity changes, clear,
+  acknowledgement, silence, dismissal, and delivery attempts/outcomes. It does not
+  require recording every identical sensor delta. Preserve source identity,
+  occurrence identity, source timestamp when available, receipt time, message,
+  severity, and per-occurrence start/clear times and duration.
+- A new occurrence on the same path must not overwrite earlier occurrences or
+  their delivery results. Duplicate updates within one occurrence should coalesce.
+  Do not invent separate one-shot occurrences from identical repeats without a
+  documented identity/rearm policy.
+- Provide global and per-notification history in the UI and API, including dismissed
+  entries, with pagination and filters for time, path/source, state and severity.
+  History must work locally and remain available after restart and successful delivery.
+- Retain history by default. Any future bounded retention or purge must be explicit,
+  documented, and separate from delivery-queue cleanup; protect pending work.
+- Keep local controls and upstream controls distinct. Show upstream failure or
+  unsupported operations honestly; do not report a local timestamp as confirmed
+  Signal K acknowledgement or silence.
+
+### Verified working-copy gaps
+
+Assessment is based on source inspection of the working copy at base commit
+`bef795c`, including pre-existing uncommitted implementation changes. These are
+static findings, not a live Signal K compatibility or runtime certification.
+
+| Area | Current evidence | Missing behavior |
+| --- | --- | --- |
+| Notification list | `src/alerts/catalog.ts` includes rules and recognized alerts, but selects only the latest matching alert for each rule/zone. | Drill-down or individual rows so wildcard rules and multiple sources cannot hide occurrences. |
+| One-time retention | `oneTime` is a rule flag; remove writes `removed_at`. Catalog filtering hides removed rows, and ingestion does not reset that flag. | Dismissed history access, reappearance of later occurrences, and defined handling for unconfigured one-shot events. |
+| Full history | `public/app.js` History filters current catalog rows to `cleared`; `src/api/routes.ts` has no event-history endpoint. | A real timeline including active, cleared and dismissed occurrences, with query/filter/pagination support. |
+| Event completeness | `src/storage/db.ts` records initial/state/severity events; same-state message changes and acknowledge/silence/remove actions are not event records. | Complete meaningful lifecycle audit, with immutable occurrence snapshots. |
+| Recurrence and delivery audit | `src/storage/schema.ts` has one alert per source key and one delivery per alert/transport. Ingestion uses `INSERT OR IGNORE`; first seen/max severity span recurrences. | Separate occurrences and delivery generations/attempt history, so later triggers and clears can be delivered without overwriting earlier results. |
+| Input semantics | Normalization defaults unknown states (including `notice`) to `alert`; null becomes an active alert. Delta source timestamps are not passed into ingestion. | Verify supported Signal K clear/null and severity semantics, retain original state/time, and test compatible normalization. |
+| Zones and startup | `src/alerts/zones.ts` exists, but `src/plugin.ts` does not call it or pass zones to the catalog. Startup subscribes without reading existing notifications. | Wire zone discovery/current values and startup reconciliation without generating duplicate historical occurrences. |
+| Controls | Acknowledge/silence persist local timestamps before optional upstream calls; no confirmed asynchronous result is required. | Verified supported server API behavior, truthful control results, and action history. |
+| Player similarity | No local sound/TTS engine, playback queue, repeat/play-once policy, or timed playback-disable controls are present. | Decide whether to implement playback here or integrate with a separate player; document the chosen ownership and prevent duplicate audio. |
+
+### Scope decisions still open
+
+The notification list, one-time retention, and full history are required. Local
+sound/TTS parity is a candidate requirement inferred from “similar”; whether this
+plugin owns playback or complements the reference player remains open. Slack,
+arbitrary pre/post shell commands, exact visual copying, and the reference's URL
+compatibility are not implied requirements. Confirm playback architecture before
+implementing it, without delaying the required persistence and history work.
+
+### Acceptance scenarios for future implementation
+
+1. Receive one notice once with no route, no WAN and no browser open. Restart the
+   plugin: it remains visible with its original content and occurrence time.
+2. Dismiss that occurrence: it disappears from the main list, stays in history,
+   and any pending remote delivery remains queued. A distinct later occurrence
+   on the same source appears as a new item.
+3. Raise, update message/severity, clear, then raise the same path again. History
+   shows both occurrences with independent durations and events; identical repeats
+   do not create duplicate occurrences or deliveries.
+4. Raise and clear while offline, then reconnect. The occurrence remains readable
+   locally and remotely after successful delivery; each transport has its own
+   durable outcomes, including later trigger/resolve work.
+5. Match two paths and two sources with one wildcard rule. All are inspectable;
+   the rule summary cannot replace the individual notification/history records.
+6. Acknowledge or silence while the upstream API fails or is unavailable. Display
+   the failure/local-only result accurately and preserve the action audit.
+7. Browse more than one history page, filter a single source, include dismissed
+   entries, and restart: ordering and records remain stable.
+
+Documentation-only review: no runtime fixes or new acceptance tests are implemented
+by this update. Prioritize occurrence/event storage and one-time lifecycle, then
+history API/UI, then verified zone/control integration and the playback decision.
+
 ## Objective
 
 Build a production-quality Signal K plugin that reliably delivers boat alerts across intermittent connectivity.
@@ -258,7 +356,7 @@ updated_at
 
 ### `alert_events`
 
-Optional but recommended.
+Required for full notification history.
 
 Track meaningful lifecycle transitions, not every raw delta:
 
@@ -634,7 +732,7 @@ Support approximately:
 ```yaml
 storage:
   path: /path/to/plugin.sqlite
-  deliveredRetentionDays: 30
+  # History retention defaults to unlimited; any purge policy must be explicit.
 
 retry:
   initialSeconds: 10
@@ -716,11 +814,10 @@ Also expose:
 - `POST /retry`
 - `POST /test/:transport`
 
-Optional later:
+Required: notification list, acknowledgement/silence result handling, and full
+history UI/API as specified above.
 
-- connectivity wake/release actions;
-- acknowledgement interaction;
-- plugin web UI.
+Optional later: connectivity wake/release actions.
 
 ## Phase 17: test strategy
 
