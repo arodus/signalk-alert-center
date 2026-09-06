@@ -1,43 +1,44 @@
-import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import {
+  AlertDefinitionRecord,
+  AlertEventRecord,
+  AlertPolicyRecord,
   AlertRecord,
+  DeliveryAttemptRecord,
   DeliveryRecord,
+  IngestOptions,
   NormalizedAlert,
+  OccurrencePage,
+  OccurrenceQuery,
   severityRank,
 } from "../alerts/types";
-import { schema } from "./schema";
+import { currentSchemaVersion, schema } from "./schema";
 
-type AlertRow = Record<string, unknown>;
+type Row = Record<string, unknown>;
 const date = (value: unknown): Date | undefined =>
   value ? new Date(String(value)) : undefined;
+const json = (value: unknown): unknown | undefined =>
+  value === null || value === undefined ? undefined : JSON.parse(String(value));
 
 export class AlertDatabase {
   readonly db: DatabaseSync;
 
   constructor(filename = ":memory:") {
     this.db = new DatabaseSync(filename);
-    this.db.exec(schema);
-    this.migrateAlerts();
-  }
-
-  private migrateAlerts(): void {
-    const columns = new Set(
-      (this.db.prepare("PRAGMA table_info(alerts)").all() as AlertRow[]).map(
-        (row) => String(row.name),
-      ),
-    );
-    for (const [name, definition] of [
-      ["fire_count", "INTEGER NOT NULL DEFAULT 0"],
-      ["last_fired_at", "TEXT"],
-      ["removed_at", "TEXT"],
-      ["notification_id", "TEXT"],
-      ["acknowledged_at", "TEXT"],
-      ["silenced_at", "TEXT"],
-    ] as const) {
-      if (!columns.has(name)) {
-        this.db.exec(`ALTER TABLE alerts ADD COLUMN ${name} ${definition}`);
-      }
+    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec(schema);
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        )
+        .run(currentSchemaVersion, new Date().toISOString());
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
   }
 
@@ -45,133 +46,353 @@ export class AlertDatabase {
     this.db.close();
   }
 
+  schemaVersion(): number {
+    const row = this.db
+      .prepare("SELECT MAX(version) AS version FROM schema_migrations")
+      .get() as Row;
+    return Number(row.version ?? 0);
+  }
+
+  upsertDefinition(
+    definition: {
+      id: string;
+      sourceType: AlertDefinitionRecord["sourceType"];
+      pathPattern: string;
+      name: string;
+      metadata?: unknown;
+    },
+    now = new Date(),
+  ): AlertDefinitionRecord {
+    const timestamp = now.toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO alert_definitions
+          (id, source_type, path_pattern, name, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+          source_type=excluded.source_type, path_pattern=excluded.path_pattern,
+          name=excluded.name, metadata_json=excluded.metadata_json,
+          updated_at=excluded.updated_at`,
+      )
+      .run(
+        definition.id,
+        definition.sourceType,
+        definition.pathPattern,
+        definition.name,
+        definition.metadata === undefined
+          ? null
+          : JSON.stringify(definition.metadata),
+        timestamp,
+        timestamp,
+      );
+    return this.getDefinition(definition.id);
+  }
+
+  private ensureDefinition(
+    alert: NormalizedAlert,
+    definitionId: string,
+    now: Date,
+  ): void {
+    if (
+      this.db
+        .prepare("SELECT 1 FROM alert_definitions WHERE id=?")
+        .get(definitionId)
+    )
+      return;
+    this.upsertDefinition(
+      {
+        id: definitionId,
+        sourceType: "recognized",
+        pathPattern: alert.path,
+        name: alert.path,
+      },
+      now,
+    );
+  }
+
+  getDefinition(id: string): AlertDefinitionRecord {
+    const row = this.db
+      .prepare("SELECT * FROM alert_definitions WHERE id=?")
+      .get(id) as Row | undefined;
+    if (!row) throw new Error(`Unknown alert definition: ${id}`);
+    return {
+      id: String(row.id),
+      sourceType: row.source_type as AlertDefinitionRecord["sourceType"],
+      pathPattern: String(row.path_pattern),
+      name: String(row.name),
+      metadata: json(row.metadata_json),
+      createdAt: new Date(String(row.created_at)),
+      updatedAt: new Date(String(row.updated_at)),
+    };
+  }
+
+  listDefinitions(): AlertDefinitionRecord[] {
+    return (
+      this.db
+        .prepare("SELECT id FROM alert_definitions ORDER BY name, id")
+        .all() as Row[]
+    ).map((row) => this.getDefinition(String(row.id)));
+  }
+
+  setPolicy(
+    definitionId: string,
+    policy: Omit<AlertPolicyRecord, "definitionId" | "updatedAt">,
+    now = new Date(),
+  ): AlertPolicyRecord {
+    const timestamp = now.toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO alert_policies
+            (definition_id, enabled, minimum_severity, connectivity_json,
+             one_time, activation_delay_seconds, rearm_after_seconds, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(definition_id) DO UPDATE SET
+            enabled=excluded.enabled, minimum_severity=excluded.minimum_severity,
+            connectivity_json=excluded.connectivity_json, one_time=excluded.one_time,
+            activation_delay_seconds=excluded.activation_delay_seconds,
+            rearm_after_seconds=excluded.rearm_after_seconds,
+            updated_at=excluded.updated_at`,
+        )
+        .run(
+          definitionId,
+          policy.enabled === undefined ? null : Number(policy.enabled),
+          policy.minimumSeverity ?? null,
+          policy.connectivity === undefined
+            ? null
+            : JSON.stringify(policy.connectivity),
+          policy.oneTime === undefined ? null : Number(policy.oneTime),
+          policy.activationDelaySeconds ?? null,
+          policy.rearmAfterSeconds ?? null,
+          timestamp,
+        );
+      this.db
+        .prepare("DELETE FROM alert_policy_notifiers WHERE definition_id=?")
+        .run(definitionId);
+      for (const notifierId of [...new Set(policy.notifierIds)]) {
+        this.db
+          .prepare(
+            "INSERT INTO alert_policy_notifiers(definition_id, transport_instance_id) VALUES (?, ?)",
+          )
+          .run(definitionId, notifierId);
+      }
+      this.db.exec("COMMIT");
+      return this.getPolicy(definitionId)!;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  getPolicy(definitionId: string): AlertPolicyRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM alert_policies WHERE definition_id=?")
+      .get(definitionId) as Row | undefined;
+    if (!row) return undefined;
+    const notifiers = this.db
+      .prepare(
+        "SELECT transport_instance_id FROM alert_policy_notifiers WHERE definition_id=? ORDER BY transport_instance_id",
+      )
+      .all(definitionId) as Row[];
+    return {
+      definitionId,
+      enabled: row.enabled === null ? undefined : Boolean(row.enabled),
+      minimumSeverity: row.minimum_severity
+        ? (String(row.minimum_severity) as AlertPolicyRecord["minimumSeverity"])
+        : undefined,
+      connectivity: json(row.connectivity_json) as
+        AlertPolicyRecord["connectivity"] | undefined,
+      oneTime: row.one_time === null ? undefined : Boolean(row.one_time),
+      activationDelaySeconds:
+        row.activation_delay_seconds === null
+          ? undefined
+          : Number(row.activation_delay_seconds),
+      rearmAfterSeconds:
+        row.rearm_after_seconds === null
+          ? undefined
+          : Number(row.rearm_after_seconds),
+      notifierIds: notifiers.map((item) => String(item.transport_instance_id)),
+      updatedAt: new Date(String(row.updated_at)),
+    };
+  }
+
   ingest(
     alert: NormalizedAlert,
     transportIds: string[],
     now = new Date(),
-  ): AlertRecord {
+    options: IngestOptions = {},
+  ): AlertRecord | undefined {
     const timestamp = now.toISOString();
-    const sourcePayload =
+    const definitionId =
+      options.definitionId ?? `recognized:${alert.sourceKey}`;
+    const delaySeconds = Math.max(0, options.activationDelaySeconds ?? 0);
+    const payload =
       alert.sourcePayload === undefined
         ? null
         : JSON.stringify(alert.sourcePayload);
-    // Alert state and its delivery rows must commit together before any send.
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const existing = this.db
-        .prepare("SELECT * FROM alerts WHERE source_key = ?")
-        .get(alert.sourceKey) as AlertRow | undefined;
-      const id = existing ? String(existing.id) : randomUUID();
-      const maxSeverity =
-        existing &&
-        severityRank(
-          String(existing.max_severity) as AlertRecord["maxSeverity"],
-        ) > severityRank(alert.severity)
-          ? String(existing.max_severity)
-          : alert.severity;
-      const firstSeenAt = existing ? String(existing.first_seen_at) : timestamp;
-      const previousState = existing?.current_state as
-        AlertRecord["currentState"] | undefined;
-      const previousSeverity = existing?.current_severity as
-        AlertRecord["currentSeverity"] | undefined;
-      const clearedAt = alert.state === "cleared" ? timestamp : null;
-      const fired = alert.state === "active" && previousState !== "active";
-      const notificationId =
-        alert.notificationId ??
-        (existing ? (existing.notification_id as string | null) : null);
-      if (existing) {
+      this.ensureDefinition(alert, definitionId, now);
+      let active = this.db
+        .prepare(
+          "SELECT * FROM alert_occurrences WHERE source_key=? AND current_state='active'",
+        )
+        .get(alert.sourceKey) as Row | undefined;
+
+      const rearmAfterSeconds = options.rearmAfterSeconds;
+      if (
+        active &&
+        alert.state === "active" &&
+        rearmAfterSeconds !== undefined &&
+        rearmAfterSeconds > 0 &&
+        now.getTime() - new Date(String(active.started_at)).getTime() >=
+          rearmAfterSeconds * 1000
+      ) {
+        const suppressed = active.activation_state === "pending";
         this.db
           .prepare(
-            `UPDATE alerts SET last_seen_at=?, cleared_at=?, current_state=?, current_severity=?, max_severity=?, message=?, source_payload_json=?, fire_count=fire_count+?, last_fired_at=CASE WHEN ? THEN ? ELSE last_fired_at END, notification_id=?, acknowledged_at=CASE WHEN ? THEN NULL ELSE acknowledged_at END, silenced_at=CASE WHEN ? THEN NULL ELSE silenced_at END, updated_at=? WHERE id=?`,
+            `UPDATE alert_occurrences SET current_state='cleared', cleared_at=?,
+             activation_state=CASE WHEN ? THEN 'suppressed' ELSE activation_state END,
+             activation_due_at=CASE WHEN ? THEN NULL ELSE activation_due_at END,
+             last_seen_at=?, updated_at=? WHERE id=?`,
           )
           .run(
             timestamp,
-            clearedAt,
+            Number(suppressed),
+            Number(suppressed),
+            timestamp,
+            timestamp,
+            String(active.id),
+          );
+        if (suppressed)
+          this.addEvent(String(active.id), "suppressed_before_activation", now);
+        this.addEvent(String(active.id), "rearmed", now, {
+          rearmAfterSeconds,
+        });
+        active = undefined;
+      }
+
+      let id: string;
+      if (active) {
+        id = String(active.id);
+        const previousSeverity = String(active.current_severity);
+        const previousMessage = active.message
+          ? String(active.message)
+          : undefined;
+        const maxSeverity =
+          severityRank(active.max_severity as AlertRecord["maxSeverity"]) >
+          severityRank(alert.severity)
+            ? String(active.max_severity)
+            : alert.severity;
+        const clearing = alert.state === "cleared";
+        const suppression = clearing && active.activation_state === "pending";
+        this.db
+          .prepare(
+            `UPDATE alert_occurrences SET
+              source_timestamp=COALESCE(?, source_timestamp), last_seen_at=?,
+              cleared_at=?, current_state=?, current_severity=?, max_severity=?,
+              message=?, source_payload_json=?, notification_id=COALESCE(?, notification_id),
+              activation_state=CASE WHEN ? THEN 'suppressed' ELSE activation_state END,
+              activation_due_at=CASE WHEN ? THEN NULL ELSE activation_due_at END,
+              updated_at=? WHERE id=?`,
+          )
+          .run(
+            alert.sourceTimestamp?.toISOString() ?? null,
+            timestamp,
+            clearing ? timestamp : null,
             alert.state,
             alert.severity,
             maxSeverity,
             alert.message ?? null,
-            sourcePayload,
-            fired ? 1 : 0,
-            fired ? 1 : 0,
-            fired ? timestamp : null,
-            notificationId,
-            fired ? 1 : 0,
-            fired ? 1 : 0,
+            payload,
+            alert.notificationId ?? null,
+            Number(suppression),
+            Number(suppression),
             timestamp,
             id,
           );
-        if (previousState !== alert.state) {
-          this.db
-            .prepare(
-              "INSERT INTO alert_events (alert_id,event_type,occurred_at,payload_json) VALUES (?,?,?,?)",
-            )
-            .run(
-              id,
-              alert.state === "cleared" ? "cleared" : "raised",
-              timestamp,
-              sourcePayload,
-            );
-        } else if (previousSeverity !== alert.severity) {
-          this.db
-            .prepare(
-              "INSERT INTO alert_events (alert_id,event_type,occurred_at,payload_json) VALUES (?,?,?,?)",
-            )
-            .run(
-              id,
-              "severity_changed",
-              timestamp,
-              JSON.stringify({ from: previousSeverity, to: alert.severity }),
-            );
+        if (!clearing && previousSeverity !== alert.severity) {
+          this.addEvent(id, "severity_changed", now, {
+            from: previousSeverity,
+            to: alert.severity,
+          });
         }
+        if (!clearing && previousMessage !== alert.message) {
+          this.addEvent(id, "message_changed", now, {
+            from: previousMessage,
+            to: alert.message,
+          });
+        }
+        if (suppression) this.addEvent(id, "suppressed_before_activation", now);
+        if (clearing) this.addEvent(id, "cleared", now, alert.sourcePayload);
       } else {
+        if (alert.state === "cleared") {
+          this.db.exec("COMMIT");
+          return undefined;
+        }
+        id = randomUUID();
+        const count = this.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM alert_occurrences WHERE source_key=?",
+          )
+          .get(alert.sourceKey) as Row;
+        const occurrenceNumber = Number(count.count) + 1;
+        const activeState = alert.state === "active";
+        const activationState = activeState
+          ? delaySeconds > 0
+            ? "pending"
+            : "eligible"
+          : "suppressed";
+        const activationDueAt =
+          activeState && delaySeconds > 0
+            ? new Date(now.getTime() + delaySeconds * 1000).toISOString()
+            : null;
         this.db
           .prepare(
-            `INSERT INTO alerts (id,source_key,path,first_seen_at,last_seen_at,cleared_at,current_state,current_severity,max_severity,message,source_payload_json,fire_count,last_fired_at,notification_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO alert_occurrences
+              (id, definition_id, occurrence_number, source_key, path, started_at,
+               source_timestamp, received_at, last_seen_at, cleared_at, current_state,
+               current_severity, max_severity, message, source_payload_json,
+               notification_id, activation_due_at, activation_state, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
+            definitionId,
+            occurrenceNumber,
             alert.sourceKey,
             alert.path,
-            firstSeenAt,
             timestamp,
-            clearedAt,
+            alert.sourceTimestamp?.toISOString() ?? null,
+            timestamp,
+            timestamp,
+            activeState ? null : timestamp,
             alert.state,
             alert.severity,
-            maxSeverity,
+            alert.severity,
             alert.message ?? null,
-            sourcePayload,
-            alert.state === "active" ? 1 : 0,
-            alert.state === "active" ? timestamp : null,
-            notificationId,
+            payload,
+            alert.notificationId ?? null,
+            activationDueAt,
+            activationState,
             timestamp,
             timestamp,
           );
-        this.db
-          .prepare(
-            "INSERT INTO alert_events (alert_id,event_type,occurred_at,payload_json) VALUES (?,?,?,?)",
-          )
-          .run(
-            id,
-            alert.state === "cleared" ? "cleared" : "raised",
-            timestamp,
-            sourcePayload,
-          );
-      }
-      for (const transportId of transportIds) {
-        this.db
-          .prepare(
-            `INSERT OR IGNORE INTO deliveries (id,alert_id,transport_instance_id,state,attempt_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`,
-          )
-          .run(
-            randomUUID(),
-            id,
-            transportId,
-            "pending",
-            0,
-            timestamp,
-            timestamp,
-          );
+        this.addEvent(
+          id,
+          activeState ? "raised" : "cleared",
+          now,
+          alert.sourcePayload,
+        );
+        for (const transportId of [...new Set(transportIds)]) {
+          this.db
+            .prepare(
+              "INSERT INTO occurrence_notifiers(alert_id, transport_instance_id) VALUES (?, ?)",
+            )
+            .run(id, transportId);
+        }
+        if (activationState === "eligible") this.createDeliveryIntents(id, now);
       }
       const result = this.getAlert(id);
       this.db.exec("COMMIT");
@@ -182,11 +403,260 @@ export class AlertDatabase {
     }
   }
 
-  listAlerts(): AlertRecord[] {
+  private createDeliveryIntents(alertId: string, now: Date): void {
+    const timestamp = now.toISOString();
     const rows = this.db
-      .prepare("SELECT id FROM alerts ORDER BY first_seen_at")
-      .all() as AlertRow[];
-    return rows.map((row) => this.getAlert(String(row.id)));
+      .prepare(
+        "SELECT transport_instance_id FROM occurrence_notifiers WHERE alert_id=? ORDER BY rowid",
+      )
+      .all(alertId) as Row[];
+    for (const row of rows) {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO deliveries
+            (id, alert_id, transport_instance_id, state, attempt_count, created_at, updated_at)
+           VALUES (?, ?, ?, 'pending', 0, ?, ?)`,
+        )
+        .run(
+          randomUUID(),
+          alertId,
+          String(row.transport_instance_id),
+          timestamp,
+          timestamp,
+        );
+    }
+  }
+
+  processDueActivations(now = new Date()): AlertRecord[] {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT id FROM alert_occurrences
+           WHERE activation_state='pending' AND current_state='active'
+             AND activation_due_at <= ? ORDER BY activation_due_at, id`,
+        )
+        .all(now.toISOString()) as Row[];
+      for (const row of rows) {
+        const id = String(row.id);
+        this.db
+          .prepare(
+            "UPDATE alert_occurrences SET activation_state='eligible', activation_due_at=NULL, updated_at=? WHERE id=? AND activation_state='pending'",
+          )
+          .run(now.toISOString(), id);
+        this.addEvent(id, "activation_eligible", now);
+        this.createDeliveryIntents(id, now);
+      }
+      const result = rows.map((row) => this.getAlert(String(row.id)));
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listActivationDeadlines(): Array<{ alertId: string; dueAt: Date }> {
+    return (
+      this.db
+        .prepare(
+          "SELECT id, activation_due_at FROM alert_occurrences WHERE activation_state='pending' ORDER BY activation_due_at, id",
+        )
+        .all() as Row[]
+    ).map((row) => ({
+      alertId: String(row.id),
+      dueAt: new Date(String(row.activation_due_at)),
+    }));
+  }
+
+  nextActivationDueAt(): Date | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT MIN(activation_due_at) AS due_at FROM alert_occurrences WHERE activation_state='pending'",
+      )
+      .get() as Row;
+    return date(row.due_at);
+  }
+
+  private addEvent(
+    alertId: string,
+    eventType: string,
+    now: Date,
+    payload?: unknown,
+  ): void {
+    this.db
+      .prepare(
+        "INSERT INTO alert_events(alert_id,event_type,occurred_at,payload_json) VALUES (?,?,?,?)",
+      )
+      .run(
+        alertId,
+        eventType,
+        now.toISOString(),
+        payload === undefined ? null : JSON.stringify(payload),
+      );
+  }
+
+  listAlertEvents(alertId?: string): AlertEventRecord[] {
+    const rows = (
+      alertId
+        ? this.db
+            .prepare(
+              "SELECT * FROM alert_events WHERE alert_id=? ORDER BY occurred_at, id",
+            )
+            .all(alertId)
+        : this.db
+            .prepare("SELECT * FROM alert_events ORDER BY occurred_at, id")
+            .all()
+    ) as Row[];
+    return rows.map((row) => ({
+      id: Number(row.id),
+      alertId: String(row.alert_id),
+      eventType: String(row.event_type),
+      occurredAt: new Date(String(row.occurred_at)),
+      payload: json(row.payload_json),
+    }));
+  }
+
+  listAlerts(): AlertRecord[] {
+    return (
+      this.db
+        .prepare("SELECT id FROM alert_occurrences ORDER BY started_at, id")
+        .all() as Row[]
+    ).map((row) => this.getAlert(String(row.id)));
+  }
+
+  queryOccurrences(query: OccurrenceQuery = {}): OccurrencePage {
+    const clauses: string[] = [];
+    const parameters: Array<string | number> = [];
+    if (query.definitionId) {
+      clauses.push("definition_id=?");
+      parameters.push(query.definitionId);
+    }
+    if (query.state) {
+      clauses.push("current_state=?");
+      parameters.push(query.state);
+    }
+    if (query.severity) {
+      clauses.push("current_severity=?");
+      parameters.push(query.severity);
+    }
+    if (query.dismissed !== undefined) {
+      clauses.push(
+        query.dismissed ? "dismissed_at IS NOT NULL" : "dismissed_at IS NULL",
+      );
+    }
+    if (query.cursor) {
+      const cursor = this.db
+        .prepare("SELECT started_at, id FROM alert_occurrences WHERE id=?")
+        .get(query.cursor) as Row | undefined;
+      if (!cursor) throw new Error("Invalid occurrence cursor");
+      clauses.push("(started_at < ? OR (started_at = ? AND id < ?))");
+      parameters.push(
+        String(cursor.started_at),
+        String(cursor.started_at),
+        String(cursor.id),
+      );
+    }
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    parameters.push(limit + 1);
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM alert_occurrences
+         ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
+         ORDER BY started_at DESC, id DESC LIMIT ?`,
+      )
+      .all(...parameters) as Row[];
+    const hasMore = rows.length > limit;
+    const items = rows
+      .slice(0, limit)
+      .map((row) => this.getAlert(String(row.id)));
+    return { items, nextCursor: hasMore ? items.at(-1)?.id : undefined };
+  }
+
+  listOccurrences(query: OccurrenceQuery = {}): AlertRecord[] {
+    return this.queryOccurrences(query).items;
+  }
+
+  getAlert(id: string): AlertRecord {
+    const row = this.db
+      .prepare("SELECT * FROM alert_occurrences WHERE id=?")
+      .get(id) as Row | undefined;
+    if (!row) throw new Error(`Unknown alert occurrence: ${id}`);
+    const lifetime = this.db
+      .prepare(
+        "SELECT COUNT(*) AS count, MAX(started_at) AS last_fired_at FROM alert_occurrences WHERE source_key=? AND current_state IN ('active','cleared')",
+      )
+      .get(row.source_key) as Row;
+    return {
+      id: String(row.id),
+      definitionId: String(row.definition_id),
+      occurrenceNumber: Number(row.occurrence_number),
+      sourceKey: String(row.source_key),
+      path: String(row.path),
+      firstSeenAt: new Date(String(row.started_at)),
+      sourceTimestamp: date(row.source_timestamp),
+      receivedAt: new Date(String(row.received_at)),
+      lastSeenAt: new Date(String(row.last_seen_at)),
+      clearedAt: date(row.cleared_at),
+      lastFiredAt: date(lifetime.last_fired_at),
+      fireCount: Number(lifetime.count),
+      removedAt: date(row.dismissed_at),
+      dismissedAt: date(row.dismissed_at),
+      currentState: row.current_state as AlertRecord["currentState"],
+      currentSeverity: row.current_severity as AlertRecord["currentSeverity"],
+      maxSeverity: row.max_severity as AlertRecord["maxSeverity"],
+      message: row.message ? String(row.message) : undefined,
+      sourcePayload: json(row.source_payload_json),
+      notificationId: row.notification_id
+        ? String(row.notification_id)
+        : undefined,
+      acknowledgedAt: date(row.acknowledged_at),
+      silencedAt: date(row.silenced_at),
+      activationDueAt: date(row.activation_due_at),
+      activationState: row.activation_state as AlertRecord["activationState"],
+    };
+  }
+
+  acknowledgeAlert(id: string, now = new Date()): void {
+    this.markOccurrence(id, "acknowledged_at", "acknowledged", now);
+  }
+
+  silenceAlert(id: string, now = new Date()): void {
+    this.markOccurrence(id, "silenced_at", "silenced", now);
+  }
+
+  dismissOccurrence(id: string, now = new Date()): void {
+    this.markOccurrence(id, "dismissed_at", "dismissed", now);
+  }
+
+  removeAlert(id: string, now = new Date()): void {
+    this.dismissOccurrence(id, now);
+  }
+
+  private markOccurrence(
+    id: string,
+    column: "acknowledged_at" | "silenced_at" | "dismissed_at",
+    event: string,
+    now: Date,
+  ): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE alert_occurrences SET ${column}=COALESCE(${column}, ?), updated_at=? WHERE id=?`,
+        )
+        .run(now.toISOString(), now.toISOString(), id);
+      if (result.changes === 0)
+        throw new Error(`Unknown alert occurrence: ${id}`);
+      const duplicate = this.db
+        .prepare("SELECT 1 FROM alert_events WHERE alert_id=? AND event_type=?")
+        .get(id, event);
+      if (!duplicate) this.addEvent(id, event, now);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   pendingDeliveryCount(): number {
@@ -194,7 +664,7 @@ export class AlertDatabase {
       .prepare(
         "SELECT COUNT(*) AS count FROM deliveries WHERE state NOT IN ('delivered', 'failed_terminal')",
       )
-      .get() as AlertRow;
+      .get() as Row;
     return Number(row.count);
   }
 
@@ -209,7 +679,10 @@ export class AlertDatabase {
   setWakeDue(alertId: string, dueAt: Date, now = new Date()): void {
     this.db
       .prepare(
-        "INSERT INTO wake_requests (alert_id, wake_due_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(alert_id) DO NOTHING",
+        `INSERT INTO wake_requests (alert_id, wake_due_at, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(alert_id) DO UPDATE SET
+          wake_due_at=MIN(wake_requests.wake_due_at, excluded.wake_due_at),
+          updated_at=excluded.updated_at`,
       )
       .run(alertId, dueAt.toISOString(), now.toISOString());
   }
@@ -219,23 +692,22 @@ export class AlertDatabase {
   }
 
   listWakeDue(now = new Date()): Array<{ alertId: string; dueAt: Date }> {
-    const rows = this.db
-      .prepare(
-        "SELECT alert_id, wake_due_at FROM wake_requests WHERE wake_due_at <= ? ORDER BY wake_due_at",
-      )
-      .all(now.toISOString()) as AlertRow[];
-    return rows.map((row) => ({
-      alertId: String(row.alert_id),
-      dueAt: new Date(String(row.wake_due_at)),
-    }));
+    return this.readWakeRequests("WHERE wake_due_at <= ?", now.toISOString());
   }
 
   listWakeRequests(): Array<{ alertId: string; dueAt: Date }> {
+    return this.readWakeRequests("");
+  }
+
+  private readWakeRequests(
+    where: string,
+    ...parameters: string[]
+  ): Array<{ alertId: string; dueAt: Date }> {
     const rows = this.db
       .prepare(
-        "SELECT alert_id, wake_due_at FROM wake_requests ORDER BY wake_due_at",
+        `SELECT alert_id, wake_due_at FROM wake_requests ${where} ORDER BY wake_due_at`,
       )
-      .all() as AlertRow[];
+      .all(...parameters) as Row[];
     return rows.map((row) => ({
       alertId: String(row.alert_id),
       dueAt: new Date(String(row.wake_due_at)),
@@ -243,68 +715,46 @@ export class AlertDatabase {
   }
 
   recoverSending(now = new Date()): void {
-    this.db
-      .prepare(
-        "UPDATE deliveries SET state='failed_retryable', next_attempt_at=?, last_error_code='INTERRUPTED', last_error_message='Delivery was interrupted before completion', updated_at=? WHERE state='sending'",
-      )
-      .run(now.toISOString(), now.toISOString());
+    const timestamp = now.toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db
+        .prepare(
+          "SELECT id, attempt_count FROM deliveries WHERE state='sending'",
+        )
+        .all() as Row[];
+      for (const row of rows) {
+        this.db
+          .prepare(
+            `UPDATE delivery_attempts SET finished_at=?, outcome='interrupted',
+             error_code='INTERRUPTED', error_message='Delivery was interrupted before completion'
+             WHERE delivery_id=? AND attempt_number=? AND outcome='sending'`,
+          )
+          .run(timestamp, String(row.id), Number(row.attempt_count));
+      }
+      this.db
+        .prepare(
+          `UPDATE deliveries SET state='failed_retryable', next_attempt_at=?,
+           last_error_code='INTERRUPTED',
+           last_error_message='Delivery was interrupted before completion', updated_at=?
+           WHERE state='sending'`,
+        )
+        .run(timestamp, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   deliveryEvents(): DeliveryRecord[] {
     return this.listDeliveries();
   }
 
-  getAlert(id: string): AlertRecord {
-    const row = this.db
-      .prepare("SELECT * FROM alerts WHERE id=?")
-      .get(id) as AlertRow;
-    return {
-      id: String(row.id),
-      sourceKey: String(row.source_key),
-      path: String(row.path),
-      firstSeenAt: new Date(String(row.first_seen_at)),
-      lastSeenAt: new Date(String(row.last_seen_at)),
-      clearedAt: date(row.cleared_at),
-      lastFiredAt: date(row.last_fired_at),
-      fireCount: Number(row.fire_count ?? 0),
-      removedAt: date(row.removed_at),
-      currentState: row.current_state as AlertRecord["currentState"],
-      currentSeverity: row.current_severity as AlertRecord["currentSeverity"],
-      maxSeverity: row.max_severity as AlertRecord["maxSeverity"],
-      message: row.message ? String(row.message) : undefined,
-      sourcePayload: row.source_payload_json
-        ? JSON.parse(String(row.source_payload_json))
-        : undefined,
-      notificationId: row.notification_id
-        ? String(row.notification_id)
-        : undefined,
-      acknowledgedAt: date(row.acknowledged_at),
-      silencedAt: date(row.silenced_at),
-    };
-  }
-
-  acknowledgeAlert(id: string, now = new Date()): void {
-    this.db
-      .prepare("UPDATE alerts SET acknowledged_at=?, updated_at=? WHERE id=?")
-      .run(now.toISOString(), now.toISOString(), id);
-  }
-
-  silenceAlert(id: string, now = new Date()): void {
-    this.db
-      .prepare("UPDATE alerts SET silenced_at=?, updated_at=? WHERE id=?")
-      .run(now.toISOString(), now.toISOString(), id);
-  }
-
-  removeAlert(id: string, now = new Date()): void {
-    this.db
-      .prepare("UPDATE alerts SET removed_at=?, updated_at=? WHERE id=?")
-      .run(now.toISOString(), now.toISOString(), id);
-  }
-
   listDeliveries(): DeliveryRecord[] {
     const rows = this.db
-      .prepare("SELECT * FROM deliveries ORDER BY created_at")
-      .all() as AlertRow[];
+      .prepare("SELECT * FROM deliveries ORDER BY rowid")
+      .all() as Row[];
     return rows.map((row) => ({
       id: String(row.id),
       alertId: String(row.alert_id),
@@ -325,19 +775,33 @@ export class AlertDatabase {
   }
 
   claimDelivery(id: string, now = new Date()): void {
-    this.db
-      .prepare(
-        "UPDATE deliveries SET state='sending', attempt_count=attempt_count+1, last_attempt_at=?, updated_at=? WHERE id=? AND state <> 'delivered'",
-      )
-      .run(now.toISOString(), now.toISOString(), id);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE deliveries SET state='sending', attempt_count=attempt_count+1,
+           last_attempt_at=?, updated_at=? WHERE id=? AND state <> 'delivered'`,
+        )
+        .run(now.toISOString(), now.toISOString(), id);
+      if (result.changes) {
+        const row = this.db
+          .prepare("SELECT attempt_count FROM deliveries WHERE id=?")
+          .get(id) as Row;
+        this.db
+          .prepare(
+            "INSERT INTO delivery_attempts(delivery_id, attempt_number, started_at, outcome) VALUES (?, ?, ?, 'sending')",
+          )
+          .run(id, Number(row.attempt_count), now.toISOString());
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   recordDeliverySuccess(id: string, remoteId?: string, now = new Date()): void {
-    this.db
-      .prepare(
-        "UPDATE deliveries SET state='delivered', delivered_at=?, remote_id=?, next_attempt_at=NULL, updated_at=? WHERE id=?",
-      )
-      .run(now.toISOString(), remoteId ?? null, now.toISOString(), id);
+    this.finishAttempt(id, "delivered", now, undefined, undefined, remoteId);
   }
 
   recordDeliveryFailure(
@@ -348,17 +812,90 @@ export class AlertDatabase {
     nextAttemptAt?: Date,
     now = new Date(),
   ): void {
-    this.db
-      .prepare(
-        "UPDATE deliveries SET state=?, last_error_code=?, last_error_message=?, next_attempt_at=?, updated_at=? WHERE id=?",
-      )
-      .run(
-        retryable ? "failed_retryable" : "failed_terminal",
-        code,
-        message.slice(0, 500),
-        nextAttemptAt?.toISOString() ?? null,
-        now.toISOString(),
-        id,
-      );
+    this.finishAttempt(
+      id,
+      retryable ? "failed_retryable" : "failed_terminal",
+      now,
+      code,
+      message.slice(0, 500),
+      undefined,
+      nextAttemptAt,
+    );
+  }
+
+  private finishAttempt(
+    id: string,
+    outcome: "delivered" | "failed_retryable" | "failed_terminal",
+    now: Date,
+    errorCode?: string,
+    errorMessage?: string,
+    remoteId?: string,
+    nextAttemptAt?: Date,
+  ): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare("SELECT attempt_count FROM deliveries WHERE id=?")
+        .get(id) as Row | undefined;
+      if (!row) throw new Error(`Unknown delivery intent: ${id}`);
+      this.db
+        .prepare(
+          `UPDATE deliveries SET state=?, delivered_at=?, remote_id=?, next_attempt_at=?,
+           last_error_code=?, last_error_message=?, updated_at=? WHERE id=?`,
+        )
+        .run(
+          outcome,
+          outcome === "delivered" ? now.toISOString() : null,
+          remoteId ?? null,
+          nextAttemptAt?.toISOString() ?? null,
+          errorCode ?? null,
+          errorMessage ?? null,
+          now.toISOString(),
+          id,
+        );
+      this.db
+        .prepare(
+          `UPDATE delivery_attempts SET finished_at=?, outcome=?, error_code=?,
+           error_message=?, remote_id=? WHERE delivery_id=? AND attempt_number=?`,
+        )
+        .run(
+          now.toISOString(),
+          outcome,
+          errorCode ?? null,
+          errorMessage ?? null,
+          remoteId ?? null,
+          id,
+          Number(row.attempt_count),
+        );
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listDeliveryAttempts(deliveryId?: string): DeliveryAttemptRecord[] {
+    const rows = (
+      deliveryId
+        ? this.db
+            .prepare(
+              "SELECT * FROM delivery_attempts WHERE delivery_id=? ORDER BY attempt_number",
+            )
+            .all(deliveryId)
+        : this.db
+            .prepare("SELECT * FROM delivery_attempts ORDER BY started_at, id")
+            .all()
+    ) as Row[];
+    return rows.map((row) => ({
+      id: Number(row.id),
+      deliveryId: String(row.delivery_id),
+      attemptNumber: Number(row.attempt_number),
+      startedAt: new Date(String(row.started_at)),
+      finishedAt: date(row.finished_at),
+      outcome: row.outcome as DeliveryAttemptRecord["outcome"],
+      errorCode: row.error_code ? String(row.error_code) : undefined,
+      errorMessage: row.error_message ? String(row.error_message) : undefined,
+      remoteId: row.remote_id ? String(row.remote_id) : undefined,
+    }));
   }
 }

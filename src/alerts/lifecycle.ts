@@ -1,5 +1,5 @@
 import { AlertDatabase } from "../storage/db";
-import { NormalizedAlert } from "./types";
+import { IngestOptions, NormalizedAlert } from "./types";
 
 export class AlertLifecycle {
   constructor(
@@ -11,12 +11,17 @@ export class AlertLifecycle {
     alert: NormalizedAlert,
     transportIdsOrNow: string[] | Date = this.transportIds,
     now = new Date(),
+    options: IngestOptions = {},
   ) {
     const transportIds = Array.isArray(transportIdsOrNow)
       ? transportIdsOrNow
       : this.transportIds;
     const timestamp =
       transportIdsOrNow instanceof Date ? transportIdsOrNow : now;
-    return this.database.ingest(alert, transportIds, timestamp);
+    return this.database.ingest(alert, transportIds, timestamp, options);
+  }
+
+  processDueActivations(now = new Date()) {
+    return this.database.processDueActivations(now);
   }
 }
