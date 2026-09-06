@@ -177,4 +177,31 @@ describe("AlertLifecycle", () => {
     expect(database.getAlert(record.id).removedAt).toBeInstanceOf(Date);
     expect(database.listDeliveries()).toHaveLength(1);
   });
+
+  it("persists a notification id and clears acknowledge/silence on re-fire", () => {
+    const { database, lifecycle } = createLifecycle(["ntfy-main"]);
+    const raisedAt = new Date("2026-09-05T10:00:00.000Z");
+    const clearedAt = new Date("2026-09-05T10:05:00.000Z");
+    const reFiredAt = new Date("2026-09-05T10:20:00.000Z");
+
+    const raised = lifecycle.ingest(
+      alert({ notificationId: "sk-id-1" }),
+      raisedAt,
+    );
+    expect(raised.notificationId).toBe("sk-id-1");
+
+    database.acknowledgeAlert(raised.id);
+    database.silenceAlert(raised.id);
+    expect(database.getAlert(raised.id).acknowledgedAt).toBeInstanceOf(Date);
+    expect(database.getAlert(raised.id).silencedAt).toBeInstanceOf(Date);
+
+    lifecycle.ingest(
+      alert({ state: "cleared", severity: "normal" }),
+      clearedAt,
+    );
+    const reFired = lifecycle.ingest(alert(), reFiredAt);
+
+    expect(reFired.acknowledgedAt).toBeUndefined();
+    expect(reFired.silencedAt).toBeUndefined();
+  });
 });

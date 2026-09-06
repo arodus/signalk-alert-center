@@ -26,6 +26,8 @@ export function registerRoutes(
   runScheduler: () => Promise<void>,
   catalog: () => unknown,
   removeAlert: (id: string) => boolean,
+  acknowledgeAlert: (id: string) => boolean,
+  silenceAlert: (id: string) => boolean,
 ): void {
   router.get("/status", (_request, response) => {
     response.json(status());
@@ -38,6 +40,22 @@ export function registerRoutes(
       return;
     }
     response.json({ status: "removed" });
+  });
+  router.post("/alerts/:id/acknowledge", (request, response) => {
+    const id = (request as RequestLike).params?.id;
+    if (!id || !acknowledgeAlert(id)) {
+      response.status(404).json({ error: "Alert was not found" });
+      return;
+    }
+    response.json({ status: "acknowledged" });
+  });
+  router.post("/alerts/:id/silence", (request, response) => {
+    const id = (request as RequestLike).params?.id;
+    if (!id || !silenceAlert(id)) {
+      response.status(404).json({ error: "Alert was not found" });
+      return;
+    }
+    response.json({ status: "silenced" });
   });
   router.get("/deliveries", (_request, response) =>
     response.json(database()?.listDeliveries() ?? []),

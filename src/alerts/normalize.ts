@@ -22,6 +22,7 @@ export function normalizeSeverity(value: unknown): Severity {
 export function normalizeNotification(
   path: string,
   value: unknown,
+  source?: string,
 ): NormalizedAlert {
   const record =
     value && typeof value === "object"
@@ -41,13 +42,18 @@ export function normalizeNotification(
       : typeof record.description === "string"
         ? record.description
         : undefined;
+  const notificationId = typeof record.id === "string" ? record.id : undefined;
   return {
-    sourceKey: path,
+    // Multiple sources can legitimately raise the same path independently
+    // (e.g. two GPS units both losing signal); coalesce per source instead
+    // of collapsing them into a single alert.
+    sourceKey: source ? `${path}@${source}` : path,
     path,
     severity,
     state,
     message,
     sourcePayload: value,
+    notificationId,
   };
 }
 

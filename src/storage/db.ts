@@ -31,6 +31,9 @@ export class AlertDatabase {
       ["fire_count", "INTEGER NOT NULL DEFAULT 0"],
       ["last_fired_at", "TEXT"],
       ["removed_at", "TEXT"],
+      ["notification_id", "TEXT"],
+      ["acknowledged_at", "TEXT"],
+      ["silenced_at", "TEXT"],
     ] as const) {
       if (!columns.has(name)) {
         this.db.exec(`ALTER TABLE alerts ADD COLUMN ${name} ${definition}`);
@@ -73,10 +76,13 @@ export class AlertDatabase {
         AlertRecord["currentSeverity"] | undefined;
       const clearedAt = alert.state === "cleared" ? timestamp : null;
       const fired = alert.state === "active" && previousState !== "active";
+      const notificationId =
+        alert.notificationId ??
+        (existing ? (existing.notification_id as string | null) : null);
       if (existing) {
         this.db
           .prepare(
-            `UPDATE alerts SET last_seen_at=?, cleared_at=?, current_state=?, current_severity=?, max_severity=?, message=?, source_payload_json=?, fire_count=fire_count+?, last_fired_at=CASE WHEN ? THEN ? ELSE last_fired_at END, updated_at=? WHERE id=?`,
+            `UPDATE alerts SET last_seen_at=?, cleared_at=?, current_state=?, current_severity=?, max_severity=?, message=?, source_payload_json=?, fire_count=fire_count+?, last_fired_at=CASE WHEN ? THEN ? ELSE last_fired_at END, notification_id=?, acknowledged_at=CASE WHEN ? THEN NULL ELSE acknowledged_at END, silenced_at=CASE WHEN ? THEN NULL ELSE silenced_at END, updated_at=? WHERE id=?`,
           )
           .run(
             timestamp,
@@ -89,6 +95,9 @@ export class AlertDatabase {
             fired ? 1 : 0,
             fired ? 1 : 0,
             fired ? timestamp : null,
+            notificationId,
+            fired ? 1 : 0,
+            fired ? 1 : 0,
             timestamp,
             id,
           );
@@ -118,7 +127,7 @@ export class AlertDatabase {
       } else {
         this.db
           .prepare(
-            `INSERT INTO alerts (id,source_key,path,first_seen_at,last_seen_at,cleared_at,current_state,current_severity,max_severity,message,source_payload_json,fire_count,last_fired_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO alerts (id,source_key,path,first_seen_at,last_seen_at,cleared_at,current_state,current_severity,max_severity,message,source_payload_json,fire_count,last_fired_at,notification_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           )
           .run(
             id,
@@ -134,6 +143,7 @@ export class AlertDatabase {
             sourcePayload,
             alert.state === "active" ? 1 : 0,
             alert.state === "active" ? timestamp : null,
+            notificationId,
             timestamp,
             timestamp,
           );
@@ -265,7 +275,24 @@ export class AlertDatabase {
       sourcePayload: row.source_payload_json
         ? JSON.parse(String(row.source_payload_json))
         : undefined,
+      notificationId: row.notification_id
+        ? String(row.notification_id)
+        : undefined,
+      acknowledgedAt: date(row.acknowledged_at),
+      silencedAt: date(row.silenced_at),
     };
+  }
+
+  acknowledgeAlert(id: string, now = new Date()): void {
+    this.db
+      .prepare("UPDATE alerts SET acknowledged_at=?, updated_at=? WHERE id=?")
+      .run(now.toISOString(), now.toISOString(), id);
+  }
+
+  silenceAlert(id: string, now = new Date()): void {
+    this.db
+      .prepare("UPDATE alerts SET silenced_at=?, updated_at=? WHERE id=?")
+      .run(now.toISOString(), now.toISOString(), id);
   }
 
   removeAlert(id: string, now = new Date()): void {

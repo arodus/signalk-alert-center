@@ -1,0 +1,11 @@
+services:
+  signalk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signalk-persistent-notifier
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/home/node/.signalk
+    restart: unless-stopped

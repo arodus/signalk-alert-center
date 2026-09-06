@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS alerts (
   first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, cleared_at TEXT,
   current_state TEXT NOT NULL, current_severity TEXT NOT NULL, max_severity TEXT NOT NULL,
   message TEXT, source_payload_json TEXT, fire_count INTEGER NOT NULL DEFAULT 0,
-  last_fired_at TEXT, removed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  last_fired_at TEXT, removed_at TEXT, notification_id TEXT,
+  acknowledged_at TEXT, silenced_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS alert_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id TEXT NOT NULL REFERENCES alerts(id),

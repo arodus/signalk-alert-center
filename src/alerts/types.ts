@@ -28,6 +28,9 @@ export interface AlertRecord {
   maxSeverity: Severity;
   message?: string;
   sourcePayload?: unknown;
+  notificationId?: string;
+  acknowledgedAt?: Date;
+  silencedAt?: Date;
 }
 
 export type DeliveryState =
@@ -59,6 +62,7 @@ export interface NormalizedAlert {
   state: AlertState;
   message?: string;
   sourcePayload?: unknown;
+  notificationId?: string;
 }
 
 export const severityRank = (severity: Severity): number =>
