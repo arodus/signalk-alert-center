@@ -10,9 +10,8 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Signal K operations</p>
           <h1>Alert center</h1>
-          <p class="lede">Persistent history and deliberate delivery.</p>
+          <p class="lede">Current Signal K alerts and delivery history</p>
         </div>
         <div class="actions">
           <span id="updated" class="updated">Loading…</span
@@ -24,58 +23,33 @@
         </div>
       </header>
 
-      <section class="summary-grid" aria-label="System summary">
-        <article class="summary-card summary-card-live">
-          <span class="summary-label">Needs attention</span
-          ><strong id="active-count">--</strong
-          ><span class="summary-note">active and not dismissed</span>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Known alerts</span
-          ><strong id="definition-count">--</strong
-          ><span class="summary-note">rules, zones, and discovered</span>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Pending deliveries</span
-          ><strong id="pending-count">--</strong
-          ><span id="connectivity-note" class="summary-note"
-            >checking queue</span
-          >
-        </article>
+      <section class="status-strip" aria-label="System summary">
+        <div class="status-item status-item-live">
+          <strong id="active-count">--</strong><span>Active alerts</span>
+        </div>
+        <div class="status-item">
+          <strong id="definition-count">--</strong><span>Definitions</span>
+        </div>
+        <div class="status-item">
+          <strong id="pending-count">--</strong><span>Pending delivery</span>
+        </div>
+        <span id="connectivity-note" class="connectivity-note"
+          >Checking connectivity…</span
+        >
       </section>
 
       <section class="workspace">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Definitions</p>
-            <h2>Configured and discovered alerts</h2>
-          </div>
-        </div>
-        <div class="filter-row">
-          <label for="zone-filter">Zone</label
-          ><select id="zone-filter">
-            <option value="">All zones</option>
-          </select>
-        </div>
-        <div
-          id="definition-list"
-          class="definition-grid"
-          aria-live="polite"
-        ></div>
-      </section>
-
-      <section class="workspace">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Occurrences</p>
-            <h2>Attention and history</h2>
+            <h2>Current alerts</h2>
+            <p>Open an alert to see its recent history and delivery details.</p>
           </div>
         </div>
         <form id="history-filters" class="filter-row">
-          <label for="state-filter">State</label
+          <label for="state-filter">Show</label
           ><select id="state-filter" name="state">
-            <option value="">All</option>
-            <option value="active">Active</option>
+            <option value="active" selected>Active</option>
+            <option value="">All history</option>
             <option value="cleared">Cleared</option>
           </select>
           <label for="severity-filter">Severity</label
@@ -91,9 +65,11 @@
             ><input id="dismissed-filter" type="checkbox" /> Include
             dismissed</label
           >
-          <button class="button button-quiet" type="submit">Apply</button>
+          <button class="button button-quiet button-small" type="submit">
+            Apply
+          </button>
         </form>
-        <div id="occurrence-list" class="alert-list" aria-live="polite"></div>
+        <div id="occurrence-list" class="table-shell" aria-live="polite"></div>
         <button
           id="history-more"
           class="button button-quiet load-more"
@@ -104,10 +80,19 @@
         </button>
       </section>
 
+      <section class="workspace">
+        <div class="section-heading">
+          <div>
+            <h2>Alert settings</h2>
+            <p>Definitions determine which alerts are tracked and delivered.</p>
+          </div>
+        </div>
+        <div id="definition-list" class="table-shell" aria-live="polite"></div>
+      </section>
+
       <section class="workspace delivery-section">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Transport health</p>
             <h2>Delivery queue</h2>
           </div>
         </div>

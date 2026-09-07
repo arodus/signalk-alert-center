@@ -56,24 +56,23 @@ single module, mutable GET endpoints, and playback-specific queue should not be
 copied. This plugin's SQLite occurrence/event model and authenticated REST
 mutations are the better base for durable remote delivery.
 
-## Target dashboard behavior
+## Dashboard behavior
 
-The main view should contain two related but distinct lists:
+The compact main view puts **Current alerts** first and defaults to active alerts.
+Its filters can also show cleared or all historical occurrences. Multiple paths or
+sources matched by one rule remain individually inspectable. Clicking a row opens
+its recent event and notifier-delivery history.
 
-1. **Alert definitions**: every configured rule and discovered Signal K zone,
-   including disabled and never-fired definitions. A definition shows its path or
-   selector, zone thresholds, effective policy, current occurrence count, and last
-   fired time.
-2. **Occurrences requiring attention**: active occurrences and retained one-time
-   occurrences. Multiple paths or sources matched by one rule remain individually
-   inspectable.
+**Alert settings** is a separate table of every configured rule, Signal K threshold,
+and notification path learned from incoming data, including disabled and never-fired
+definitions. The UI calls these learned entries “Discovered paths”; “discovered” is
+definition provenance, not a live alert state. Signal K zone metadata remains an
+input to definition discovery, but definitions are not grouped or filtered by zone.
 
-Clicking either a definition or occurrence opens a detail drawer with recent
-history. The timeline includes raised, message/severity changes, activation-delay
+The event timeline includes raised, message/severity changes, activation-delay
 expiry or suppression, clear, acknowledge, silence, dismissal, policy actions,
-and every notifier attempt/outcome. A separate History view provides cursor-based
-pagination and filters for time, definition, path, source, state, severity,
-dismissal, and notifier.
+and every notifier attempt/outcome. History uses cursor-based pagination and filters
+for state, severity, and dismissal.
 
 For a one-time occurrence the UI may present a **Delete** action, but this is a
 soft dismissal: it disappears from the attention list, remains in history, and
@@ -309,11 +308,11 @@ read-only access and mutations require read-write access. Collection endpoints u
 bounded cursor pagination and validated filters. The complete request and response
 contract is returned through the plugin's OpenAPI document.
 
-The dashboard is served at `/signalk-persistent-notifier`. It shows all known
-definitions, current and historical occurrences, dismissed-item filtering,
-per-transport delivery state, connectivity status, and manual retry. Select an
-occurrence to open its recent event timeline. Select **Settings** on a definition
-to edit notifier, threshold, delay, one-time/rearm, and connectivity policy.
+The dashboard is served at `/signalk-persistent-notifier`. It puts active alerts
+first, followed by compact definition settings and the delivery queue. Filters expose
+cleared history and dismissed occurrences without mixing them into the default active
+view. Select an alert to open its recent event timeline. Select **Settings** on a
+definition to edit notifier, threshold, delay, one-time/rearm, and connectivity policy.
 
 Policy edits apply to future occurrences. The occurrence snapshots the effective
 one-time, severity, activation, rearm, connectivity, and notifier policy so a later

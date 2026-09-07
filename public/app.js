@@ -19,7 +19,6 @@ const elements = {
   updated: $("#updated"),
   error: $("#error"),
   login: $("#login"),
-  zone: $("#zone-filter"),
   moreOccurrences: $("#history-more"),
   drawer: $("#detail-drawer"),
   backdrop: $("#drawer-backdrop"),
@@ -82,23 +81,39 @@ function definitionFor(occurrence) {
     (definition) => definition.id === occurrence.definitionId,
   );
 }
+function definitionOrigin(sourceType) {
+  return (
+    {
+      rule: "Configured rule",
+      zone: "Signal K threshold",
+      recognized: "Discovered path",
+    }[sourceType] ?? String(sourceType ?? "Definition").replaceAll("_", " ")
+  );
+}
+function sourceName(sourceKey) {
+  const separator = String(sourceKey ?? "").indexOf("@");
+  return separator >= 0 ? sourceKey.slice(separator + 1) : "Signal K";
+}
 
 function renderDefinitions() {
-  const zone = elements.zone.value;
-  const visible = state.definitions.filter(
-    (item) => !zone || (zone === "__none__" ? !item.zone : item.zone === zone),
-  );
-  elements.definitions.innerHTML = visible.length
-    ? visible
-        .map((definition) => {
-          const policy = definition.policy ?? {};
-          return `<article class="definition-card">
-      <div><div class="title-row"><h3>${escapeHtml(definition.name ?? definition.pathPattern)}</h3><span class="source-pill">${escapeHtml(definition.sourceType)}</span></div><p>${escapeHtml(definition.description ?? definition.pathPattern)}</p><div class="alert-meta">${definition.zone ? `${escapeHtml(definition.zone)} · ` : ""}${definition.fireCount ?? 0} occurrence${definition.fireCount === 1 ? "" : "s"}${definition.lastFiredAt ? ` · Last fired ${formatDate(definition.lastFiredAt)}` : " · Never fired"}</div></div>
-      <div class="definition-side"><span class="policy-summary">${policy.enabled === false ? "Delivery off" : `${policy.activationDelaySeconds ?? 0}s delay · ${(policy.notifierIds ?? []).length} notifier(s)`}</span><button class="button button-quiet policy-button" data-id="${escapeHtml(definition.id)}" type="button">Settings</button></div>
-    </article>`;
-        })
-        .join("")
-    : '<div class="empty">No alert definitions match this zone.</div>';
+  elements.definitions.innerHTML = state.definitions.length
+    ? `<table class="data-table definition-table">
+        <thead><tr><th>Alert definition</th><th>Origin</th><th>Activity</th><th>Delivery</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <tbody>${state.definitions
+          .map((definition) => {
+            const policy = definition.policy ?? {};
+            const fireCount = definition.fireCount ?? 0;
+            const notifierCount = (policy.notifierIds ?? []).length;
+            return `<tr>
+            <td data-label="Alert definition"><strong class="cell-title">${escapeHtml(definition.name ?? definition.pathPattern)}</strong><span class="cell-detail">${escapeHtml(definition.pathPattern)}</span></td>
+            <td data-label="Origin">${escapeHtml(definitionOrigin(definition.sourceType))}</td>
+            <td data-label="Activity">${fireCount ? `${fireCount} alert${fireCount === 1 ? "" : "s"}<span class="cell-detail">Last ${formatDate(definition.lastFiredAt)}</span>` : '<span class="muted">Never triggered</span>'}</td>
+            <td data-label="Delivery">${policy.enabled === false ? '<span class="muted">Off</span>' : `<strong>${escapeHtml(policy.minimumSeverity ?? "normal")}+</strong><span class="cell-detail">${policy.activationDelaySeconds ?? 0}s delay · ${notifierCount} notifier${notifierCount === 1 ? "" : "s"}</span>`}</td>
+            <td class="action-cell"><button class="button button-quiet button-small policy-button" data-id="${escapeHtml(definition.id)}" type="button">Settings</button></td>
+          </tr>`;
+          })
+          .join("")}</tbody></table>`
+    : '<div class="empty">No alert definitions have been configured or discovered.</div>';
   document
     .querySelectorAll(".policy-button")
     .forEach((button) =>
@@ -108,22 +123,25 @@ function renderDefinitions() {
 
 function renderOccurrences() {
   elements.occurrences.innerHTML = state.occurrences.length
-    ? state.occurrences
-        .map((occurrence) => {
-          const definition = definitionFor(occurrence);
-          const dismissed = Boolean(occurrence.dismissedAt);
-          const oneTime =
-            occurrence.oneTime ??
-            definition?.oneTime ??
-            definition?.policy?.oneTime;
-          return `<article class="alert-card ${occurrence.state === "cleared" ? "is-resolved" : ""} ${dismissed ? "is-dismissed" : ""}" data-occurrence-id="${escapeHtml(occurrence.id)}" tabindex="0" role="button" aria-label="Open history for ${escapeHtml(definition?.name ?? occurrence.path)}">
-      <span class="alert-stripe ${escapeHtml(occurrence.state === "cleared" ? "resolved" : occurrence.maxSeverity)}" aria-hidden="true"></span>
-      <div class="alert-content"><h3 class="alert-title">${escapeHtml(definition?.name ?? occurrence.name ?? occurrence.path)}</h3><p class="alert-message">${escapeHtml(occurrence.message ?? occurrence.path)}</p><div class="alert-meta">${escapeHtml(occurrence.state)} · ${escapeHtml(occurrence.maxSeverity)} · Started ${formatDate(occurrence.startedAt ?? occurrence.firstSeenAt)}${dismissed ? ` · Dismissed ${formatDate(occurrence.dismissedAt)}` : ""}</div></div>
-      <div class="alert-side">${occurrence.state === "active" && !occurrence.acknowledgedAt ? `<button class="ack-alert" data-id="${escapeHtml(occurrence.id)}" type="button">Acknowledge</button>` : ""}${occurrence.state === "active" && !occurrence.silencedAt ? `<button class="silence-alert" data-id="${escapeHtml(occurrence.id)}" type="button">Silence</button>` : ""}${oneTime && !dismissed ? `<button class="remove-alert" data-id="${escapeHtml(occurrence.id)}" type="button">Delete</button>` : ""}</div>
-    </article>`;
-        })
-        .join("")
-    : '<div class="empty">No occurrences match these filters.</div>';
+    ? `<table class="data-table alert-table">
+        <thead><tr><th>Alert</th><th>Status</th><th>Started</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <tbody>${state.occurrences
+          .map((occurrence) => {
+            const definition = definitionFor(occurrence);
+            const dismissed = Boolean(occurrence.dismissedAt);
+            const oneTime =
+              occurrence.oneTime ??
+              definition?.oneTime ??
+              definition?.policy?.oneTime;
+            return `<tr class="clickable-row ${occurrence.state === "cleared" ? "is-resolved" : ""} ${dismissed ? "is-dismissed" : ""}" data-occurrence-id="${escapeHtml(occurrence.id)}" tabindex="0" aria-label="Open history for ${escapeHtml(definition?.name ?? occurrence.path)}">
+            <td data-label="Alert"><strong class="cell-title">${escapeHtml(definition?.name ?? occurrence.name ?? occurrence.path)}</strong><span class="cell-detail message-detail">${escapeHtml(occurrence.message ?? occurrence.path)}</span><span class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</span></td>
+            <td data-label="Status"><span class="alert-severity ${escapeHtml(occurrence.maxSeverity)}">${escapeHtml(occurrence.maxSeverity)}</span><span class="cell-detail">${escapeHtml(occurrence.state)}${dismissed ? " · dismissed" : ""}</span></td>
+            <td data-label="Started"><time>${formatDate(occurrence.startedAt ?? occurrence.firstSeenAt)}</time></td>
+            <td class="action-cell"><div class="row-actions">${occurrence.state === "active" && !occurrence.acknowledgedAt ? `<button class="ack-alert" data-id="${escapeHtml(occurrence.id)}" type="button">Acknowledge</button>` : ""}${occurrence.state === "active" && !occurrence.silencedAt ? `<button class="silence-alert" data-id="${escapeHtml(occurrence.id)}" type="button">Silence</button>` : ""}${oneTime && !dismissed ? `<button class="remove-alert" data-id="${escapeHtml(occurrence.id)}" type="button">Delete</button>` : ""}</div></td>
+          </tr>`;
+          })
+          .join("")}</tbody></table>`
+    : '<div class="empty">No alerts match these filters.</div>';
   document.querySelectorAll("[data-occurrence-id]").forEach((card) => {
     card.addEventListener("click", (event) => {
       if (!event.target.closest("button"))
@@ -162,28 +180,6 @@ function renderDeliveries(deliveries) {
         )
         .join("")
     : '<div class="empty">No deliveries have been queued.</div>';
-}
-function populateZones() {
-  const current = elements.zone.value;
-  const zones = [
-    ...new Set(state.definitions.map((item) => item.zone).filter(Boolean)),
-  ].sort();
-  elements.zone.innerHTML =
-    '<option value="">All zones</option>' +
-    zones
-      .map(
-        (zone) =>
-          `<option value="${escapeHtml(zone)}">${escapeHtml(zone)}</option>`,
-      )
-      .join("") +
-    (state.definitions.some((item) => !item.zone)
-      ? '<option value="__none__">No zone</option>'
-      : "");
-  elements.zone.value = [...elements.zone.options].some(
-    (option) => option.value === current,
-  )
-    ? current
-    : "";
 }
 function occurrenceParams(cursor) {
   const params = new URLSearchParams({ limit: "30" });
@@ -239,7 +235,6 @@ async function load() {
       : "delivery intents waiting";
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     elements.moreOccurrences.hidden = !state.occurrenceCursor;
-    populateZones();
     renderDefinitions();
     renderOccurrences();
     renderDeliveries(deliveries);
@@ -376,7 +371,6 @@ async function savePolicy(event) {
 }
 
 $("#refresh").addEventListener("click", load);
-elements.zone.addEventListener("change", renderDefinitions);
 $("#history-filters").addEventListener("submit", (event) => {
   event.preventDefault();
   loadOccurrences().catch(showError);
