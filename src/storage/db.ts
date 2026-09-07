@@ -227,6 +227,8 @@ export class AlertDatabase {
     const definitionId =
       options.definitionId ?? `recognized:${alert.sourceKey}`;
     const delaySeconds = Math.max(0, options.activationDelaySeconds ?? 0);
+    const minimumSeverity = options.minimumSeverity ?? "normal";
+    const connectivity = options.connectivity ?? { mode: "queue" };
     const payload =
       alert.sourcePayload === undefined
         ? null
@@ -240,7 +242,11 @@ export class AlertDatabase {
         )
         .get(alert.sourceKey) as Row | undefined;
 
-      const rearmAfterSeconds = options.rearmAfterSeconds;
+      const rearmAfterSeconds = active
+        ? active.rearm_after_seconds === null
+          ? undefined
+          : Number(active.rearm_after_seconds)
+        : options.rearmAfterSeconds;
       if (
         active &&
         alert.state === "active" &&
@@ -326,6 +332,61 @@ export class AlertDatabase {
         }
         if (suppression) this.addEvent(id, "suppressed_before_activation", now);
         if (clearing) this.addEvent(id, "cleared", now, alert.sourcePayload);
+
+        if (!clearing) {
+          const qualifies =
+            severityRank(alert.severity) >=
+            severityRank(
+              String(active.minimum_severity) as AlertRecord["minimumSeverity"],
+            );
+          const notifierCount = Number(
+            (
+              this.db
+                .prepare(
+                  "SELECT COUNT(*) AS count FROM occurrence_notifiers WHERE alert_id=?",
+                )
+                .get(id) as Row
+            ).count,
+          );
+          if (
+            qualifies &&
+            notifierCount > 0 &&
+            active.activation_state === "suppressed"
+          ) {
+            const snapshotDelay = Number(active.activation_delay_seconds);
+            const dueAt =
+              snapshotDelay > 0
+                ? new Date(now.getTime() + snapshotDelay * 1000)
+                : undefined;
+            this.db
+              .prepare(
+                `UPDATE alert_occurrences SET activation_state=?, activation_due_at=?,
+                 updated_at=? WHERE id=?`,
+              )
+              .run(
+                dueAt ? "pending" : "eligible",
+                dueAt?.toISOString() ?? null,
+                timestamp,
+                id,
+              );
+            this.addEvent(
+              id,
+              dueAt ? "activation_pending" : "activation_eligible",
+              now,
+            );
+            if (!dueAt) this.createDeliveryIntents(id, now);
+          } else if (!qualifies && active.activation_state === "pending") {
+            this.db
+              .prepare(
+                `UPDATE alert_occurrences SET activation_state='suppressed',
+                 activation_due_at=NULL, updated_at=? WHERE id=?`,
+              )
+              .run(timestamp, id);
+            this.addEvent(id, "suppressed_before_activation", now, {
+              reason: "below_minimum_severity",
+            });
+          }
+        }
       } else {
         if (alert.state === "cleared") {
           this.db.exec("COMMIT");
@@ -339,13 +400,17 @@ export class AlertDatabase {
           .get(alert.sourceKey) as Row;
         const occurrenceNumber = Number(count.count) + 1;
         const activeState = alert.state === "active";
-        const activationState = activeState
+        const qualifies =
+          activeState &&
+          transportIds.length > 0 &&
+          severityRank(alert.severity) >= severityRank(minimumSeverity);
+        const activationState = qualifies
           ? delaySeconds > 0
             ? "pending"
             : "eligible"
           : "suppressed";
         const activationDueAt =
-          activeState && delaySeconds > 0
+          qualifies && delaySeconds > 0
             ? new Date(now.getTime() + delaySeconds * 1000).toISOString()
             : null;
         this.db
@@ -354,8 +419,10 @@ export class AlertDatabase {
               (id, definition_id, occurrence_number, source_key, path, started_at,
                source_timestamp, received_at, last_seen_at, cleared_at, current_state,
                current_severity, max_severity, message, source_payload_json,
-               notification_id, activation_due_at, activation_state, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               notification_id, one_time, minimum_severity,
+               activation_delay_seconds, rearm_after_seconds, connectivity_json,
+               activation_due_at, activation_state, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -374,6 +441,11 @@ export class AlertDatabase {
             alert.message ?? null,
             payload,
             alert.notificationId ?? null,
+            Number(options.oneTime ?? false),
+            minimumSeverity,
+            delaySeconds,
+            options.rearmAfterSeconds ?? null,
+            JSON.stringify(connectivity),
             activationDueAt,
             activationState,
             timestamp,
@@ -612,6 +684,14 @@ export class AlertDatabase {
         : undefined,
       acknowledgedAt: date(row.acknowledged_at),
       silencedAt: date(row.silenced_at),
+      oneTime: Boolean(row.one_time),
+      minimumSeverity: row.minimum_severity as AlertRecord["minimumSeverity"],
+      activationDelaySeconds: Number(row.activation_delay_seconds),
+      rearmAfterSeconds:
+        row.rearm_after_seconds === null
+          ? undefined
+          : Number(row.rearm_after_seconds),
+      connectivity: json(row.connectivity_json) as AlertRecord["connectivity"],
       activationDueAt: date(row.activation_due_at),
       activationState: row.activation_state as AlertRecord["activationState"],
     };
@@ -627,6 +707,16 @@ export class AlertDatabase {
 
   dismissOccurrence(id: string, now = new Date()): void {
     this.markOccurrence(id, "dismissed_at", "dismissed", now);
+  }
+
+  recordOccurrenceEvent(
+    id: string,
+    eventType: string,
+    payload?: unknown,
+    now = new Date(),
+  ): void {
+    this.getAlert(id);
+    this.addEvent(id, eventType, now, payload);
   }
 
   removeAlert(id: string, now = new Date()): void {
@@ -666,6 +756,17 @@ export class AlertDatabase {
       )
       .get() as Row;
     return Number(row.count);
+  }
+
+  nextDeliveryDueAt(): Date | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT MIN(COALESCE(next_attempt_at, created_at)) AS due_at
+         FROM deliveries
+         WHERE state NOT IN ('delivered', 'failed_terminal', 'sending')`,
+      )
+      .get() as Row;
+    return date(row.due_at);
   }
 
   retryFailedDeliveries(): void {

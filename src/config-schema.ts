@@ -15,6 +15,18 @@ export const pluginConfigSchema = {
         },
       },
     },
+    discovery: {
+      type: "object",
+      title: "Definition discovery",
+      properties: {
+        zoneRefreshSeconds: {
+          type: "number",
+          minimum: 1,
+          title: "Zone metadata refresh interval (seconds)",
+          default: 300,
+        },
+      },
+    },
     retry: {
       type: "object",
       title: "Retry policy",
@@ -38,6 +50,52 @@ export const pluginConfigSchema = {
           type: "number",
           title: "Jitter (0-1)",
           default: 0.2,
+        },
+      },
+    },
+    defaults: {
+      type: "object",
+      title: "Default alert policy",
+      description:
+        "Fallback policy for discovered Signal K zone definitions without an explicit rule or dashboard override.",
+      properties: {
+        enabled: { type: "boolean", title: "Enabled", default: true },
+        oneTime: { type: "boolean", title: "One-time occurrence" },
+        minSeverity: {
+          type: "string",
+          title: "Minimum severity",
+          enum: [...severities],
+          default: "warn",
+        },
+        activationDelaySeconds: {
+          type: "number",
+          minimum: 0,
+          title: "Must remain active before notifying (seconds)",
+          default: 0,
+        },
+        rearmAfterSeconds: {
+          type: "number",
+          minimum: 0,
+          title: "One-time rearm interval (seconds)",
+        },
+        connectivity: {
+          type: "object",
+          title: "Connectivity behavior",
+          properties: {
+            mode: {
+              type: "string",
+              enum: ["queue", "wake", "wake_after"],
+              default: "queue",
+            },
+            delaySeconds: { type: "number", minimum: 0 },
+          },
+          required: ["mode"],
+        },
+        notifiers: {
+          type: "array",
+          title: "Default notifier IDs",
+          uniqueItems: true,
+          items: { type: "string" },
         },
       },
     },
@@ -76,6 +134,17 @@ export const pluginConfigSchema = {
           zone: { type: "string", title: "Zone" },
           oneTime: { type: "boolean", title: "One-time alert", default: false },
           enabled: { type: "boolean", title: "Enabled", default: true },
+          activationDelaySeconds: {
+            type: "number",
+            minimum: 0,
+            title: "Must remain active before notifying (seconds)",
+            default: 0,
+          },
+          rearmAfterSeconds: {
+            type: "number",
+            minimum: 0,
+            title: "One-time rearm interval (seconds)",
+          },
           match: {
             type: "string",
             title: "Signal K path match (glob)",
@@ -97,6 +166,7 @@ export const pluginConfigSchema = {
               },
               delaySeconds: {
                 type: "number",
+                minimum: 0,
                 title: "Delay before waking (seconds, wake_after only)",
               },
             },

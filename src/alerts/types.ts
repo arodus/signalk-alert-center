@@ -38,6 +38,12 @@ export interface AlertRecord {
   acknowledgedAt?: Date;
   silencedAt?: Date;
   dismissedAt?: Date;
+  /** Policy snapshot: whether this occurrence remains until dismissed. */
+  oneTime: boolean;
+  minimumSeverity: Severity;
+  activationDelaySeconds: number;
+  rearmAfterSeconds?: number;
+  connectivity: ConnectivityMode;
   activationDueAt?: Date;
   activationState?: ActivationState;
 }
@@ -115,7 +121,10 @@ export interface DeliveryAttemptRecord {
 
 export interface IngestOptions {
   activationDelaySeconds?: number;
+  connectivity?: ConnectivityMode;
   definitionId?: string;
+  minimumSeverity?: Severity;
+  oneTime?: boolean;
   rearmAfterSeconds?: number;
 }
 

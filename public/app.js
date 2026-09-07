@@ -222,10 +222,13 @@ async function load() {
     state.occurrences = pageItems(occurrences);
     state.notifiers = pageItems(notifiers);
     state.occurrenceCursor = occurrences.nextCursor;
-    elements.activeCount.textContent = state.occurrences.filter(
-      (item) => item.state === "active" && !item.dismissedAt,
-    ).length;
-    elements.definitionCount.textContent = state.definitions.length;
+    elements.activeCount.textContent =
+      status.alerts?.active ??
+      state.occurrences.filter(
+        (item) => item.state === "active" && !item.dismissedAt,
+      ).length;
+    elements.definitionCount.textContent =
+      status.alerts?.definitions ?? state.definitions.length;
     elements.pendingCount.textContent =
       status.alerts?.pendingDelivery ??
       deliveries.filter(
@@ -265,7 +268,7 @@ async function openOccurrence(id) {
     state.selectedOccurrence = id;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<p class="delivery-meta">${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)} · ${escapeHtml(delivery.state)}</p>`).join("")}` : ""}`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
     elements.events.innerHTML = '<div class="empty">Loading history…</div>';
     elements.backdrop.hidden = false;
     elements.drawer.classList.add("is-open");

@@ -26,10 +26,15 @@ const SKIP_KEYS = new Set([
 // defined, so this walks the self vessel tree the same way other plugins
 // (e.g. signalk-notification-player) walk it for notification values.
 export function listConfiguredZones(app: {
+  getPath?: (path: string) => unknown;
   getSelfPath?: (path: string) => unknown;
+  selfContext?: string;
 }): ConfiguredZonePath[] {
   const results: ConfiguredZonePath[] = [];
-  const root = app.getSelfPath?.("");
+  // getSelfPath returns the simplified value at a path. getPath on the
+  // context returns the full model entries, including `meta.zones`.
+  const root =
+    app.getPath?.(app.selfContext ?? "vessels.self") ?? app.getSelfPath?.("");
   if (!root || typeof root !== "object") return results;
 
   const walk = (node: unknown, path: string): void => {

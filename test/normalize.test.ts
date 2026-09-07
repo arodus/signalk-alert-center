@@ -40,4 +40,20 @@ describe("normalizeNotification", () => {
 
     expect(first.sourceKey).toBe(second.sourceKey);
   });
+
+  it("treats a null Signal K notification value as a clear", () => {
+    const alert = normalizeNotification(
+      "notifications.navigation.gnss",
+      null,
+      "gps1",
+      new Date("2026-09-07T00:00:00.000Z"),
+    );
+
+    expect(alert.state).toBe("cleared");
+    expect(alert.severity).toBe("normal");
+    expect(alert.sourcePayload).toBeNull();
+    expect(alert.sourceTimestamp?.toISOString()).toBe(
+      "2026-09-07T00:00:00.000Z",
+    );
+  });
 });

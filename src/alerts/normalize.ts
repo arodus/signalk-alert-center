@@ -23,17 +23,23 @@ export function normalizeNotification(
   path: string,
   value: unknown,
   source?: string,
+  sourceTimestamp?: Date,
 ): NormalizedAlert {
   const record =
     value && typeof value === "object"
       ? (value as Record<string, unknown>)
       : {};
-  const severity = normalizeSeverity(
-    record.state ?? record.severity ?? record.level,
-  );
+  const severity =
+    value === null
+      ? "normal"
+      : normalizeSeverity(record.state ?? record.severity ?? record.level);
   const stateValue = String(record.state ?? record.status ?? "").toLowerCase();
   const state =
-    stateValue === "normal" || stateValue === "cleared" || severity === "normal"
+    value === null ||
+    stateValue === "normal" ||
+    stateValue === "nominal" ||
+    stateValue === "cleared" ||
+    severity === "normal"
       ? "cleared"
       : "active";
   const message =
@@ -54,6 +60,7 @@ export function normalizeNotification(
     message,
     sourcePayload: value,
     notificationId,
+    sourceTimestamp,
   };
 }
 

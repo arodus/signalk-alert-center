@@ -132,6 +132,64 @@ describe("occurrence storage", () => {
     expect(db.listDeliveries()).toEqual([]);
   });
 
+  it("starts the delay when an occurrence rises above its snapshotted threshold", () => {
+    const db = database();
+    const started = db.ingest(
+      active({ severity: "warn" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:00:00Z"),
+      {
+        activationDelaySeconds: 60,
+        minimumSeverity: "alarm",
+        oneTime: true,
+      },
+    )!;
+    expect(started.activationState).toBe("suppressed");
+    expect(started.oneTime).toBe(true);
+
+    const escalated = db.ingest(
+      active({ severity: "alarm" }),
+      ["discord"],
+      new Date("2026-01-01T00:00:30Z"),
+      {
+        activationDelaySeconds: 0,
+        minimumSeverity: "warn",
+      },
+    )!;
+    expect(escalated.activationState).toBe("pending");
+    expect(escalated.activationDueAt).toEqual(new Date("2026-01-01T00:01:30Z"));
+    expect(escalated.minimumSeverity).toBe("alarm");
+    expect(escalated.oneTime).toBe(true);
+
+    db.processDueActivations(new Date("2026-01-01T00:01:30Z"));
+    expect(db.listDeliveries()).toMatchObject([
+      { transportInstanceId: "ntfy" },
+    ]);
+  });
+
+  it("cancels a pending delay when severity drops below its threshold", () => {
+    const db = database();
+    const occurrence = db.ingest(
+      active({ severity: "alarm" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:00:00Z"),
+      { activationDelaySeconds: 60, minimumSeverity: "alarm" },
+    )!;
+    db.ingest(
+      active({ severity: "warn" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:00:30Z"),
+      { activationDelaySeconds: 0, minimumSeverity: "normal" },
+    );
+
+    expect(db.getAlert(occurrence.id).activationState).toBe("suppressed");
+    expect(db.nextActivationDueAt()).toBeUndefined();
+    expect(db.processDueActivations(new Date("2026-01-01T00:02:00Z"))).toEqual(
+      [],
+    );
+    expect(db.listDeliveries()).toEqual([]);
+  });
+
   it("stores policies, explicit rearm, filtered pages, and delivery attempts", () => {
     const db = database();
     db.upsertDefinition({

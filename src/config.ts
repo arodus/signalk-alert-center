@@ -11,6 +11,8 @@ export interface RuleConfig {
   zone?: string;
   oneTime?: boolean;
   enabled?: boolean;
+  activationDelaySeconds?: number;
+  rearmAfterSeconds?: number;
   match: string;
   minSeverity: Severity;
   connectivity: ConnectivityMode;
@@ -18,6 +20,7 @@ export interface RuleConfig {
 }
 export interface PluginConfig {
   storage?: { path?: string };
+  discovery?: { zoneRefreshSeconds?: number };
   retry?: {
     initialSeconds?: number;
     maxSeconds?: number;
@@ -26,6 +29,15 @@ export interface PluginConfig {
   };
   notifiers?: Record<string, NotifierConfig>;
   rules?: RuleConfig[];
+  defaults?: {
+    enabled?: boolean;
+    oneTime?: boolean;
+    minSeverity?: Severity;
+    activationDelaySeconds?: number;
+    rearmAfterSeconds?: number;
+    connectivity?: ConnectivityMode;
+    notifiers?: string[];
+  };
   connectivity?: {
     enabled?: boolean;
     switch?: { path: string; onValue: unknown; offValue: unknown };
@@ -63,6 +75,9 @@ export function validateConfig(config: PluginConfig): void {
     }
   }
   validateRetry(config.retry);
+  if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
+    throw new Error("discovery.zoneRefreshSeconds must be at least 1");
+  validatePolicy(config.defaults, "defaults", notifierIds);
   for (const rule of config.rules ?? []) {
     if (!rule.match || !rule.notifiers)
       throw new Error("Rules require match and notifiers");
@@ -75,6 +90,7 @@ export function validateConfig(config: PluginConfig): void {
       rule.connectivity.delaySeconds < 0
     )
       throw new Error("wake_after delay must be non-negative");
+    validatePolicy(rule, `Rule ${rule.id ?? rule.match}`, notifierIds);
   }
   if (config.connectivity?.enabled && !config.connectivity.switch)
     throw new Error("Enabled connectivity requires a switch configuration");
@@ -98,6 +114,36 @@ export function validateConfig(config: PluginConfig): void {
     throw new Error("internetCheckIntervalSeconds must be positive");
   if ((config.connectivity?.idleCooldownSeconds ?? 0) < 0)
     throw new Error("idleCooldownSeconds must be non-negative");
+}
+
+function validatePolicy(
+  policy:
+    | Pick<
+        RuleConfig,
+        | "activationDelaySeconds"
+        | "rearmAfterSeconds"
+        | "notifiers"
+        | "minSeverity"
+      >
+    | PluginConfig["defaults"],
+  label: string,
+  notifierIds: Set<string>,
+): void {
+  if (!policy) return;
+  if (
+    policy.activationDelaySeconds !== undefined &&
+    policy.activationDelaySeconds < 0
+  )
+    throw new Error(`${label} activation delay must be non-negative`);
+  if (policy.rearmAfterSeconds !== undefined && policy.rearmAfterSeconds < 0)
+    throw new Error(`${label} rearm delay must be non-negative`);
+  if (
+    policy.minSeverity !== undefined &&
+    !severities.includes(policy.minSeverity)
+  )
+    throw new Error(`${label} has an invalid minimum severity`);
+  if (policy.notifiers?.some((id) => !notifierIds.has(id)))
+    throw new Error(`${label} references an unknown notifier`);
 }
 
 function requireString(
