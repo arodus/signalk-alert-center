@@ -5,7 +5,9 @@
 > Historical planning note: the gap table below describes the repository at base
 > commit `bef795c`. The occurrence model, policy/history API, dashboard, zone
 > discovery, startup reconciliation, and Docker acceptance path have since been
-> implemented. See the README for current behavior and the remaining roadmap.
+> implemented. The 2026-09-07 UI/configuration revision also replaced configured
+> rules with dashboard-owned per-alert policies and one unified Alerts table. See
+> the README for current behavior and the remaining roadmap.
 
 Build a persistent onboard notification center, comparable in purpose to
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
@@ -21,10 +23,10 @@ that the corresponding behavior has been implemented.
 
 ### Required behavior
 
-- Keep configured rules/zones (including never-fired definitions), current
+- Keep discovered zones (including never-fired definitions), current
   notifications, and historical occurrences distinguishable. Grouping must still
   allow every matching path and source to be inspected individually.
-- Capture notifications even with no matching delivery rule, no notifier enabled,
+- Capture notifications even with no selected notifier, no notifier enabled,
   no sound method, or no Internet connection. Do not depend on a browser being open.
 - A one-time notification means a discrete occurrence that may arrive once and
   never receive a clear update. Keep it in the list across refreshes and restarts
@@ -60,7 +62,7 @@ static findings, not a live Signal K compatibility or runtime certification.
 
 | Area | Current evidence | Missing behavior |
 | --- | --- | --- |
-| Notification list | `src/alerts/catalog.ts` includes rules and recognized alerts, but selects only the latest matching alert for each rule/zone. | Drill-down or individual rows so wildcard rules and multiple sources cannot hide occurrences. |
+| Notification list | The former `src/alerts/catalog.ts` combined rule and recognized-alert projections. | Replaced by definition/occurrence APIs and a unified Alerts table with history drill-down. |
 | One-time retention | `oneTime` is a rule flag; remove writes `removed_at`. Catalog filtering hides removed rows, and ingestion does not reset that flag. | Dismissed history access, reappearance of later occurrences, and defined handling for unconfigured one-shot events. |
 | Full history | `public/app.js` History filters current catalog rows to `cleared`; `src/api/routes.ts` has no event-history endpoint. | A real timeline including active, cleared and dismissed occurrences, with query/filter/pagination support. |
 | Event completeness | `src/storage/db.ts` records initial/state/severity events; same-state message changes and acknowledge/silence/remove actions are not event records. | Complete meaningful lifecycle audit, with immutable occurrence snapshots. |
@@ -92,8 +94,8 @@ implementing it, without delaying the required persistence and history work.
 4. Raise and clear while offline, then reconnect. The occurrence remains readable
    locally and remotely after successful delivery; each transport has its own
    durable outcomes, including later trigger/resolve work.
-5. Match two paths and two sources with one wildcard rule. All are inspectable;
-   the rule summary cannot replace the individual notification/history records.
+5. Raise one path from two sources. Both are inspectable; a definition summary
+   cannot replace the individual notification/history records.
 6. Acknowledge or silence while the upstream API fails or is unavailable. Display
    the failure/local-only result accurately and preserve the action audit.
 7. Browse more than one history page, filter a single source, include dismissed
@@ -226,7 +228,7 @@ src/
   alerts/
     types.ts
     normalize.ts
-    rules.ts
+    policy.ts
     lifecycle.ts
 
   storage/
@@ -410,46 +412,13 @@ Requirements:
 
 Persist lifecycle change before scheduling delivery.
 
-## Phase 4: rule engine
+## Phase 4: per-alert policy — implemented
 
-Rules should be ordered and deterministic.
-
-Example:
-
-```yaml
-rules:
-  - id: bilge-emergency
-    match: notifications.bilge.highWater
-    minSeverity: emergency
-    connectivity:
-      mode: wake
-    notifiers:
-      - ntfy-main
-      - pagerduty-critical
-      - discord-boat
-
-  - id: shore-power
-    match: notifications.electrical.shorePower.*
-    minSeverity: alarm
-    connectivity:
-      mode: wake_after
-      delaySeconds: 600
-    notifiers:
-      - ntfy-main
-      - discord-boat
-
-  - id: default-warning
-    match: notifications.*
-    minSeverity: warn
-    connectivity:
-      mode: queue
-    notifiers:
-      - ntfy-main
-```
-
-Decide and document whether first-match or merge semantics are used.
-
-Recommendation: allow merge/fan-out but prevent duplicate notifier instance IDs.
+The rule-engine proposal was superseded. Signal K plugin configuration contains
+global defaults and notifier credentials only. Notification paths and zone metadata
+create durable definitions; notifier selection, alert minimum severity, activation
+delay, one-time behavior, and connectivity behavior are edited per definition in the
+Alert center and stored in SQLite.
 
 ## Phase 5: transport registry
 
@@ -457,27 +426,31 @@ Configuration:
 
 ```yaml
 notifiers:
-  ntfy-main:
+  - name: Crew ntfy
     type: ntfy
     enabled: true
+    minSeverity: warn
     server: https://ntfy.sh
     topic: ...
     token: ...
 
-  pagerduty-critical:
+  - name: Emergency PagerDuty
     type: pagerduty
     enabled: true
+    minSeverity: alarm
     routingKey: ...
 
-  discord-boat:
+  - name: Boat Discord
     type: discord
     enabled: true
+    minSeverity: alert
     webhookUrl: ...
 ```
 
 Instantiate each notifier independently.
 
-The scheduler addresses notifier **instance IDs**, not only notifier type.
+The scheduler uses the configured notification service **name** as its stable key,
+not only the service type.
 
 This permits multiple ntfy topics, multiple Discord channels, etc.
 
@@ -690,7 +663,7 @@ leave it ON
 
 ## Phase 13: wake-after behavior
 
-For rules such as shore-power failure:
+For alerts such as shore-power failure:
 
 ```yaml
 connectivity:
@@ -705,7 +678,7 @@ Implementation:
 - if alert clears before due time:
   - cancel wake requirement;
   - retain alert history;
-  - it may still be queued for later notification depending on rule;
+  - it may still be queued for later notification depending on alert policy;
 - after restart, reconstruct delayed wake timers from persisted timestamps.
 
 Never rely on an in-memory timer as the sole source of truth.
@@ -715,7 +688,7 @@ Never rely on an in-memory timer as the sole source of truth.
 When connectivity becomes ONLINE:
 
 - release all eligible queued deliveries, not just the one that caused the wake;
-- respect notifier/rule policies;
+- respect notifier and per-alert policies;
 - prioritize emergency deliveries first;
 - continue lower-priority backlog while connectivity is available.
 
@@ -764,22 +737,31 @@ connectivity:
     url: https://example.com/generate_204
 
 notifiers:
-  ntfy-main:
+  - name: Crew ntfy
     type: ntfy
     server: https://ntfy.sh
     topic: ...
     token: ...
+    minSeverity: warn
 
-  pagerduty-critical:
+  - name: Emergency PagerDuty
     type: pagerduty
     routingKey: ...
+    minSeverity: alarm
 
-  discord-boat:
+  - name: Boat Discord
     type: discord
     webhookUrl: ...
+    minSeverity: alert
 
-rules:
-  ...
+defaults:
+  enabled: true
+  minSeverity: warn
+  activationDelaySeconds: 0
+  connectivity:
+    mode: queue
+  notifiers:
+    - Crew ntfy
 ```
 
 Adapt final schema to Signal K plugin configuration conventions.

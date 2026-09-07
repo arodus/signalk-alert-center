@@ -1,5 +1,35 @@
 import { severities } from "./alerts/types";
 
+const serviceName = {
+  type: "string",
+  title: "Service name",
+  description:
+    "Choose a unique, recognizable name. This name appears in each alert's Settings, for example “Crew ntfy” or “Emergency PagerDuty”.",
+  minLength: 1,
+};
+const serviceEnabled = {
+  type: "boolean",
+  title: "Use this service",
+  description:
+    "Turn this off to keep the connection details without sending notifications through it.",
+  default: true,
+};
+const serviceMinimumSeverity = {
+  type: "string",
+  title: "Lowest severity sent",
+  description:
+    "This service will never receive alerts below this level, even when an alert selects it.",
+  enum: [...severities],
+  default: "normal",
+};
+const serviceType = (value: string, label: string) => ({
+  type: "string",
+  title: "Service type",
+  description: `Send notifications using ${label}.`,
+  enum: [value],
+  default: value,
+});
+
 // JSON Schema shown by the Signal K admin UI's plugin config form.
 export const pluginConfigSchema = {
   type: "object",
@@ -57,128 +87,160 @@ export const pluginConfigSchema = {
       type: "object",
       title: "Default alert policy",
       description:
-        "Fallback policy for discovered Signal K zone definitions without an explicit rule or dashboard override.",
+        "Fallback policy for discovered Signal K definitions without a dashboard override.",
       properties: {
-        enabled: { type: "boolean", title: "Enabled", default: true },
-        oneTime: { type: "boolean", title: "One-time occurrence" },
+        enabled: {
+          type: "boolean",
+          title: "Send remote notifications by default",
+          description:
+            "Newly discovered alerts inherit this value until their Settings are changed in the Alert center.",
+          default: true,
+        },
+        oneTime: {
+          type: "boolean",
+          title: "Mark new occurrences as one-time",
+          description:
+            "Stores the one-time label on new occurrences. A later Signal K raise/clear cycle still creates a new occurrence.",
+        },
         minSeverity: {
           type: "string",
-          title: "Minimum severity",
+          title: "Lowest severity sent by default",
+          description:
+            "New alerts do not send remote notifications until they reach this Signal K severity.",
           enum: [...severities],
           default: "warn",
         },
         activationDelaySeconds: {
           type: "number",
           minimum: 0,
-          title: "Must remain active before notifying (seconds)",
+          title: "Default wait before sending (seconds)",
+          description:
+            "How long a new alert must remain active before its first remote notification is created.",
           default: 0,
         },
         rearmAfterSeconds: {
           type: "number",
           minimum: 0,
-          title: "One-time rearm interval (seconds)",
+          title: "Default repeat interval while active (seconds)",
+          description:
+            "Starts a new occurrence after this interval when an alert never clears. Leave empty to disable repeating.",
         },
         connectivity: {
           type: "object",
-          title: "Connectivity behavior",
+          title: "Default Internet connection behavior",
+          description:
+            "Choose whether new alerts wait for an existing connection or request the configured connection to wake.",
           properties: {
             mode: {
               type: "string",
+              title: "Connection action",
+              description:
+                "Queue waits for connectivity, wake starts it immediately, and wake after waits before starting it.",
               enum: ["queue", "wake", "wake_after"],
               default: "queue",
             },
-            delaySeconds: { type: "number", minimum: 0 },
+            delaySeconds: {
+              type: "number",
+              minimum: 0,
+              title: "Wait before waking (seconds)",
+              description:
+                "Used only with wake after. The alert must remain active for this long before connectivity is requested.",
+            },
           },
           required: ["mode"],
         },
         notifiers: {
           type: "array",
-          title: "Default notifier IDs",
+          title: "Services used by default",
+          description:
+            "Enter the service names that new alerts should use. You can change this later in each alert's Settings.",
           uniqueItems: true,
-          items: { type: "string" },
+          items: {
+            type: "string",
+            title: "Service name",
+          },
         },
       },
     },
     notifiers: {
-      type: "object",
-      title: "Notifiers",
-      description:
-        "Each key is a notifier ID referenced by rules. Only fill in the fields for the chosen type.",
-      additionalProperties: {
-        type: "object",
-        title: "Notifier",
-        properties: {
-          type: {
-            type: "string",
-            title: "Type",
-            enum: ["ntfy", "pagerduty", "discord"],
-          },
-          enabled: { type: "boolean", title: "Enabled", default: true },
-          server: { type: "string", title: "ntfy server URL" },
-          topic: { type: "string", title: "ntfy topic" },
-          token: { type: "string", title: "ntfy token (optional)" },
-          routingKey: { type: "string", title: "PagerDuty routing key" },
-          webhookUrl: { type: "string", title: "Discord webhook URL" },
-        },
-        required: ["type"],
-      },
-    },
-    rules: {
       type: "array",
-      title: "Rules",
+      title: "Notification services",
+      description:
+        "Add each ntfy, PagerDuty, or Discord connection once. Alerts select these connections by their service name.",
+      default: [],
       items: {
-        type: "object",
-        properties: {
-          id: { type: "string", title: "Rule ID" },
-          name: { type: "string", title: "Name" },
-          zone: { type: "string", title: "Zone" },
-          oneTime: { type: "boolean", title: "One-time alert", default: false },
-          enabled: { type: "boolean", title: "Enabled", default: true },
-          activationDelaySeconds: {
-            type: "number",
-            minimum: 0,
-            title: "Must remain active before notifying (seconds)",
-            default: 0,
-          },
-          rearmAfterSeconds: {
-            type: "number",
-            minimum: 0,
-            title: "One-time rearm interval (seconds)",
-          },
-          match: {
-            type: "string",
-            title: "Signal K path match (glob)",
-            default: "notifications.*",
-          },
-          minSeverity: {
-            type: "string",
-            title: "Minimum severity",
-            enum: [...severities],
-          },
-          connectivity: {
+        oneOf: [
+          {
             type: "object",
-            title: "Connectivity behavior",
+            title: "ntfy",
+            additionalProperties: false,
             properties: {
-              mode: {
+              name: serviceName,
+              type: serviceType("ntfy", "ntfy"),
+              enabled: serviceEnabled,
+              minSeverity: serviceMinimumSeverity,
+              server: {
                 type: "string",
-                title: "Mode",
-                enum: ["queue", "wake", "wake_after"],
+                title: "ntfy server address",
+                description:
+                  "Base address of the ntfy server, for example https://ntfy.sh or your self-hosted server.",
+                default: "https://ntfy.sh",
               },
-              delaySeconds: {
-                type: "number",
-                minimum: 0,
-                title: "Delay before waking (seconds, wake_after only)",
+              topic: {
+                type: "string",
+                title: "ntfy topic",
+                description:
+                  "Topic that receives the boat's notifications. Treat an unprotected topic name as public.",
+              },
+              token: {
+                type: "string",
+                title: "ntfy access token",
+                description:
+                  "Optional access token required by a protected ntfy topic.",
+                format: "password",
               },
             },
-            required: ["mode"],
+            required: ["name", "type", "server", "topic"],
           },
-          notifiers: {
-            type: "array",
-            title: "Notifier IDs to use",
-            items: { type: "string" },
+          {
+            type: "object",
+            title: "PagerDuty",
+            additionalProperties: false,
+            properties: {
+              name: serviceName,
+              type: serviceType("pagerduty", "PagerDuty"),
+              enabled: serviceEnabled,
+              minSeverity: serviceMinimumSeverity,
+              routingKey: {
+                type: "string",
+                title: "PagerDuty Events API integration key",
+                description:
+                  "Integration key from the PagerDuty service's Events API v2 integration.",
+                format: "password",
+              },
+            },
+            required: ["name", "type", "routingKey"],
           },
-        },
-        required: ["match", "minSeverity", "connectivity", "notifiers"],
+          {
+            type: "object",
+            title: "Discord",
+            additionalProperties: false,
+            properties: {
+              name: serviceName,
+              type: serviceType("discord", "Discord"),
+              enabled: serviceEnabled,
+              minSeverity: serviceMinimumSeverity,
+              webhookUrl: {
+                type: "string",
+                title: "Discord channel webhook address",
+                description:
+                  "Webhook address created in the Discord channel that should receive alerts.",
+                format: "password",
+              },
+            },
+            required: ["name", "type", "webhookUrl"],
+          },
+        ],
       },
     },
     connectivity: {

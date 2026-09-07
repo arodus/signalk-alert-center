@@ -60,7 +60,7 @@ export interface AlertEventRecord {
 
 export interface AlertDefinitionRecord {
   id: string;
-  sourceType: "rule" | "zone" | "recognized";
+  sourceType: "zone" | "recognized";
   pathPattern: string;
   name: string;
   metadata?: unknown;
@@ -126,6 +126,7 @@ export interface IngestOptions {
   minimumSeverity?: Severity;
   oneTime?: boolean;
   rearmAfterSeconds?: number;
+  notifierMinimumSeverities?: Record<string, Severity>;
 }
 
 export interface OccurrenceQuery {

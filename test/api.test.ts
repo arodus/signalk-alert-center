@@ -30,12 +30,14 @@ function fixture() {
     get: registrar("GET"),
     post: registrar("POST"),
     patch: registrar("PATCH"),
+    delete: registrar("DELETE"),
     access(level) {
       access.push(level);
       return {
         get: registrar("GET"),
         post: registrar("POST"),
         patch: registrar("PATCH"),
+        delete: registrar("DELETE"),
       };
     },
   };
@@ -47,6 +49,7 @@ function fixture() {
     },
     getDefinition: (id) => (id === "bilge" ? { id } : undefined),
     updatePolicy: (id, policy) => (id === "bilge" ? { id, policy } : undefined),
+    forgetDefinition: (id) => (id === "bilge" ? "deleted" : "not_found"),
     listOccurrences(query) {
       queries.push(query);
       return { items: [] };
@@ -54,8 +57,10 @@ function fixture() {
     getOccurrence: () => undefined,
     listOccurrenceEvents: () => ({ items: [] }),
     dismissOccurrence: () => ({ status: "dismissed" }),
-    acknowledgeOccurrence: () => ({ status: "acknowledged" }),
-    silenceOccurrence: () => ({ status: "silenced" }),
+    acknowledgeOccurrence: (id) =>
+      id === "inactive" ? "inactive" : { status: "acknowledged" },
+    silenceOccurrence: (id) =>
+      id === "inactive" ? "inactive" : { status: "silenced" },
   };
   registerAlertCenterRoutes(router, {
     repository: () => repository,
@@ -80,7 +85,7 @@ describe("alert-center routes", () => {
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
     expect(access.filter((value) => value === "readonly")).toHaveLength(6);
-    expect(access.filter((value) => value === "readwrite")).toHaveLength(4);
+    expect(access.filter((value) => value === "readwrite")).toHaveLength(5);
   });
 
   it("parses bounded occurrence filters", async () => {
@@ -150,5 +155,27 @@ describe("alert-center routes", () => {
     expect(response.body).toMatchObject({
       error: { code: "UNKNOWN_NOTIFIER", details: { ids: ["missing"] } },
     });
+  });
+
+  it("forgets discovered definitions through a write-protected route", async () => {
+    const response = await fixture().invoke("DELETE", "/definitions/:id", {
+      params: { id: "bilge" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ status: "deleted" });
+  });
+
+  it("rejects acknowledge and silence for inactive occurrences", async () => {
+    for (const action of ["acknowledge", "silence"]) {
+      const response = await fixture().invoke(
+        "POST",
+        `/occurrences/:id/${action}`,
+        { params: { id: "inactive" } },
+      );
+      expect(response.statusCode).toBe(409);
+      expect(response.body).toMatchObject({
+        error: { code: "ALERT_INACTIVE" },
+      });
+    }
   });
 });

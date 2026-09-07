@@ -167,6 +167,30 @@ describe("occurrence storage", () => {
     ]);
   });
 
+  it("snapshots notifier severity floors and adds delivery on escalation", () => {
+    const db = database();
+    const occurrence = db.ingest(
+      active({ severity: "warn" }),
+      ["ntfy", "pd"],
+      undefined,
+      {
+        minimumSeverity: "warn",
+        notifierMinimumSeverities: { ntfy: "warn", pd: "alarm" },
+      },
+    )!;
+    expect(db.listDeliveries()).toMatchObject([
+      { alertId: occurrence.id, transportInstanceId: "ntfy" },
+    ]);
+
+    db.ingest(active({ severity: "alarm" }), ["different-policy"], undefined, {
+      minimumSeverity: "normal",
+      notifierMinimumSeverities: { "different-policy": "normal" },
+    });
+    expect(
+      db.listDeliveries().map((delivery) => delivery.transportInstanceId),
+    ).toEqual(["ntfy", "pd"]);
+  });
+
   it("cancels a pending delay when severity drops below its threshold", () => {
     const db = database();
     const occurrence = db.ingest(
@@ -193,12 +217,12 @@ describe("occurrence storage", () => {
   it("stores policies, explicit rearm, filtered pages, and delivery attempts", () => {
     const db = database();
     db.upsertDefinition({
-      id: "anchor-rule",
-      sourceType: "rule",
+      id: "anchor-alert",
+      sourceType: "recognized",
       pathPattern: "notifications.navigation.anchor",
       name: "Anchor",
     });
-    const policy = db.setPolicy("anchor-rule", {
+    const policy = db.setPolicy("anchor-alert", {
       enabled: true,
       oneTime: false,
       minimumSeverity: "warn",
@@ -214,7 +238,7 @@ describe("occurrence storage", () => {
       ["ntfy"],
       new Date("2026-01-01T00:00:00Z"),
       {
-        definitionId: "anchor-rule",
+        definitionId: "anchor-alert",
         rearmAfterSeconds: 60,
       },
     )!;
@@ -223,13 +247,13 @@ describe("occurrence storage", () => {
       ["ntfy"],
       new Date("2026-01-01T00:01:00Z"),
       {
-        definitionId: "anchor-rule",
+        definitionId: "anchor-alert",
         rearmAfterSeconds: 60,
       },
     )!;
     expect(second.id).not.toBe(first.id);
     expect(
-      db.queryOccurrences({ definitionId: "anchor-rule", limit: 1 }),
+      db.queryOccurrences({ definitionId: "anchor-alert", limit: 1 }),
     ).toMatchObject({
       items: [{ id: second.id }],
       nextCursor: second.id,
@@ -261,5 +285,29 @@ describe("occurrence storage", () => {
     const occurrence = db.ingest(active({ sourceTimestamp }), [], receivedAt)!;
     expect(occurrence.sourceTimestamp).toEqual(sourceTimestamp);
     expect(occurrence.receivedAt).toEqual(receivedAt);
+  });
+
+  it("forgets only inactive discovered definitions and their history", () => {
+    const db = database();
+    const occurrence = db.ingest(active(), ["ntfy"])!;
+    const definitionId = occurrence.definitionId!;
+    expect(db.forgetDiscoveredDefinition(definitionId)).toBe("active");
+
+    db.ingest(active({ state: "cleared", severity: "normal" }), []);
+    expect(db.forgetDiscoveredDefinition(definitionId)).toBe("deleted");
+    expect(db.listOccurrences()).toEqual([]);
+    expect(db.listDefinitions()).toEqual([]);
+    expect(db.listDeliveries()).toEqual([]);
+  });
+
+  it("does not forget definitions sourced from Signal K metadata", () => {
+    const db = database();
+    db.upsertDefinition({
+      id: "zone:anchor",
+      sourceType: "zone",
+      pathPattern: "notifications.navigation.anchor",
+      name: "Anchor",
+    });
+    expect(db.forgetDiscoveredDefinition("zone:anchor")).toBe("not_discovered");
   });
 });

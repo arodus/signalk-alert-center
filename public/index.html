@@ -10,9 +10,8 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Signal K operations</p>
           <h1>Alert center</h1>
-          <p class="lede">Persistent history and deliberate delivery.</p>
+          <p class="lede">Current Signal K alerts and delivery history</p>
         </div>
         <div class="actions">
           <span id="updated" class="updated">Loading…</span
@@ -24,59 +23,33 @@
         </div>
       </header>
 
-      <section class="summary-grid" aria-label="System summary">
-        <article class="summary-card summary-card-live">
-          <span class="summary-label">Needs attention</span
-          ><strong id="active-count">--</strong
-          ><span class="summary-note">active and not dismissed</span>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Known alerts</span
-          ><strong id="definition-count">--</strong
-          ><span class="summary-note">rules, zones, and discovered</span>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Pending deliveries</span
-          ><strong id="pending-count">--</strong
-          ><span id="connectivity-note" class="summary-note"
-            >checking queue</span
-          >
-        </article>
+      <section class="status-strip" aria-label="System summary">
+        <div class="status-item status-item-live">
+          <strong id="active-count">--</strong><span>Active alerts</span>
+        </div>
+        <div class="status-item">
+          <strong id="definition-count">--</strong><span>Definitions</span>
+        </div>
+        <div class="status-item">
+          <strong id="pending-count">--</strong><span>Pending delivery</span>
+        </div>
+        <span id="connectivity-note" class="connectivity-note"
+          >Checking connectivity…</span
+        >
       </section>
 
       <section class="workspace">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Definitions</p>
-            <h2>Configured and discovered alerts</h2>
-          </div>
-        </div>
-        <div class="filter-row">
-          <label for="zone-filter">Zone</label
-          ><select id="zone-filter">
-            <option value="">All zones</option>
-          </select>
-        </div>
-        <div
-          id="definition-list"
-          class="definition-grid"
-          aria-live="polite"
-        ></div>
-      </section>
-
-      <section class="workspace">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Occurrences</p>
-            <h2>Attention and history</h2>
+            <h2>Alerts</h2>
+            <p>Current status, history, and delivery settings in one place.</p>
           </div>
         </div>
         <form id="history-filters" class="filter-row">
-          <label for="state-filter">State</label
+          <label for="state-filter">Show</label
           ><select id="state-filter" name="state">
-            <option value="">All</option>
-            <option value="active">Active</option>
-            <option value="cleared">Cleared</option>
+            <option value="active" selected>Active</option>
+            <option value="">All known alerts</option>
           </select>
           <label for="severity-filter">Severity</label
           ><select id="severity-filter" name="severity">
@@ -91,9 +64,8 @@
             ><input id="dismissed-filter" type="checkbox" /> Include
             dismissed</label
           >
-          <button class="button button-quiet" type="submit">Apply</button>
         </form>
-        <div id="occurrence-list" class="alert-list" aria-live="polite"></div>
+        <div id="definition-list" class="table-shell" aria-live="polite"></div>
         <button
           id="history-more"
           class="button button-quiet load-more"
@@ -107,7 +79,6 @@
       <section class="workspace delivery-section">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Transport health</p>
             <h2>Delivery queue</h2>
           </div>
         </div>
@@ -142,6 +113,7 @@
         </button>
       </div>
       <div id="drawer-body"></div>
+      <p id="drawer-result" class="form-result" role="status"></p>
       <div id="event-list" class="event-list" aria-live="polite"></div>
       <button
         id="events-more"
@@ -171,7 +143,12 @@
         </div>
         <input id="policy-definition-id" type="hidden" />
         <label class="form-field"
-          ><span>Activation delay (seconds)</span
+          ><span
+            >Wait before sending
+            <small class="field-help"
+              >The alert must remain active for this many seconds before any
+              notification is sent.</small
+            ></span
           ><input
             id="activation-delay"
             type="number"
@@ -180,7 +157,12 @@
             required
         /></label>
         <label class="form-field"
-          ><span>Minimum severity</span
+          ><span
+            >Lowest severity sent
+            <small class="field-help"
+              >Ignore this alert until it reaches the selected Signal K
+              severity.</small
+            ></span
           ><select id="minimum-severity">
             <option>normal</option>
             <option>warn</option>
@@ -189,20 +171,40 @@
             <option>emergency</option>
           </select></label
         >
-        <label class="check-label"
-          ><input id="policy-one-time" type="checkbox" /> Treat as one-time
-          alert</label
-        >
+        <div class="form-field">
+          <label class="check-label"
+            ><input id="policy-one-time" type="checkbox" /> Mark occurrences as
+            one-time</label
+          >
+          <small class="field-help"
+            >This label is stored with each occurrence; a later Signal K
+            raise/clear cycle still creates a new occurrence.</small
+          >
+        </div>
         <label class="form-field"
-          ><span>Rearm after (seconds, blank disables)</span
+          ><span
+            >Repeat while still active
+            <small class="field-help"
+              >Start a new occurrence after this many seconds if the condition
+              never clears. Leave blank to disable repeating.</small
+            ></span
           ><input id="rearm-after" type="number" min="0" max="31536000"
         /></label>
         <fieldset>
-          <legend>Notifiers</legend>
+          <legend>Notification services</legend>
+          <p class="field-help">
+            Select the globally configured services that should receive this
+            alert.
+          </p>
           <div id="notifier-options"></div>
         </fieldset>
         <label class="form-field"
-          ><span>Connectivity</span
+          ><span
+            >Internet connection behavior
+            <small class="field-help"
+              >Queue waits for an existing connection. Wake requests the
+              configured connection immediately or after a delay.</small
+            ></span
           ><select id="connectivity-mode">
             <option value="queue">Queue only</option>
             <option value="wake">Wake immediately</option>
@@ -210,18 +212,38 @@
           </select></label
         >
         <label id="wake-delay-field" class="form-field" hidden
-          ><span>Wake delay (seconds)</span
+          ><span
+            >Wait before waking the connection
+            <small class="field-help"
+              >Only wake the configured connection if the alert is still active
+              after this many seconds.</small
+            ></span
           ><input id="wake-delay" type="number" min="0" max="604800"
         /></label>
-        <label class="check-label"
-          ><input id="policy-enabled" type="checkbox" /> Delivery enabled</label
-        >
+        <div class="form-field">
+          <label class="check-label"
+            ><input id="policy-enabled" type="checkbox" /> Send remote
+            notifications</label
+          >
+          <small class="field-help"
+            >Turn this off to keep tracking the alert without creating new ntfy,
+            PagerDuty, or Discord deliveries.</small
+          >
+        </div>
         <p id="policy-result" class="form-result" role="status"></p>
         <div class="dialog-actions">
+          <button
+            id="policy-forget"
+            class="button button-danger"
+            type="button"
+            hidden
+          >
+            Forget alert
+          </button>
           <button id="policy-cancel" class="button button-quiet" type="button">
             Cancel</button
           ><button id="policy-save" class="button button-primary" type="submit">
-            Save policy
+            Save settings
           </button>
         </div>
       </form>

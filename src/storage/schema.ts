@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS occurrence_notifiers (
   PRIMARY KEY (alert_id, transport_instance_id)
 );
 
+CREATE TABLE IF NOT EXISTS occurrence_notifier_thresholds (
+  alert_id TEXT NOT NULL REFERENCES alert_occurrences(id) ON DELETE CASCADE,
+  transport_instance_id TEXT NOT NULL,
+  minimum_severity TEXT NOT NULL DEFAULT 'normal',
+  PRIMARY KEY (alert_id, transport_instance_id)
+);
+
 CREATE TABLE IF NOT EXISTS deliveries (
   id TEXT PRIMARY KEY,
   alert_id TEXT NOT NULL REFERENCES alert_occurrences(id),

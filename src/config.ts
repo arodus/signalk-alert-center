@@ -1,23 +1,26 @@
 import { ConnectivityMode, Severity, severities } from "./alerts/types";
 
-export interface NotifierConfig {
-  type: "ntfy" | "pagerduty" | "discord";
+interface NotifierBaseConfig {
+  /** Unique user-facing name used by alert policies. */
+  name: string;
   enabled?: boolean;
-  [key: string]: unknown;
+  minSeverity?: Severity;
 }
-export interface RuleConfig {
-  id?: string;
-  name?: string;
-  zone?: string;
-  oneTime?: boolean;
-  enabled?: boolean;
-  activationDelaySeconds?: number;
-  rearmAfterSeconds?: number;
-  match: string;
-  minSeverity: Severity;
-  connectivity: ConnectivityMode;
-  notifiers: string[];
-}
+export type NotifierConfig =
+  | (NotifierBaseConfig & {
+      type: "ntfy";
+      server: string;
+      topic: string;
+      token?: string;
+    })
+  | (NotifierBaseConfig & {
+      type: "pagerduty";
+      routingKey: string;
+    })
+  | (NotifierBaseConfig & {
+      type: "discord";
+      webhookUrl: string;
+    });
 export interface PluginConfig {
   storage?: { path?: string };
   discovery?: { zoneRefreshSeconds?: number };
@@ -27,8 +30,7 @@ export interface PluginConfig {
     multiplier?: number;
     jitter?: number;
   };
-  notifiers?: Record<string, NotifierConfig>;
-  rules?: RuleConfig[];
+  notifiers?: NotifierConfig[];
   defaults?: {
     enabled?: boolean;
     oneTime?: boolean;
@@ -49,49 +51,72 @@ export interface PluginConfig {
 }
 
 export function validateConfig(config: PluginConfig): void {
-  const notifierIds = new Set(Object.keys(config.notifiers ?? {}));
-  for (const [id, notifier] of Object.entries(config.notifiers ?? {})) {
+  if (config.notifiers !== undefined && !Array.isArray(config.notifiers))
+    throw new Error(
+      "Notification services must be configured as a list; open the plugin settings and add each service by name",
+    );
+  const notifierNames = new Set<string>();
+  const normalizedNotifierNames = new Set<string>();
+  for (const notifier of config.notifiers ?? []) {
+    requireString(notifier.name, "Each notification service needs a name");
+    if (notifier.name !== notifier.name.trim())
+      throw new Error(
+        "Notification service names cannot start or end with spaces",
+      );
+    const normalizedName = notifier.name.toLocaleLowerCase();
+    if (normalizedNotifierNames.has(normalizedName))
+      throw new Error(
+        `Notification service name must be unique: ${notifier.name}`,
+      );
+    notifierNames.add(notifier.name);
+    normalizedNotifierNames.add(normalizedName);
     if (
       !notifier.type ||
       !["ntfy", "pagerduty", "discord"].includes(notifier.type)
     )
-      throw new Error(`Invalid notifier type: ${id}`);
+      throw new Error(`Invalid notification service type: ${notifier.name}`);
+    if (
+      notifier.minSeverity !== undefined &&
+      !severities.includes(notifier.minSeverity)
+    )
+      throw new Error(
+        `Notification service ${notifier.name} has an invalid minimum severity`,
+      );
     if (notifier.type === "ntfy") {
-      requireString(notifier.server, `Notifier ${id} requires server`);
-      requireString(notifier.topic, `Notifier ${id} requires topic`);
-      requireUrl(notifier.server, `Notifier ${id} has an invalid server URL`, [
-        "http:",
-        "https:",
-      ]);
+      requireString(
+        notifier.server,
+        `Notification service ${notifier.name} requires an ntfy server URL`,
+      );
+      requireString(
+        notifier.topic,
+        `Notification service ${notifier.name} requires an ntfy topic`,
+      );
+      requireUrl(
+        notifier.server,
+        `Notification service ${notifier.name} has an invalid ntfy server URL`,
+        ["http:", "https:"],
+      );
     }
     if (notifier.type === "pagerduty")
-      requireString(notifier.routingKey, `Notifier ${id} requires routingKey`);
+      requireString(
+        notifier.routingKey,
+        `Notification service ${notifier.name} requires a PagerDuty integration key`,
+      );
     if (notifier.type === "discord") {
-      requireString(notifier.webhookUrl, `Notifier ${id} requires webhookUrl`);
+      requireString(
+        notifier.webhookUrl,
+        `Notification service ${notifier.name} requires a Discord webhook URL`,
+      );
       requireUrl(
         notifier.webhookUrl,
-        `Notifier ${id} has an invalid webhook URL`,
+        `Notification service ${notifier.name} has an invalid Discord webhook URL`,
       );
     }
   }
   validateRetry(config.retry);
   if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
     throw new Error("discovery.zoneRefreshSeconds must be at least 1");
-  validatePolicy(config.defaults, "defaults", notifierIds);
-  for (const rule of config.rules ?? []) {
-    if (!rule.match || !rule.notifiers)
-      throw new Error("Rules require match and notifiers");
-    if (!severities.includes(rule.minSeverity))
-      throw new Error(`Invalid rule severity: ${rule.minSeverity}`);
-    if (rule.notifiers.some((id) => !notifierIds.has(id)))
-      throw new Error(`Rule references an unknown notifier: ${rule.match}`);
-    if (
-      rule.connectivity.mode === "wake_after" &&
-      rule.connectivity.delaySeconds < 0
-    )
-      throw new Error("wake_after delay must be non-negative");
-    validatePolicy(rule, `Rule ${rule.id ?? rule.match}`, notifierIds);
-  }
+  validatePolicy(config.defaults, "defaults", notifierNames);
   if (config.connectivity?.enabled && !config.connectivity.switch)
     throw new Error("Enabled connectivity requires a switch configuration");
   if (config.connectivity?.enabled && !config.connectivity.probe)
@@ -119,7 +144,7 @@ export function validateConfig(config: PluginConfig): void {
 function validatePolicy(
   policy:
     | Pick<
-        RuleConfig,
+        NonNullable<PluginConfig["defaults"]>,
         | "activationDelaySeconds"
         | "rearmAfterSeconds"
         | "notifiers"

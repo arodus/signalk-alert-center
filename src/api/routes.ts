@@ -8,7 +8,7 @@ export interface DefinitionQuery {
   limit: number;
   cursor?: string;
   zone?: string;
-  sourceType?: "rule" | "zone" | "recognized";
+  sourceType?: "zone" | "recognized";
   enabled?: boolean;
 }
 export interface OccurrenceQuery {
@@ -51,6 +51,9 @@ export interface AlertCenterRepository {
     id: string,
     patch: AlertPolicyPatch,
   ): MaybePromise<unknown | undefined>;
+  forgetDefinition(
+    id: string,
+  ): MaybePromise<"deleted" | "active" | "not_discovered" | "not_found">;
   listOccurrences(query: OccurrenceQuery): MaybePromise<Page<unknown>>;
   getOccurrence(id: string): MaybePromise<unknown | undefined>;
   listOccurrenceEvents(
@@ -60,8 +63,10 @@ export interface AlertCenterRepository {
   dismissOccurrence(id: string): MaybePromise<ActionResult | false | undefined>;
   acknowledgeOccurrence(
     id: string,
-  ): MaybePromise<ActionResult | false | undefined>;
-  silenceOccurrence(id: string): MaybePromise<ActionResult | false | undefined>;
+  ): MaybePromise<ActionResult | "inactive" | false | undefined>;
+  silenceOccurrence(
+    id: string,
+  ): MaybePromise<ActionResult | "inactive" | false | undefined>;
 }
 
 interface ResponseLike {
@@ -73,9 +78,10 @@ export interface RouterLike {
   get: (...args: unknown[]) => void;
   post: (...args: unknown[]) => void;
   patch?: (...args: unknown[]) => void;
+  delete?: (...args: unknown[]) => void;
   access?: (
     level: "readonly" | "readwrite",
-  ) => Pick<RouterLike, "get" | "post" | "patch">;
+  ) => Pick<RouterLike, "get" | "post" | "patch" | "delete">;
 }
 interface RequestLike {
   params?: Record<string, string | undefined>;
@@ -134,7 +140,7 @@ const wrap =
 
 function addRoute(
   router: RouterLike,
-  method: "get" | "post" | "patch",
+  method: "get" | "post" | "patch" | "delete",
   path: string,
   access: "readonly" | "readwrite",
   handler: Handler,
@@ -210,7 +216,6 @@ function parseDefinitions(request: RequestLike): DefinitionQuery {
     ...pagination(q),
     zone: textParam(q.zone, "zone"),
     sourceType: enumParam(q.sourceType, "sourceType", [
-      "rule",
       "zone",
       "recognized",
     ] as const),
@@ -358,6 +363,30 @@ export function registerAlertCenterRoutes(
   );
   addRoute(
     router,
+    "delete",
+    "/definitions/:id",
+    "readwrite",
+    wrap(async (req, res) => {
+      const result = await repo().forgetDefinition(req.params?.id ?? "");
+      if (result === "not_found")
+        throw new ApiError(404, "NOT_FOUND", "Alert definition was not found");
+      if (result === "not_discovered")
+        throw new ApiError(
+          400,
+          "NOT_DISCOVERED",
+          "Only discovered alert definitions can be forgotten",
+        );
+      if (result === "active")
+        throw new ApiError(
+          409,
+          "ALERT_ACTIVE",
+          "Clear the active alert before forgetting its definition",
+        );
+      res.json({ status: "deleted" });
+    }),
+  );
+  addRoute(
+    router,
     "get",
     "/definitions/:id",
     "readonly",
@@ -388,7 +417,7 @@ export function registerAlertCenterRoutes(
           throw new ApiError(
             400,
             "UNKNOWN_NOTIFIER",
-            "One or more notifier ids are unknown",
+            "One or more notification service names are unknown",
             { ids: missing },
           );
       }
@@ -461,6 +490,12 @@ export function registerAlertCenterRoutes(
       "readwrite",
       wrap(async (req, res) => {
         const result = await actions[action](req.params?.id ?? "");
+        if (result === "inactive")
+          throw new ApiError(
+            409,
+            "ALERT_INACTIVE",
+            `Only active alerts can be ${action === "acknowledge" ? "acknowledged" : "silenced"}`,
+          );
         if (!result)
           throw new ApiError(
             404,

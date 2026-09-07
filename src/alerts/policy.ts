@@ -1,5 +1,4 @@
-import picomatch from "picomatch";
-import { PluginConfig, RuleConfig } from "../config";
+import { PluginConfig } from "../config";
 import { AlertDatabase } from "../storage/db";
 import {
   AlertDefinitionRecord,
@@ -17,14 +16,11 @@ export interface EffectivePolicy {
   rearmAfterSeconds?: number;
   connectivity: ConnectivityMode;
   notifierIds: string[];
-  provenance: "override" | "rule" | "default";
+  provenance: "override" | "default";
 }
 
 export const pathDefinitionId = (notificationPath: string): string =>
   `path:${notificationPath}`;
-
-export const ruleDefinitionId = (rule: RuleConfig, index: number): string =>
-  `rule:${rule.id ?? index}`;
 
 export class AlertPolicyResolver {
   constructor(
@@ -64,66 +60,18 @@ export class AlertPolicyResolver {
     };
   }
 
-  forRule(rule: RuleConfig, index: number): EffectivePolicy {
-    const configured: EffectivePolicy = {
-      ...this.defaults(),
-      enabled: rule.enabled !== false,
-      oneTime: rule.oneTime === true,
-      minimumSeverity: rule.minSeverity,
-      activationDelaySeconds: rule.activationDelaySeconds ?? 0,
-      rearmAfterSeconds: rule.rearmAfterSeconds,
-      connectivity: rule.connectivity,
-      notifierIds: [...rule.notifiers],
-      provenance: "rule",
-    };
-    return this.applyStored(
-      configured,
-      this.database.getPolicy(ruleDefinitionId(rule, index)),
-    );
-  }
-
   forPath(path: string, _severity?: Severity): EffectivePolicy {
-    let effective = this.defaults();
-    const notifierIds = new Set(effective.notifierIds);
-
-    for (const [index, rule] of (this.config.rules ?? []).entries()) {
-      if (!picomatch(rule.match)(path)) continue;
-      const candidate = this.forRule(rule, index);
-      // Later matching rules retain the existing configuration precedence for
-      // scalar fields. Eligible notifier targets are safely unioned.
-      effective = { ...candidate, notifierIds: [...notifierIds] };
-      if (candidate.enabled) {
-        candidate.notifierIds.forEach((id) => notifierIds.add(id));
-      }
-      effective.notifierIds = [...notifierIds];
-    }
-
-    effective = this.applyStored(
-      effective,
+    return this.applyStored(
+      this.defaults(),
       this.database.getPolicy(pathDefinitionId(path)),
     );
-    return effective;
   }
 
   forDefinition(definition: AlertDefinitionRecord): EffectivePolicy {
-    const ruleIndex = (this.config.rules ?? []).findIndex(
-      (rule, index) => ruleDefinitionId(rule, index) === definition.id,
-    );
-    return ruleIndex >= 0
-      ? this.forRule(this.config.rules![ruleIndex], ruleIndex)
-      : this.forPath(definition.pathPattern);
+    return this.forPath(definition.pathPattern);
   }
 
   seedDefinitions(zones: ConfiguredZonePath[]): void {
-    (this.config.rules ?? []).forEach((rule, index) => {
-      this.database.upsertDefinition({
-        id: ruleDefinitionId(rule, index),
-        sourceType: "rule",
-        pathPattern: rule.match,
-        name: rule.name ?? rule.match,
-        metadata: { zone: rule.zone },
-      });
-    });
     zones.forEach((zone) => {
       const path = `notifications.${zone.path}`;
       this.database.upsertDefinition({
@@ -141,16 +89,7 @@ export class AlertPolicyResolver {
     try {
       this.database.getDefinition(id);
       return id;
-    } catch {
-      // A configured rule owns paths that do not have a more-specific zone
-      // definition. Later matching rules retain configuration precedence.
-      let owningRule: string | undefined;
-      (this.config.rules ?? []).forEach((rule, index) => {
-        if (picomatch(rule.match)(path))
-          owningRule = ruleDefinitionId(rule, index);
-      });
-      if (owningRule) return owningRule;
-    }
+    } catch {}
     this.database.upsertDefinition({
       id,
       sourceType: "recognized",

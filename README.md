@@ -6,14 +6,14 @@ An offline-first Signal K plugin for durable alert delivery through ntfy, PagerD
 
 This project provides a persistent onboard notification center inspired by
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
-with separate definition and occurrence lists, retained one-time events, recent
-history, and offline remote delivery. It discovers configured rules and Signal K
-`meta.zones`, including definitions that have never fired. Every raise/clear cycle
+with one alert list, retained event history, and offline remote delivery. It discovers
+Signal K `meta.zones` and incoming notification paths, including definitions that
+have never fired. Every raise/clear cycle
 is stored as a distinct occurrence, while duplicate updates within the cycle are
 coalesced. Clicking an occurrence opens its durable event and notifier history.
 
 One-time behavior is snapshotted when an occurrence starts. The occurrence remains
-visible until **Delete** is selected; deletion is a soft dismissal, so its history
+visible until **Dismiss** is selected; dismissal is soft, so its history
 and pending delivery work remain intact. A later raise creates a visible new
 occurrence. Per-definition settings cover enabled state, minimum severity,
 notifiers, activation delay, one-time/rearm behavior, and connectivity mode.
@@ -40,7 +40,7 @@ following boundaries explicit:
 
 | Area            | Implemented behavior                                                                                                                                                                |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions     | Configured rules, discovered zones, and recognized notification paths are durable and visible before they fire.                                                                     |
+| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                          |
 | Ingestion       | An all-source subscription is established before startup reconciliation; `$source`, source time, receipt time, and raw values are retained. Null/normal values clear an occurrence. |
 | Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                  |
 | One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                         |
@@ -56,31 +56,35 @@ single module, mutable GET endpoints, and playback-specific queue should not be
 copied. This plugin's SQLite occurrence/event model and authenticated REST
 mutations are the better base for durable remote delivery.
 
-## Target dashboard behavior
+## Dashboard behavior
 
-The main view should contain two related but distinct lists:
+The compact main view puts current alerts first and defaults to active alerts.
+It can switch to all known alert definitions. Multiple sources for the same path
+remain individually inspectable while active. Clicking a row opens its recent event
+and notifier-delivery history.
 
-1. **Alert definitions**: every configured rule and discovered Signal K zone,
-   including disabled and never-fired definitions. A definition shows its path or
-   selector, zone thresholds, effective policy, current occurrence count, and last
-   fired time.
-2. **Occurrences requiring attention**: active occurrences and retained one-time
-   occurrences. Multiple paths or sources matched by one rule remain individually
-   inspectable.
+The same table also contains Signal K thresholds and notification paths learned from
+incoming data, including disabled and never-fired definitions when **All known
+alerts** is selected. The UI calls these learned entries “Discovered paths”;
+“discovered” is definition provenance, not a live alert state. Signal K zone metadata
+remains an input to definition discovery, but definitions are not grouped by zone.
+Each row opens current information and history and has a direct **Settings** action.
 
-Clicking either a definition or occurrence opens a detail drawer with recent
-history. The timeline includes raised, message/severity changes, activation-delay
+The event timeline includes raised, message/severity changes, activation-delay
 expiry or suppression, clear, acknowledge, silence, dismissal, policy actions,
-and every notifier attempt/outcome. A separate History view provides cursor-based
-pagination and filters for time, definition, path, source, state, severity,
-dismissal, and notifier.
+and every notifier attempt/outcome. History uses cursor-based pagination and filters
+for state, severity, and dismissal.
 
-For a one-time occurrence the UI may present a **Delete** action, but this is a
-soft dismissal: it disappears from the attention list, remains in history, and
+For an occurrence the UI presents a **Dismiss** action. It disappears from the
+active list, remains in history, and
 does not cancel pending notifier delivery. A later occurrence on the same path and
 source is a new row and becomes visible normally.
 
-The definition settings panel controls enabled state, notifier instances, minimum
+This is distinct from **Forget alert**, which is available only for inactive
+discovered definitions and permanently removes their history and settings. Definitions
+derived from current Signal K zone metadata cannot be forgotten.
+
+The definition settings panel controls enabled state, notification services, minimum
 severity, connectivity mode, one-time/rearm behavior, and
 `activationDelaySeconds`. Overrides are stored by this plugin; Signal K
 `meta.zones` remain authoritative input metadata and are not rewritten. Settings
@@ -117,7 +121,7 @@ replaced rather than migrated. Released schema changes must use migrations.
 
 Create a clean schema, recording its version for future migrations, with:
 
-- `alert_definitions`: rule/zone/discovered identity and display metadata;
+- `alert_definitions`: zone/discovered identity and display metadata;
 - `alert_policies` plus a normalized definition-to-notifier mapping;
 - `alert_occurrences`: immutable occurrence identity, source/path, lifecycle,
   source/receipt times, current and maximum severity, dismissal, and clear time;
@@ -152,6 +156,7 @@ Provide at least:
 GET   /definitions
 GET   /definitions/:id
 PATCH /definitions/:id/policy
+DELETE /definitions/:id
 GET   /occurrences
 GET   /occurrences/:id
 GET   /occurrences/:id/events
@@ -162,16 +167,16 @@ POST  /occurrences/:id/silence
 
 Keep the existing status/delivery/retry endpoints during migration. Use cursors,
 bounded limits, filter validation, stable ordering, and structured error bodies.
-Expose effective policy and provenance (`override`, `rule`, or `default`). Register
+Expose effective policy and provenance (`override` or `default`). Register
 read routes as read-only and mutations as read-write/admin using the supported
 Signal K router API, and publish the complete contract through `getOpenApi()`.
 
 ### 5. Definitions and occurrences dashboard — implemented
 
-- Render all zone/rule definitions and a separate attention list.
+- Render active and known definitions in one compact alert table.
 - Add an accessible detail drawer opened by click and keyboard, with paginated
   recent history and notifier outcomes.
-- Add a policy editor populated from configured notifier instances, with validation
+- Add a policy editor populated from configured notification services, with validation
   and an explicit save result.
 - Add global history filters, pagination, dismissed-state visibility, empty/loading/
   auth/error states, and responsive layouts suitable for an onboard tablet.
@@ -246,32 +251,35 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
 ```json
 {
   "storage": { "path": "/var/lib/signalk/persistent-notifier/alerts.sqlite" },
-  "notifiers": {
-    "ntfy-main": {
+  "notifiers": [
+    {
+      "name": "Crew ntfy",
       "type": "ntfy",
       "server": "https://ntfy.sh",
       "topic": "boat-alerts",
-      "token": "secret"
+      "token": "secret",
+      "minSeverity": "warn"
     },
-    "pagerduty-critical": { "type": "pagerduty", "routingKey": "secret" },
-    "discord-boat": {
-      "type": "discord",
-      "webhookUrl": "https://discord.com/api/webhooks/..."
-    }
-  },
-  "rules": [
     {
-      "id": "bilge-high-water",
-      "name": "Bilge high water",
-      "zone": "Bilge",
-      "oneTime": false,
-      "enabled": true,
-      "match": "notifications.bilge.*",
-      "minSeverity": "alarm",
-      "connectivity": { "mode": "wake" },
-      "notifiers": ["ntfy-main", "pagerduty-critical", "discord-boat"]
+      "name": "Emergency PagerDuty",
+      "type": "pagerduty",
+      "routingKey": "secret",
+      "minSeverity": "alarm"
+    },
+    {
+      "name": "Boat Discord",
+      "type": "discord",
+      "webhookUrl": "https://discord.com/api/webhooks/...",
+      "minSeverity": "alert"
     }
   ],
+  "defaults": {
+    "enabled": true,
+    "minSeverity": "warn",
+    "activationDelaySeconds": 0,
+    "connectivity": { "mode": "queue" },
+    "notifiers": ["Crew ntfy"]
+  },
   "connectivity": {
     "enabled": true,
     "switch": {
@@ -287,6 +295,19 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
 }
 ```
 
+The Signal K plugin form contains only global configuration: storage/discovery,
+retry behavior, notifier connections and secrets, global defaults, and optional
+connectivity management. Per-alert notifier selection, minimum severity, activation
+delay, one-time behavior, and connectivity policy are stored from the Alert center's
+**Settings** dialog. A notifier's global `minSeverity` is a hard floor; an alert-level
+override cannot make that notifier send at a lower severity.
+
+Each entry under **Notification services** has a unique, human-readable `name`. That
+name appears in the per-alert Settings dialog and is used by the default alert policy.
+Renaming a service does not rewrite saved alert policies, so reselect the renamed
+service on affected alerts. The Signal K form presents separate ntfy, PagerDuty, and
+Discord entry types and only asks for credentials relevant to that service.
+
 Repeated updates coalesce by notification path and available source identifier. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
 
 The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifier`:
@@ -297,6 +318,7 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `POST /retry`
 - `GET /definitions` and `GET /definitions/:id`
 - `PATCH /definitions/:id/policy`
+- `DELETE /definitions/:id` for inactive discovered paths
 - `GET /notifiers`
 - `GET /occurrences` and `GET /occurrences/:id`
 - `GET /occurrences/:id/events`
@@ -309,11 +331,13 @@ read-only access and mutations require read-write access. Collection endpoints u
 bounded cursor pagination and validated filters. The complete request and response
 contract is returned through the plugin's OpenAPI document.
 
-The dashboard is served at `/signalk-persistent-notifier`. It shows all known
-definitions, current and historical occurrences, dismissed-item filtering,
-per-transport delivery state, connectivity status, and manual retry. Select an
-occurrence to open its recent event timeline. Select **Settings** on a definition
-to edit notifier, threshold, delay, one-time/rearm, and connectivity policy.
+The dashboard is served at `/signalk-persistent-notifier`. One compact table puts
+active alerts first and can switch to all known definitions. Select an alert to open
+its current information and recent event timeline; alert actions and **Settings** are
+available there as well as directly from the row. Acknowledge and silence apply only
+to active occurrences. **Include dismissed** updates the table immediately. Inactive
+discovered definitions can be permanently forgotten from Settings; active alerts and
+Signal K zone definitions cannot be forgotten.
 
 Policy edits apply to future occurrences. The occurrence snapshots the effective
 one-time, severity, activation, rearm, connectivity, and notifier policy so a later
