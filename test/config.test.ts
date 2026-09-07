@@ -20,6 +20,13 @@ describe("validateConfig", () => {
     ]);
   });
 
+  it("uses a public endpoint suitable for the HEAD-based Internet probe", () => {
+    expect(
+      pluginConfigSchema.properties.connectivity.properties.probe.properties.url
+        .default,
+    ).toBe("https://www.gstatic.com/generate_204");
+  });
+
   it("rejects zone refresh intervals below one second", () => {
     expect(() =>
       validateConfig({ discovery: { zoneRefreshSeconds: 0 } }),

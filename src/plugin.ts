@@ -12,8 +12,21 @@ export = function persistentNotifier(app: ServerAPI): Plugin {
     name: "Persistent notifier",
     description: "Offline-first durable Signal K alert delivery",
     schema: pluginConfigSchema,
-    start(options: object) {
-      runtime.start(options as PluginConfig);
+    start(options: object, restart: (newConfiguration: object) => void) {
+      const config = options as PluginConfig;
+      if (config.maintenance?.resetDatabase) {
+        const nextConfiguration: PluginConfig = {
+          ...config,
+          maintenance: {
+            ...config.maintenance,
+            resetDatabase: false,
+          },
+        };
+        runtime.resetDatabase(config);
+        setImmediate(() => restart(nextConfiguration));
+        return;
+      }
+      runtime.start(config);
     },
     statusMessage: () => runtime.statusMessage(),
     registerWithRouter: (router) => runtime.registerWithRouter(router),

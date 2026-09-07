@@ -78,6 +78,13 @@ h2 {
   color: var(--muted);
   font-size: 0.82rem;
 }
+.admin-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--teal-dark);
+  text-decoration: none;
+  white-space: nowrap;
+}
 .button {
   border: 1px solid transparent;
   border-radius: 4px;

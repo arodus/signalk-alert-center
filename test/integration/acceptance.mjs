@@ -16,8 +16,12 @@ async function json(url, options) {
 async function eventually(load, predicate, label) {
   let value;
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    value = await load();
-    if (predicate(value)) return value;
+    try {
+      value = await load();
+      if (predicate(value)) return value;
+    } catch (error) {
+      value = { transientError: String(error) };
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   assert.fail(`${label}: ${JSON.stringify(value)}`);
@@ -187,6 +191,52 @@ assert.equal(
     (item) => item.path === "notifications.bilge.highWater",
   ).length,
   2,
+);
+
+const plugins = await json(`${signalkUrl}/skServer/plugins`);
+const notifierPlugin = plugins.find(
+  (plugin) => plugin.id === "signalk-persistent-notifier",
+);
+assert.ok(notifierPlugin, "persistent notifier is listed by Signal K");
+await json(
+  `${signalkUrl}/skServer/plugins/signalk-persistent-notifier/config`,
+  {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...notifierPlugin.data,
+      configuration: {
+        ...notifierPlugin.data.configuration,
+        maintenance: { resetDatabase: true },
+      },
+    }),
+  },
+);
+await eventually(
+  () => json(`${signalkUrl}/skServer/plugins`),
+  (items) => {
+    const plugin = items.find(
+      (item) => item.id === "signalk-persistent-notifier",
+    );
+    return plugin?.data.configuration?.maintenance?.resetDatabase === false;
+  },
+  "one-shot database reset setting was not cleared",
+);
+await eventually(
+  () =>
+    json(
+      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
+    ),
+  (page) => !page.items.some((item) => item.id === occurrence.id),
+  "database reset retained an old occurrence",
+);
+await eventually(
+  () =>
+    json(
+      `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+    ),
+  (item) => item.policy.activationDelaySeconds === 0,
+  "database reset did not restore the default alert policy",
 );
 
 console.log("Docker acceptance smoke test passed");

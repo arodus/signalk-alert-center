@@ -72,6 +72,29 @@ describe("occurrence storage", () => {
     expect(db.listDeliveries()).toEqual([]);
   });
 
+  it("resets all stored data and re-initializes the schema", () => {
+    const db = database();
+    const occurrence = db.ingest(active(), ["ntfy"])!;
+    db.setWakeDue(occurrence.id, new Date("2026-01-01T00:10:00Z"));
+    db.setPolicy(occurrence.definitionId, {
+      enabled: true,
+      oneTime: false,
+      minimumSeverity: "warn",
+      connectivity: { mode: "queue" },
+      activationDelaySeconds: 0,
+      notifierIds: ["ntfy"],
+    });
+
+    db.reset();
+
+    expect(db.schemaVersion()).toBe(1);
+    expect(db.listDefinitions()).toEqual([]);
+    expect(db.listOccurrences()).toEqual([]);
+    expect(db.listDeliveries()).toEqual([]);
+    expect(db.listWakeRequests()).toEqual([]);
+    expect(db.ingest(active(), [])).toMatchObject({ occurrenceNumber: 1 });
+  });
+
   it("persists activation deadlines across restart and promotes once", () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-storage-"));
     directories.push(directory);

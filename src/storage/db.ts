@@ -46,6 +46,42 @@ export class AlertDatabase {
     this.db.close();
   }
 
+  /** Clears all application data while preserving and re-initializing the schema. */
+  reset(): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const table of [
+        "delivery_attempts",
+        "deliveries",
+        "wake_requests",
+        "occurrence_notifier_thresholds",
+        "occurrence_notifiers",
+        "alert_events",
+        "alert_occurrences",
+        "alert_policy_notifiers",
+        "alert_policies",
+        "alert_definitions",
+        "connectivity_sessions",
+        "schema_migrations",
+      ])
+        this.db.exec(`DELETE FROM ${table}`);
+      this.db.exec(
+        "DELETE FROM sqlite_sequence WHERE name IN ('alert_events', 'delivery_attempts')",
+      );
+      this.db
+        .prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        )
+        .run(currentSchemaVersion, new Date().toISOString());
+      // Keep this operation valid as new idempotent schema objects are added.
+      this.db.exec(schema);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   schemaVersion(): number {
     const row = this.db
       .prepare("SELECT MAX(version) AS version FROM schema_migrations")

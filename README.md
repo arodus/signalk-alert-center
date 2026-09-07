@@ -290,17 +290,28 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
     "idleCooldownSeconds": 300,
     "bootTimeoutSeconds": 240,
     "internetCheckIntervalSeconds": 5,
-    "probe": { "url": "https://example.com/generate_204", "timeoutSeconds": 10 }
+    "probe": {
+      "url": "https://www.gstatic.com/generate_204",
+      "timeoutSeconds": 10
+    }
   }
 }
 ```
 
 The Signal K plugin form contains only global configuration: storage/discovery,
 retry behavior, notifier connections and secrets, global defaults, and optional
-connectivity management. Per-alert notifier selection, minimum severity, activation
-delay, one-time behavior, and connectivity policy are stored from the Alert center's
-**Settings** dialog. A notifier's global `minSeverity` is a hard floor; an alert-level
-override cannot make that notifier send at a lower severity.
+connectivity management. It also contains a destructive, one-shot database reset
+under **Database maintenance**. Enable **Reset database when Save Configuration is
+clicked**, then click Signal K's **Save Configuration** button. The plugin deletes
+all alert definitions, occurrences, event and delivery history, and per-alert policy;
+re-initializes the schema; discovers current Signal K definitions again; and
+automatically turns the reset control back off. Global plugin configuration,
+including notification service secrets, is retained.
+
+Per-alert notifier selection, minimum severity, activation delay, one-time behavior,
+and connectivity policy are stored from the Alert center's **Settings** dialog. A
+notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
+that notifier send at a lower severity.
 
 Each entry under **Notification services** has a unique, human-readable `name`. That
 name appears in the per-alert Settings dialog and is used by the default alert policy.
@@ -343,7 +354,12 @@ Policy edits apply to future occurrences. The occurrence snapshots the effective
 one-time, severity, activation, rearm, connectivity, and notifier policy so a later
 settings edit cannot rewrite history or silently retarget pending work.
 
-When connectivity is enabled, the plugin waits for the configured probe to return a successful HTTP response before entering `ONLINE`. It retries until `bootTimeoutSeconds` and enters `FAULT` without deleting queued alerts if readiness never arrives.
+When connectivity is enabled, the plugin sends an HTTP `HEAD` request to the
+configured probe URL and enters `ONLINE` after any 2xx response. The default is
+Google's lightweight public `https://www.gstatic.com/generate_204` endpoint, which
+returns HTTP 204 without authentication. The plugin retries until
+`bootTimeoutSeconds` and enters `FAULT` without deleting queued alerts if readiness
+never arrives.
 
 Docker-backed HTTP integration tests are available with
 `npm run test:integration`. They start a local scripted HTTP service and exercise
