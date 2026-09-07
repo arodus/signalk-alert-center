@@ -2,21 +2,26 @@
 
 An offline-first Signal K plugin for durable alert delivery through ntfy, PagerDuty, and Discord. Alerts and independent per-notifier delivery rows are stored in SQLite before any network or switch operation.
 
-## Product goal and current limitations
+## Alert center
 
-The goal is a persistent onboard notification center inspired by
+This project provides a persistent onboard notification center inspired by
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
-with a notification list, retained one-time events, and full chronological history,
-in addition to offline remote delivery. A one-time event must stay visible until
-explicit dismissal and remain in history afterward, even if it never receives a
-clear update. A later occurrence must be visible again.
+with separate definition and occurrence lists, retained one-time events, recent
+history, and offline remote delivery. It discovers configured rules and Signal K
+`meta.zones`, including definitions that have never fired. Every raise/clear cycle
+is stored as a distinct occurrence, while duplicate updates within the cycle are
+coalesced. Clicking an occurrence opens its durable event and notifier history.
 
-**This goal is not fully implemented.** The current History tab only filters the
-latest catalog state for cleared alerts. It does not expose the stored event log
-or dismissed alerts. Rule summaries can hide individual matching notifications;
-one-time dismissal can also hide later occurrences. Event/action and delivery
-attempt history are incomplete. Zone discovery is not wired into the plugin, and
-there is no local sound/TTS playback engine. Playback ownership remains open.
+One-time behavior is snapshotted when an occurrence starts. The occurrence remains
+visible until **Delete** is selected; deletion is a soft dismissal, so its history
+and pending delivery work remain intact. A later raise creates a visible new
+occurrence. Per-definition settings cover enabled state, minimum severity,
+notifiers, activation delay, one-time/rearm behavior, and connectivity mode.
+
+Local sound/TTS playback is intentionally not implemented. The remaining roadmap
+is transport resolve semantics, richer global history filters/observability,
+retention controls, browser automation, and a decision whether playback belongs
+here or in a dedicated player.
 
 See the [gap assessment and acceptance scenarios](IMPLEMENTATION_BRIEF.md#product-goal-and-gap-assessment-2026-09-06)
 for verified source findings, required behavior, and unresolved scope decisions.
@@ -30,22 +35,18 @@ The plugin must subscribe to those notification deltas and also reconcile the
 current notification subtree at startup. Delta `$source` and timestamp are part of
 occurrence identity and audit data, not optional display details.
 
-The current code has a sound durability foundation—SQLite, transactional alert and
-delivery creation, independent per-notifier state, persisted retry deadlines, and
-conservative connectivity ownership—but is not yet a complete Signal K notification
-center:
+The implementation uses the current typed Signal K plugin surface and keeps the
+following boundaries explicit:
 
-| Area               | Current state                                                                                                                                                      | Required direction                                                                                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions        | Configured rules are listed; zone walking exists but is not connected to startup or the catalog.                                                                   | List every rule and every `meta.zones` definition, including never-fired definitions, without fabricating occurrences.                       |
-| Ingestion          | Subscribes to `notifications.*` and retains `$source`; it does not reconcile existing values or retain source timestamps, and null currently normalizes as active. | Subscribe plus idempotent startup snapshot; treat null as clear and retain raw state, source, and both source/receipt times.                 |
-| Identity           | One mutable alert row is keyed by path/source.                                                                                                                     | Separate definitions, sources, occurrences, events, delivery intents, and attempts so recurrence cannot overwrite history.                   |
-| One-time alerts    | A rule flag allows soft removal, but the removed row disappears from every view and suppresses later activity on the same row.                                     | Dismiss only the selected occurrence from the main list; retain it in history and allow a later occurrence to appear.                        |
-| History            | The History tab filters the latest catalog rows to `cleared`.                                                                                                      | Query a durable event timeline globally and per definition/occurrence, including dismissed items and delivery outcomes.                      |
-| Per-alert policy   | Notifier fan-out and timing are only configured in rules.                                                                                                          | Provide a UI/API for per-definition overrides, including notifier selection and durable activation delay.                                    |
-| Controls           | Local acknowledge/silence timestamps are written before an optional upstream call.                                                                                 | Check Signal K capability flags, report the actual upstream result, and audit local and upstream outcomes separately.                        |
-| API/UI security    | Plugin routes use the default admin-only router and browser requests do not explicitly include session credentials.                                                | Use least-privilege read/write route access, cookie-backed requests, clear login handling, and complete OpenAPI schemas.                     |
-| Plugin conventions | The package has discovery keywords and a mounted `public/` app, but the server surface is largely typed as `any`.                                                  | Use `@signalk/server-api` types and verify lifecycle, schema, subscription, and router behavior against a declared supported server version. |
+| Area            | Implemented behavior                                                                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Definitions     | Configured rules, discovered zones, and recognized notification paths are durable and visible before they fire.                                                                     |
+| Ingestion       | An all-source subscription is established before startup reconciliation; `$source`, source time, receipt time, and raw values are retained. Null/normal values clear an occurrence. |
+| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                  |
+| One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                         |
+| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                  |
+| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                              |
+| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                             |
 
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player)
 is a useful product reference: it discovers known/configured notifications, opens
@@ -95,13 +96,13 @@ An activation delay is different from `wake_after`:
 - `wake_after`: once a delivery is eligible, wait before requesting managed
   connectivity. It affects power behavior, not whether the alert qualifies.
 
-## Implementation plan
+## Implementation status and roadmap
 
-Implement the missing functionality in the following order. Each phase should
-include a schema/API contract, migration coverage, restart tests, and UI acceptance
-tests before the next phase starts.
+The initial alert-center implementation followed these phases. This is a new
+project: the prototype SQLite schema was not a compatibility contract and was
+replaced rather than migrated. Released schema changes must use migrations.
 
-### 1. Characterize and stabilize the Signal K boundary
+### 1. Signal K boundary — implemented
 
 - Add `@signalk/server-api` types and declare the supported Signal K server range.
 - Correct null/normal clear handling, preserve unknown raw values, and capture
@@ -112,9 +113,9 @@ tests before the next phase starts.
 - Wire zone discovery into the catalog and refresh it when metadata changes or on
   an explicit low-frequency rescan. Treat zones as definitions only.
 
-### 2. Introduce an occurrence-based schema
+### 2. Occurrence-based schema — implemented
 
-Add versioned, transactional migrations and split the current rows into:
+Create a clean schema, recording its version for future migrations, with:
 
 - `alert_definitions`: rule/zone/discovered identity and display metadata;
 - `alert_policies` plus a normalized definition-to-notifier mapping;
@@ -125,12 +126,12 @@ Add versioned, transactional migrations and split the current rows into:
   work and append-only results;
 - persisted activation and connectivity deadlines.
 
-Migrate existing alert, event, and delivery rows without inventing recurrence
-boundaries that cannot be proven. Mark migrated records accordingly and keep a
-backup/rollback path. Add indexes for current-list lookup and stable, cursor-based
-history order (`occurred_at`, unique id).
+Do not add migration code for the discarded prototype schema. Development databases
+created by earlier commits should be deleted and recreated. Add indexes for
+current-list lookup and stable, cursor-based history order (`occurred_at`, unique
+id); future released schema changes must use transactional migrations.
 
-### 3. Define recurrence, dismissal, and delay state machines
+### 3. Recurrence, dismissal, and delay state machines — implemented
 
 - Start an occurrence on inactive-to-active transition; coalesce identical updates
   while active; close it on null/normal; start a new occurrence on the next raise.
@@ -143,7 +144,7 @@ history order (`occurred_at`, unique id).
 - Make dismissal occurrence-scoped and independent of acknowledge, silence,
   upstream clear, activation, and delivery state.
 
-### 4. Add policy and history APIs
+### 4. Policy and history APIs — implemented
 
 Provide at least:
 
@@ -165,7 +166,7 @@ Expose effective policy and provenance (`override`, `rule`, or `default`). Regis
 read routes as read-only and mutations as read-write/admin using the supported
 Signal K router API, and publish the complete contract through `getOpenApi()`.
 
-### 5. Rebuild the dashboard around definitions and occurrences
+### 5. Definitions and occurrences dashboard — implemented
 
 - Render all zone/rule definitions and a separate attention list.
 - Add an accessible detail drawer opened by click and keyboard, with paginated
@@ -176,7 +177,7 @@ Signal K router API, and publish the complete contract through `getOpenApi()`.
   auth/error states, and responsive layouts suitable for an onboard tablet.
 - Use `credentials: "include"`; redirect or link to Signal K login on 401/403.
 
-### 6. Integrate delivery without weakening durability
+### 6. Delivery integration — partially implemented
 
 - Create delivery intents only after activation eligibility and snapshot the
   effective policy onto the occurrence so later edits do not rewrite history.
@@ -186,7 +187,7 @@ Signal K router API, and publish the complete contract through `getOpenApi()`.
 - Keep connectivity requests downstream of eligible delivery. Re-evaluate
   `wake_after` cancellation and shutdown protection against occurrence-based work.
 
-### 7. Finish compatibility, observability, and retention
+### 7. Compatibility, observability, and retention — remaining roadmap
 
 - Await and audit Signal K notification API actions after checking `canSilence`,
   `canAcknowledge`, and `canClear`; show unsupported and failed actions honestly.
@@ -294,19 +295,67 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `GET /alerts`
 - `GET /deliveries`
 - `POST /retry`
+- `GET /definitions` and `GET /definitions/:id`
+- `PATCH /definitions/:id/policy`
+- `GET /notifiers`
+- `GET /occurrences` and `GET /occurrences/:id`
+- `GET /occurrences/:id/events`
+- `POST /occurrences/:id/dismiss`
+- `POST /occurrences/:id/acknowledge`
+- `POST /occurrences/:id/silence`
 
-Signal K protects these routes with its normal plugin authentication. The status response includes queue counts, connectivity state, switch state, ownership, and the last connectivity error.
+Signal K protects these routes with its normal authentication. Read endpoints use
+read-only access and mutations require read-write access. Collection endpoints use
+bounded cursor pagination and validated filters. The complete request and response
+contract is returned through the plugin's OpenAPI document.
 
-The included operational dashboard is served by Signal K at `/signalk-persistent-notifier`. It shows active alerts, latest cleared-alert states, per-transport delivery state, connectivity ownership, refresh status, and a manual retry action.
+The dashboard is served at `/signalk-persistent-notifier`. It shows all known
+definitions, current and historical occurrences, dismissed-item filtering,
+per-transport delivery state, connectivity status, and manual retry. Select an
+occurrence to open its recent event timeline. Select **Settings** on a definition
+to edit notifier, threshold, delay, one-time/rearm, and connectivity policy.
 
-The dashboard alert catalog includes every configured rule, including rules that have never fired, plus recognized notifications that do not match a configured rule. Each entry shows its zone, current state, first seen time, last fired time, fire count, and delivery context. Configured `oneTime` alerts can be soft-removed from the dashboard without deleting stored event or delivery rows. Removed entries are currently
-excluded from the catalog, including its History view; this is not yet the required
-dismissal-and-history behavior.
+Policy edits apply to future occurrences. The occurrence snapshots the effective
+one-time, severity, activation, rearm, connectivity, and notifier policy so a later
+settings edit cannot rewrite history or silently retarget pending work.
 
 When connectivity is enabled, the plugin waits for the configured probe to return a successful HTTP response before entering `ONLINE`. It retries until `bootTimeoutSeconds` and enters `FAULT` without deleting queued alerts if readiness never arrives.
 
-Docker-backed HTTP integration tests are available with `npm run test:integration`. They start a local mock service and exercise ntfy, PagerDuty, and Discord transport requests without sending data to external services. Docker and Docker Compose are required; the normal `npm test` suite remains self-contained.
+Docker-backed HTTP integration tests are available with
+`npm run test:integration`. They start a local scripted HTTP service and exercise
+ntfy, PagerDuty, and Discord without contacting external services.
+
+For a real Signal K acceptance run:
+
+```sh
+npm run test:acceptance
+docker compose -f docker-compose.acceptance.yml down -v
+```
+
+This builds against the pinned Signal K 2.31.1 image, installs a test-only fixture
+plugin, publishes zone metadata and timestamped raise/clear deltas, changes a
+definition policy, checks recent history, dismisses a one-time occurrence, and
+verifies that a later raise creates a new visible occurrence. The separate mock
+service also verifies scripted retry responses and captured request bodies.
+
+For interactive UI testing:
+
+```sh
+docker compose -f docker-compose.live.yml up --build
+```
+
+Open `http://localhost:3000`, complete Signal K setup if prompted, enable/configure
+the plugin, then open `http://localhost:3000/signalk-persistent-notifier`. The live
+Compose file uses a named volume. Remove it only when you intentionally want a
+fresh development database:
+
+```sh
+docker compose -f docker-compose.live.yml down -v
+```
 
 ## Development
 
-`npm test` runs the lifecycle and connectivity tests. `npm run format:check`, `npm run lint`, and `npm run build` are the required quality checks. The plugin entry point wires the Signal K subscription, durable delivery engine, connectivity manager, and authenticated plugin routes.
+`npm test` runs the lifecycle, persistence, API, policy, runtime, scheduler, and
+connectivity tests. `npm run format:check`, `npm run lint`, and `npm run build` are
+the required quality checks. Node 22.5 or newer is required; Docker acceptance is
+pinned to Signal K server 2.31.1.

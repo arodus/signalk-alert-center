@@ -77,6 +77,17 @@ the persisted deadline and active state after restart. Do not implement this as 
 in-memory timer, and do not confuse it with `wake_after`, which controls when to
 power connectivity after delivery has already become eligible.
 
+This repository is pre-release and the occurrence schema is the first supported
+schema. Do not add compatibility code for the discarded prototype SQLite layout;
+recreate development databases instead. Any schema change after the first release
+must use a transactional, restart-safe migration.
+
+For end-to-end changes, run the real-server acceptance environment with
+`npm run test:acceptance`, then clean it up with
+`docker compose -f docker-compose.acceptance.yml down -v`. Keep fixture plugins
+and mock transports test-only; acceptance must never contact real notification
+services or vessel hardware.
+
 ## Signal K integration rules
 
 - Follow the current legacy alarm contract: subscribe to `notifications.*`, treat

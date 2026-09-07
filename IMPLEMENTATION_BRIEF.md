@@ -2,6 +2,11 @@
 
 ## Product goal and gap assessment (2026-09-06)
 
+> Historical planning note: the gap table below describes the repository at base
+> commit `bef795c`. The occurrence model, policy/history API, dashboard, zone
+> discovery, startup reconciliation, and Docker acceptance path have since been
+> implemented. See the README for current behavior and the remaining roadmap.
+
 Build a persistent onboard notification center, comparable in purpose to
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
 with a usable notification list, retained one-time notifications, and full history,
@@ -94,9 +99,10 @@ implementing it, without delaying the required persistence and history work.
 7. Browse more than one history page, filter a single source, include dismissed
    entries, and restart: ordering and records remain stable.
 
-Documentation-only review: no runtime fixes or new acceptance tests are implemented
-by this update. Prioritize occurrence/event storage and one-time lifecycle, then
-history API/UI, then verified zone/control integration and the playback decision.
+The implemented alert center now covers occurrence/event storage, one-time
+lifecycle, history API/UI, zone discovery, and capability-aware controls. Playback
+ownership, richer observability/retention, and expanded browser/restart acceptance
+coverage remain follow-up work.
 
 ## Objective
 
