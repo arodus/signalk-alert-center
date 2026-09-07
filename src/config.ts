@@ -3,20 +3,8 @@ import { ConnectivityMode, Severity, severities } from "./alerts/types";
 export interface NotifierConfig {
   type: "ntfy" | "pagerduty" | "discord";
   enabled?: boolean;
+  minSeverity?: Severity;
   [key: string]: unknown;
-}
-export interface RuleConfig {
-  id?: string;
-  name?: string;
-  zone?: string;
-  oneTime?: boolean;
-  enabled?: boolean;
-  activationDelaySeconds?: number;
-  rearmAfterSeconds?: number;
-  match: string;
-  minSeverity: Severity;
-  connectivity: ConnectivityMode;
-  notifiers: string[];
 }
 export interface PluginConfig {
   storage?: { path?: string };
@@ -28,7 +16,6 @@ export interface PluginConfig {
     jitter?: number;
   };
   notifiers?: Record<string, NotifierConfig>;
-  rules?: RuleConfig[];
   defaults?: {
     enabled?: boolean;
     oneTime?: boolean;
@@ -56,6 +43,11 @@ export function validateConfig(config: PluginConfig): void {
       !["ntfy", "pagerduty", "discord"].includes(notifier.type)
     )
       throw new Error(`Invalid notifier type: ${id}`);
+    if (
+      notifier.minSeverity !== undefined &&
+      !severities.includes(notifier.minSeverity)
+    )
+      throw new Error(`Notifier ${id} has an invalid minimum severity`);
     if (notifier.type === "ntfy") {
       requireString(notifier.server, `Notifier ${id} requires server`);
       requireString(notifier.topic, `Notifier ${id} requires topic`);
@@ -78,20 +70,6 @@ export function validateConfig(config: PluginConfig): void {
   if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
     throw new Error("discovery.zoneRefreshSeconds must be at least 1");
   validatePolicy(config.defaults, "defaults", notifierIds);
-  for (const rule of config.rules ?? []) {
-    if (!rule.match || !rule.notifiers)
-      throw new Error("Rules require match and notifiers");
-    if (!severities.includes(rule.minSeverity))
-      throw new Error(`Invalid rule severity: ${rule.minSeverity}`);
-    if (rule.notifiers.some((id) => !notifierIds.has(id)))
-      throw new Error(`Rule references an unknown notifier: ${rule.match}`);
-    if (
-      rule.connectivity.mode === "wake_after" &&
-      rule.connectivity.delaySeconds < 0
-    )
-      throw new Error("wake_after delay must be non-negative");
-    validatePolicy(rule, `Rule ${rule.id ?? rule.match}`, notifierIds);
-  }
   if (config.connectivity?.enabled && !config.connectivity.switch)
     throw new Error("Enabled connectivity requires a switch configuration");
   if (config.connectivity?.enabled && !config.connectivity.probe)
@@ -119,7 +97,7 @@ export function validateConfig(config: PluginConfig): void {
 function validatePolicy(
   policy:
     | Pick<
-        RuleConfig,
+        NonNullable<PluginConfig["defaults"]>,
         | "activationDelaySeconds"
         | "rearmAfterSeconds"
         | "notifiers"

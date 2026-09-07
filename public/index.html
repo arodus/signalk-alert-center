@@ -41,16 +41,15 @@
       <section class="workspace">
         <div class="section-heading">
           <div>
-            <h2>Current alerts</h2>
-            <p>Open an alert to see its recent history and delivery details.</p>
+            <h2>Alerts</h2>
+            <p>Current status, history, and delivery settings in one place.</p>
           </div>
         </div>
         <form id="history-filters" class="filter-row">
           <label for="state-filter">Show</label
           ><select id="state-filter" name="state">
             <option value="active" selected>Active</option>
-            <option value="">All history</option>
-            <option value="cleared">Cleared</option>
+            <option value="">All known alerts</option>
           </select>
           <label for="severity-filter">Severity</label
           ><select id="severity-filter" name="severity">
@@ -65,11 +64,8 @@
             ><input id="dismissed-filter" type="checkbox" /> Include
             dismissed</label
           >
-          <button class="button button-quiet button-small" type="submit">
-            Apply
-          </button>
         </form>
-        <div id="occurrence-list" class="table-shell" aria-live="polite"></div>
+        <div id="definition-list" class="table-shell" aria-live="polite"></div>
         <button
           id="history-more"
           class="button button-quiet load-more"
@@ -78,16 +74,6 @@
         >
           Load more
         </button>
-      </section>
-
-      <section class="workspace">
-        <div class="section-heading">
-          <div>
-            <h2>Alert settings</h2>
-            <p>Definitions determine which alerts are tracked and delivered.</p>
-          </div>
-        </div>
-        <div id="definition-list" class="table-shell" aria-live="polite"></div>
       </section>
 
       <section class="workspace delivery-section">
@@ -127,6 +113,7 @@
         </button>
       </div>
       <div id="drawer-body"></div>
+      <p id="drawer-result" class="form-result" role="status"></p>
       <div id="event-list" class="event-list" aria-live="polite"></div>
       <button
         id="events-more"
@@ -203,6 +190,14 @@
         >
         <p id="policy-result" class="form-result" role="status"></p>
         <div class="dialog-actions">
+          <button
+            id="policy-forget"
+            class="button button-danger"
+            type="button"
+            hidden
+          >
+            Forget alert
+          </button>
           <button id="policy-cancel" class="button button-quiet" type="button">
             Cancel</button
           ><button id="policy-save" class="button button-primary" type="submit">

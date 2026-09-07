@@ -1,5 +1,4 @@
 import path from "node:path";
-import picomatch from "picomatch";
 import {
   Context,
   NotificationId,
@@ -157,7 +156,6 @@ export class PersistentNotifierRuntime {
 
   private async applyConnectivityPolicy(
     occurrence: AlertRecord,
-    policy: EffectivePolicy,
     now: Date,
   ): Promise<void> {
     if (occurrence.currentState === "cleared") {
@@ -165,19 +163,15 @@ export class PersistentNotifierRuntime {
       this.scheduleNextWake();
       return;
     }
-    if (
-      !policy.enabled ||
-      policy.notifierIds.length === 0 ||
-      occurrence.activationState === "suppressed"
-    )
-      return;
+    if (occurrence.activationState === "suppressed") return;
     const eligibleAt = occurrence.activationDueAt ?? now;
     const wakeAt =
-      policy.connectivity.mode === "wake"
+      occurrence.connectivity.mode === "wake"
         ? eligibleAt
-        : policy.connectivity.mode === "wake_after"
+        : occurrence.connectivity.mode === "wake_after"
           ? new Date(
-              eligibleAt.getTime() + policy.connectivity.delaySeconds * 1000,
+              eligibleAt.getTime() +
+                occurrence.connectivity.delaySeconds * 1000,
             )
           : undefined;
     if (!wakeAt) return;
@@ -201,9 +195,12 @@ export class PersistentNotifierRuntime {
       normalized.path,
       normalized.severity,
     );
+    const notifierIds = policy.notifierIds.filter(
+      (id) => this.config.notifiers?.[id]?.enabled !== false,
+    );
     const occurrence = new AlertLifecycle(this.db(), []).ingest(
       normalized,
-      policy.enabled ? policy.notifierIds : [],
+      policy.enabled ? notifierIds : [],
       receivedAt,
       {
         definitionId: this.policies().ensureDefinitionForPath(normalized.path),
@@ -212,10 +209,16 @@ export class PersistentNotifierRuntime {
         minimumSeverity: policy.minimumSeverity,
         oneTime: policy.oneTime,
         rearmAfterSeconds: policy.rearmAfterSeconds,
+        notifierMinimumSeverities: Object.fromEntries(
+          notifierIds.map((id) => [
+            id,
+            this.config.notifiers?.[id]?.minSeverity ?? "normal",
+          ]),
+        ),
       },
     );
     if (!occurrence) return undefined;
-    await this.applyConnectivityPolicy(occurrence, policy, receivedAt);
+    await this.applyConnectivityPolicy(occurrence, receivedAt);
     this.scheduleNextActivation();
     await this.runScheduler();
     return occurrence;
@@ -229,11 +232,7 @@ export class PersistentNotifierRuntime {
     const policy = this.policies().forDefinition(definition);
     const occurrences = this.db()
       .listAlerts()
-      .filter((occurrence) =>
-        definition.sourceType === "rule"
-          ? picomatch(definition.pathPattern)(occurrence.path)
-          : occurrence.definitionId === definition.id,
-      );
+      .filter((occurrence) => occurrence.definitionId === definition.id);
     const lastFiredAt = occurrences.reduce<Date | undefined>(
       (latest, occurrence) =>
         !latest || occurrence.firstSeenAt > latest
@@ -373,6 +372,8 @@ export class PersistentNotifierRuntime {
         });
         return this.getDefinition(id);
       },
+      forgetDefinition: (id: string) =>
+        this.db().forgetDiscoveredDefinition(id),
       listOccurrences: (query: OccurrenceQuery) => {
         let items = this.db()
           .listAlerts()
@@ -431,13 +432,14 @@ export class PersistentNotifierRuntime {
       },
       dismissOccurrence: (id) => {
         const occurrence = this.getOccurrence(id);
-        if (!occurrence || !occurrence.oneTime) return false;
+        if (!occurrence) return false;
         this.db().dismissOccurrence(id);
         return { status: "dismissed", upstream: "not_requested" };
       },
       acknowledgeOccurrence: (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
+        if (occurrence.currentState !== "active") return "inactive";
         const upstream = this.upstreamAction(occurrence, "acknowledge");
         this.db().acknowledgeAlert(id);
         this.db().recordOccurrenceEvent(
@@ -452,6 +454,7 @@ export class PersistentNotifierRuntime {
       silenceOccurrence: (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
+        if (occurrence.currentState !== "active") return "inactive";
         const upstream = this.upstreamAction(occurrence, "silence");
         this.db().silenceAlert(id);
         this.db().recordOccurrenceEvent(
@@ -604,6 +607,7 @@ export class PersistentNotifierRuntime {
             id,
             type: notifier.type,
             enabled: true,
+            minimumSeverity: notifier.minSeverity ?? "normal",
           })),
     });
   }

@@ -91,7 +91,7 @@ export function getAlertCenterOpenApi() {
             {
               name: "sourceType",
               in: "query",
-              schema: { type: "string", enum: ["rule", "zone", "recognized"] },
+              schema: { type: "string", enum: ["zone", "recognized"] },
             },
             { name: "enabled", in: "query", schema: { type: "boolean" } },
           ],
@@ -111,6 +111,21 @@ export function getAlertCenterOpenApi() {
           responses: {
             "200": response("Definition", {
               $ref: "#/components/schemas/Definition",
+            }),
+            ...errors,
+          },
+        },
+        delete: {
+          summary: "Forget an inactive discovered definition and its history",
+          parameters: [idParameter],
+          responses: {
+            "200": response("Definition forgotten", {
+              type: "object",
+              required: ["status"],
+              properties: { status: { type: "string", enum: ["deleted"] } },
+            }),
+            "409": response("The alert is still active", {
+              $ref: "#/components/schemas/Error",
             }),
             ...errors,
           },
@@ -225,6 +240,13 @@ export function getAlertCenterOpenApi() {
                 "200": response("Action result", {
                   $ref: "#/components/schemas/ActionResult",
                 }),
+                ...(action === "dismiss"
+                  ? {}
+                  : {
+                      "409": response("The occurrence is not active", {
+                        $ref: "#/components/schemas/Error",
+                      }),
+                    }),
                 ...errors,
               },
             },
@@ -271,7 +293,7 @@ export function getAlertCenterOpenApi() {
             connectivity: { $ref: "#/components/schemas/Connectivity" },
             provenance: {
               type: "string",
-              enum: ["override", "rule", "default"],
+              enum: ["override", "default"],
             },
           },
         },
@@ -337,7 +359,7 @@ export function getAlertCenterOpenApi() {
             description: { type: "string" },
             sourceType: {
               type: "string",
-              enum: ["rule", "zone", "recognized"],
+              enum: ["zone", "recognized"],
             },
             pathPattern: { type: "string" },
             zone: { type: "string" },
@@ -398,6 +420,7 @@ export function getAlertCenterOpenApi() {
             id: { type: "string" },
             type: { type: "string" },
             enabled: { type: "boolean" },
+            minimumSeverity: { $ref: "#/components/schemas/Severity" },
           },
         },
         ActionResult: {

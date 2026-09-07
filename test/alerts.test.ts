@@ -69,7 +69,7 @@ describe("AlertLifecycle", () => {
     ]);
   });
 
-  it("creates deliveries only for the rule-matched transports", () => {
+  it("creates deliveries only for the selected transports", () => {
     const { database, lifecycle } = createLifecycle([
       "ntfy-main",
       "pagerduty-critical",

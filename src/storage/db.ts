@@ -134,6 +134,58 @@ export class AlertDatabase {
     ).map((row) => this.getDefinition(String(row.id)));
   }
 
+  forgetDiscoveredDefinition(
+    id: string,
+  ): "deleted" | "active" | "not_discovered" | "not_found" {
+    const definition = this.db
+      .prepare("SELECT source_type FROM alert_definitions WHERE id=?")
+      .get(id) as Row | undefined;
+    if (!definition) return "not_found";
+    if (definition.source_type !== "recognized") return "not_discovered";
+    const active = this.db
+      .prepare(
+        "SELECT 1 FROM alert_occurrences WHERE definition_id=? AND current_state='active' LIMIT 1",
+      )
+      .get(id);
+    if (active) return "active";
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(
+          "DELETE FROM delivery_attempts WHERE delivery_id IN (SELECT id FROM deliveries WHERE alert_id IN (SELECT id FROM alert_occurrences WHERE definition_id=?))",
+        )
+        .run(id);
+      for (const table of [
+        "deliveries",
+        "wake_requests",
+        "occurrence_notifier_thresholds",
+        "occurrence_notifiers",
+        "alert_events",
+      ])
+        this.db
+          .prepare(
+            `DELETE FROM ${table} WHERE alert_id IN (SELECT id FROM alert_occurrences WHERE definition_id=?)`,
+          )
+          .run(id);
+      this.db
+        .prepare("DELETE FROM alert_occurrences WHERE definition_id=?")
+        .run(id);
+      this.db
+        .prepare("DELETE FROM alert_policy_notifiers WHERE definition_id=?")
+        .run(id);
+      this.db
+        .prepare("DELETE FROM alert_policies WHERE definition_id=?")
+        .run(id);
+      this.db.prepare("DELETE FROM alert_definitions WHERE id=?").run(id);
+      this.db.exec("COMMIT");
+      return "deleted";
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   setPolicy(
     definitionId: string,
     policy: Omit<AlertPolicyRecord, "definitionId" | "updatedAt">,
@@ -215,6 +267,28 @@ export class AlertDatabase {
       notifierIds: notifiers.map((item) => String(item.transport_instance_id)),
       updatedAt: new Date(String(row.updated_at)),
     };
+  }
+
+  private eligibleNotifierCount(
+    alertId: string,
+    severity: AlertRecord["currentSeverity"],
+  ): number {
+    const rows = this.db
+      .prepare(
+        `SELECT n.transport_instance_id, COALESCE(t.minimum_severity, 'normal') AS minimum_severity
+         FROM occurrence_notifiers n
+         LEFT JOIN occurrence_notifier_thresholds t
+           ON t.alert_id=n.alert_id AND t.transport_instance_id=n.transport_instance_id
+         WHERE n.alert_id=?`,
+      )
+      .all(alertId) as Row[];
+    return rows.filter(
+      (row) =>
+        severityRank(severity) >=
+        severityRank(
+          String(row.minimum_severity) as AlertRecord["currentSeverity"],
+        ),
+    ).length;
   }
 
   ingest(
@@ -339,15 +413,7 @@ export class AlertDatabase {
             severityRank(
               String(active.minimum_severity) as AlertRecord["minimumSeverity"],
             );
-          const notifierCount = Number(
-            (
-              this.db
-                .prepare(
-                  "SELECT COUNT(*) AS count FROM occurrence_notifiers WHERE alert_id=?",
-                )
-                .get(id) as Row
-            ).count,
-          );
+          const notifierCount = this.eligibleNotifierCount(id, alert.severity);
           if (
             qualifies &&
             notifierCount > 0 &&
@@ -385,6 +451,10 @@ export class AlertDatabase {
             this.addEvent(id, "suppressed_before_activation", now, {
               reason: "below_minimum_severity",
             });
+          } else if (qualifies && active.activation_state === "eligible") {
+            // A severity increase can make an additional globally-thresholded
+            // notifier eligible during an already active occurrence.
+            this.createDeliveryIntents(id, now);
           }
         }
       } else {
@@ -400,9 +470,16 @@ export class AlertDatabase {
           .get(alert.sourceKey) as Row;
         const occurrenceNumber = Number(count.count) + 1;
         const activeState = alert.state === "active";
+        const eligibleTransportIds = transportIds.filter(
+          (transportId) =>
+            severityRank(alert.severity) >=
+            severityRank(
+              options.notifierMinimumSeverities?.[transportId] ?? "normal",
+            ),
+        );
         const qualifies =
           activeState &&
-          transportIds.length > 0 &&
+          eligibleTransportIds.length > 0 &&
           severityRank(alert.severity) >= severityRank(minimumSeverity);
         const activationState = qualifies
           ? delaySeconds > 0
@@ -463,6 +540,15 @@ export class AlertDatabase {
               "INSERT INTO occurrence_notifiers(alert_id, transport_instance_id) VALUES (?, ?)",
             )
             .run(id, transportId);
+          this.db
+            .prepare(
+              "INSERT INTO occurrence_notifier_thresholds(alert_id, transport_instance_id, minimum_severity) VALUES (?, ?, ?)",
+            )
+            .run(
+              id,
+              transportId,
+              options.notifierMinimumSeverities?.[transportId] ?? "normal",
+            );
         }
         if (activationState === "eligible") this.createDeliveryIntents(id, now);
       }
@@ -477,12 +563,24 @@ export class AlertDatabase {
 
   private createDeliveryIntents(alertId: string, now: Date): void {
     const timestamp = now.toISOString();
+    const alert = this.getAlert(alertId);
     const rows = this.db
       .prepare(
-        "SELECT transport_instance_id FROM occurrence_notifiers WHERE alert_id=? ORDER BY rowid",
+        `SELECT n.transport_instance_id, COALESCE(t.minimum_severity, 'normal') AS minimum_severity
+         FROM occurrence_notifiers n
+         LEFT JOIN occurrence_notifier_thresholds t
+           ON t.alert_id=n.alert_id AND t.transport_instance_id=n.transport_instance_id
+         WHERE n.alert_id=? ORDER BY n.rowid`,
       )
       .all(alertId) as Row[];
     for (const row of rows) {
+      if (
+        severityRank(alert.currentSeverity) <
+        severityRank(
+          String(row.minimum_severity) as AlertRecord["currentSeverity"],
+        )
+      )
+        continue;
       this.db
         .prepare(
           `INSERT OR IGNORE INTO deliveries

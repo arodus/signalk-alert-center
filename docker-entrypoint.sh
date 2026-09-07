@@ -51,8 +51,7 @@ if [ ! -f /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.jso
     "storage": { "path": "/home/node/.signalk/persistent-notifier.sqlite" },
     "discovery": { "zoneRefreshSeconds": $zone_refresh_seconds },
     "connectivity": { "enabled": false },
-    "notifiers": {},
-    "rules": []
+    "notifiers": {}
   }
 }
 EOF

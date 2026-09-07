@@ -57,7 +57,7 @@ export const pluginConfigSchema = {
       type: "object",
       title: "Default alert policy",
       description:
-        "Fallback policy for discovered Signal K zone definitions without an explicit rule or dashboard override.",
+        "Fallback policy for discovered Signal K definitions without a dashboard override.",
       properties: {
         enabled: { type: "boolean", title: "Enabled", default: true },
         oneTime: { type: "boolean", title: "One-time occurrence" },
@@ -103,7 +103,7 @@ export const pluginConfigSchema = {
       type: "object",
       title: "Notifiers",
       description:
-        "Each key is a notifier ID referenced by rules. Only fill in the fields for the chosen type.",
+        "Global notifier connections and credentials. Select these notifier IDs per alert in the Alert center.",
       additionalProperties: {
         type: "object",
         title: "Notifier",
@@ -114,6 +114,14 @@ export const pluginConfigSchema = {
             enum: ["ntfy", "pagerduty", "discord"],
           },
           enabled: { type: "boolean", title: "Enabled", default: true },
+          minSeverity: {
+            type: "string",
+            title: "Global minimum severity",
+            description:
+              "This notifier never sends alerts below this severity, even when selected for an alert.",
+            enum: [...severities],
+            default: "normal",
+          },
           server: { type: "string", title: "ntfy server URL" },
           topic: { type: "string", title: "ntfy topic" },
           token: { type: "string", title: "ntfy token (optional)" },
@@ -121,64 +129,6 @@ export const pluginConfigSchema = {
           webhookUrl: { type: "string", title: "Discord webhook URL" },
         },
         required: ["type"],
-      },
-    },
-    rules: {
-      type: "array",
-      title: "Rules",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string", title: "Rule ID" },
-          name: { type: "string", title: "Name" },
-          zone: { type: "string", title: "Zone" },
-          oneTime: { type: "boolean", title: "One-time alert", default: false },
-          enabled: { type: "boolean", title: "Enabled", default: true },
-          activationDelaySeconds: {
-            type: "number",
-            minimum: 0,
-            title: "Must remain active before notifying (seconds)",
-            default: 0,
-          },
-          rearmAfterSeconds: {
-            type: "number",
-            minimum: 0,
-            title: "One-time rearm interval (seconds)",
-          },
-          match: {
-            type: "string",
-            title: "Signal K path match (glob)",
-            default: "notifications.*",
-          },
-          minSeverity: {
-            type: "string",
-            title: "Minimum severity",
-            enum: [...severities],
-          },
-          connectivity: {
-            type: "object",
-            title: "Connectivity behavior",
-            properties: {
-              mode: {
-                type: "string",
-                title: "Mode",
-                enum: ["queue", "wake", "wake_after"],
-              },
-              delaySeconds: {
-                type: "number",
-                minimum: 0,
-                title: "Delay before waking (seconds, wake_after only)",
-              },
-            },
-            required: ["mode"],
-          },
-          notifiers: {
-            type: "array",
-            title: "Notifier IDs to use",
-            items: { type: "string" },
-          },
-        },
-        required: ["match", "minSeverity", "connectivity", "notifiers"],
       },
     },
     connectivity: {

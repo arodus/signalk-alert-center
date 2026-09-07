@@ -107,6 +107,12 @@ h2 {
 .button-primary:hover {
   background: var(--teal-dark);
 }
+.button-danger {
+  margin-right: auto;
+  color: var(--red);
+  border-color: #edbbb5;
+  background: white;
+}
 .button-quiet {
   color: var(--teal-dark);
   border-color: var(--line);
@@ -262,15 +268,19 @@ h2 {
 }
 .alert-table th:nth-child(1),
 .alert-table td:nth-child(1) {
-  width: 50%;
+  width: 34%;
 }
 .alert-table th:nth-child(2),
 .alert-table td:nth-child(2) {
-  width: 14%;
+  width: 15%;
 }
 .alert-table th:nth-child(3),
 .alert-table td:nth-child(3) {
   width: 17%;
+}
+.alert-table th:nth-child(4),
+.alert-table td:nth-child(4) {
+  width: 22%;
 }
 .clickable-row {
   cursor: pointer;
@@ -338,6 +348,12 @@ h2 {
   justify-content: space-between;
   gap: 20px;
   margin-bottom: 24px;
+}
+.drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 24px;
 }
 .icon-button {
   border: 0;

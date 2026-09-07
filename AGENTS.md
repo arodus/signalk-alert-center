@@ -46,14 +46,14 @@ and acceptance scenarios in [IMPLEMENTATION_BRIEF.md](IMPLEMENTATION_BRIEF.md#pr
 
 The dashboard must be an alert center, not just a delivery-queue view.
 
-- Show every configured delivery rule and every Signal K path with `meta.zones`,
-  including definitions that have never fired. Keep these definitions separate
-  from live or historical occurrences.
-- Show each current occurrence independently. A wildcard rule or zone summary may
-  group occurrences for navigation, but it must never hide paths or sources.
-- Keep one-time occurrences visible until an operator dismisses them. The UI may
-  label this action "Delete", but storage and API semantics are soft dismissal:
-  retain the occurrence, events, and delivery work in history.
+- Show every discovered notification path and every Signal K path with `meta.zones`,
+  including definitions that have never fired. Use one Alerts table that combines
+  definition identity, current status, history access, and policy access without
+  confusing definition provenance with occurrence state.
+- Preserve each current occurrence independently in storage and history. A summary
+  row must not hide its source identity in the detail view.
+- Keep one-time occurrences visible until an operator dismisses them. Label this
+  action "Dismiss" and retain the occurrence, events, and delivery work in history.
 - Clicking a definition or occurrence must open its recent chronological history,
   including raise, meaningful updates, clear, acknowledge, silence, dismissal,
   activation-delay decisions, and notifier attempts/outcomes.
@@ -62,9 +62,12 @@ The dashboard must be an alert center, not just a delivery-queue view.
   connectivity behavior, one-time/rearm semantics, and activation delay. Store
   dynamic per-definition overrides separately from immutable Signal K zone
   metadata and separately from occurrence state.
-- Resolve policy predictably: an explicit per-definition override wins over a
-  matching configured rule, which wins over plugin defaults. Expose the effective
-  policy and where each value came from.
+- Resolve policy predictably: an explicit per-definition override wins over plugin
+  defaults. Plugin configuration is global only; do not add per-alert rules there.
+  Expose the effective policy and where each value came from.
+- Only inactive definitions learned from notification deltas may be forgotten.
+  Forgetting is an explicit destructive operation that removes their history and
+  policy; zone-derived definitions and active alerts must reject it.
 - Policy edits apply to future occurrences by default. Do not silently add or
   cancel delivery work for an occurrence already in progress; any explicit
   "apply to current occurrence" operation must be auditable and idempotent.
@@ -342,7 +345,7 @@ Recommended module boundaries:
   - normalization
   - lifecycle transitions
   - deduplication/coalescing
-  - rule matching
+  - per-alert policy resolution
 
 - `src/storage/`
   - migrations
@@ -518,7 +521,7 @@ Discord should be considered an informational notifier, not a guaranteed wake-up
 
 ## Parallel delivery
 
-A rule may target more than one transport:
+A per-alert policy may target more than one transport:
 
 ```yaml
 notifiers:
@@ -568,7 +571,7 @@ Do not simply drop a cleared alert that was never delivered.
 
 ## Connectivity modes
 
-Rules must support at least:
+Per-alert policies must support at least:
 
 - `queue`
   - persist now;
@@ -584,23 +587,24 @@ Rules must support at least:
   - persist;
   - wake only if the condition remains active past a configured duration.
 
-Recommended rule example:
+Conceptual per-alert policy examples (stored by the plugin, not entered in the
+Signal K plugin configuration):
 
 ```yaml
-rules:
-  - match: "notifications.environment.inside.fridge.*"
+alerts:
+  - path: "notifications.environment.inside.fridge.temperature"
     minSeverity: warn
     connectivity: queue
     notifiers: [ntfy-main]
 
-  - match: "notifications.electrical.shorePower.*"
+  - path: "notifications.electrical.shorePower.lost"
     minSeverity: alarm
     connectivity:
       mode: wake_after
       delaySeconds: 600
     notifiers: [ntfy-main, discord-boat]
 
-  - match: "notifications.bilge.highWater"
+  - path: "notifications.bilge.highWater"
     minSeverity: emergency
     connectivity: wake
     notifiers: [ntfy-main, pagerduty-critical, discord-boat]
@@ -810,13 +814,14 @@ Configuration must support:
 
 - multiple configured instances of the same transport;
 - per-instance secrets;
-- rules matching Signal K paths;
-- minimum severity;
-- connectivity mode;
-- notifier fan-out;
+- per-notifier global minimum severity;
+- global policy defaults;
 - retry settings;
 - persistence settings;
 - connectivity switch settings.
+
+Per-alert minimum severity, connectivity mode, activation delay, one-time behavior,
+and notifier fan-out belong in durable Alert center settings, not plugin configuration.
 
 Never log secrets.
 
