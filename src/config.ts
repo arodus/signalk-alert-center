@@ -23,6 +23,7 @@ export type NotifierConfig =
     });
 export interface PluginConfig {
   storage?: { path?: string };
+  maintenance?: { resetDatabase?: boolean };
   discovery?: { zoneRefreshSeconds?: number };
   retry?: {
     initialSeconds?: number;

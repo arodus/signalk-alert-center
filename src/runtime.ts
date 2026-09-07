@@ -74,6 +74,23 @@ export class PersistentNotifierRuntime {
     return this.policy;
   }
 
+  private databasePath(options: PluginConfig): string {
+    return (
+      options.storage?.path ??
+      path.join(this.app.getDataDirPath(), "persistent-notifier.sqlite")
+    );
+  }
+
+  resetDatabase(options: PluginConfig): void {
+    validateConfig(options);
+    const database = new AlertDatabase(this.databasePath(options));
+    try {
+      database.reset();
+    } finally {
+      database.close();
+    }
+  }
+
   status() {
     return {
       connectivity: this.connectivity
@@ -502,10 +519,7 @@ export class PersistentNotifierRuntime {
   start(options: PluginConfig): void {
     validateConfig(options);
     this.config = options;
-    this.database = new AlertDatabase(
-      options.storage?.path ??
-        path.join(this.app.getDataDirPath(), "persistent-notifier.sqlite"),
-    );
+    this.database = new AlertDatabase(this.databasePath(options));
     this.policy = new AlertPolicyResolver(this.database, options);
 
     this.transports = new Map<string, NotificationTransport>();

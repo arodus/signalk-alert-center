@@ -45,6 +45,21 @@ export const pluginConfigSchema = {
         },
       },
     },
+    maintenance: {
+      type: "object",
+      title: "Database maintenance",
+      description:
+        "Destructive maintenance actions. Signal K automatically turns one-shot actions off after they finish.",
+      properties: {
+        resetDatabase: {
+          type: "boolean",
+          title: "Reset database when Save Configuration is clicked",
+          description:
+            "Permanently deletes every stored alert definition, occurrence, event, delivery, and per-alert policy, then creates a clean database and discovers current Signal K zone definitions again. Notification service configuration is not deleted.",
+          default: false,
+        },
+      },
+    },
     discovery: {
       type: "object",
       title: "Definition discovery",
@@ -265,11 +280,15 @@ export const pluginConfigSchema = {
         probe: {
           type: "object",
           title: "Internet reachability probe",
+          description:
+            "The plugin sends an HTTP HEAD request and considers any 2xx response online. Use a lightweight public endpoint that works without authentication.",
           properties: {
             url: {
               type: "string",
-              title: "Probe URL",
-              default: "https://example.com/generate_204",
+              title: "Internet check URL",
+              description:
+                "URL that accepts HEAD requests and returns a 2xx response when the Internet is reachable.",
+              default: "https://www.gstatic.com/generate_204",
             },
             timeoutSeconds: {
               type: "number",

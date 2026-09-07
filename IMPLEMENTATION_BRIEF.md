@@ -734,7 +734,8 @@ connectivity:
 
   probe:
     type: https
-    url: https://example.com/generate_204
+    # Must accept HEAD and return 2xx when the Internet is reachable.
+    url: https://www.gstatic.com/generate_204
 
 notifiers:
   - name: Crew ntfy
