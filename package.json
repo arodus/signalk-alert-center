@@ -1,0 +1,27 @@
+{
+  "name": "signalk-persistent-notifier",
+  "version": "0.1.0",
+  "description": "Durable offline-first Signal K alert delivery plugin",
+  "main": "dist/plugin.js",
+  "types": "dist/plugin.d.ts",
+  "files": ["dist", "README.md"],
+  "keywords": ["signalk-node-server-plugin", "signalk", "notifications"],
+  "license": "MIT",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "picomatch": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/picomatch": "^2.3.4",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "signalKPlugin": { "id": "signalk-persistent-notifier" }
+}
