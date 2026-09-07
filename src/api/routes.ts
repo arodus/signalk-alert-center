@@ -417,7 +417,7 @@ export function registerAlertCenterRoutes(
           throw new ApiError(
             400,
             "UNKNOWN_NOTIFIER",
-            "One or more notifier ids are unknown",
+            "One or more notification service names are unknown",
             { ids: missing },
           );
       }

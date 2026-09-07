@@ -70,20 +70,22 @@ describe("PersistentNotifierRuntime", () => {
     const runtime = new PersistentNotifierRuntime(app);
     runtime.start({
       storage: { path: filename },
-      notifiers: {
-        warning: {
+      notifiers: [
+        {
+          name: "warning",
           type: "ntfy",
           server: "http://127.0.0.1:9",
           topic: "test",
           minSeverity: "warn",
         },
-        critical: {
+        {
+          name: "critical",
           type: "ntfy",
           server: "http://127.0.0.1:9",
           topic: "test",
           minSeverity: "emergency",
         },
-      },
+      ],
       defaults: {
         oneTime: true,
         minSeverity: "alarm",

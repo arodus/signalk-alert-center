@@ -84,7 +84,7 @@ This is distinct from **Forget alert**, which is available only for inactive
 discovered definitions and permanently removes their history and settings. Definitions
 derived from current Signal K zone metadata cannot be forgotten.
 
-The definition settings panel controls enabled state, notifier instances, minimum
+The definition settings panel controls enabled state, notification services, minimum
 severity, connectivity mode, one-time/rearm behavior, and
 `activationDelaySeconds`. Overrides are stored by this plugin; Signal K
 `meta.zones` remain authoritative input metadata and are not rewritten. Settings
@@ -176,7 +176,7 @@ Signal K router API, and publish the complete contract through `getOpenApi()`.
 - Render active and known definitions in one compact alert table.
 - Add an accessible detail drawer opened by click and keyboard, with paginated
   recent history and notifier outcomes.
-- Add a policy editor populated from configured notifier instances, with validation
+- Add a policy editor populated from configured notification services, with validation
   and an explicit save result.
 - Add global history filters, pagination, dismissed-state visibility, empty/loading/
   auth/error states, and responsive layouts suitable for an onboard tablet.
@@ -251,31 +251,34 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
 ```json
 {
   "storage": { "path": "/var/lib/signalk/persistent-notifier/alerts.sqlite" },
-  "notifiers": {
-    "ntfy-main": {
+  "notifiers": [
+    {
+      "name": "Crew ntfy",
       "type": "ntfy",
       "server": "https://ntfy.sh",
       "topic": "boat-alerts",
       "token": "secret",
       "minSeverity": "warn"
     },
-    "pagerduty-critical": {
+    {
+      "name": "Emergency PagerDuty",
       "type": "pagerduty",
       "routingKey": "secret",
       "minSeverity": "alarm"
     },
-    "discord-boat": {
+    {
+      "name": "Boat Discord",
       "type": "discord",
       "webhookUrl": "https://discord.com/api/webhooks/...",
       "minSeverity": "alert"
     }
-  },
+  ],
   "defaults": {
     "enabled": true,
     "minSeverity": "warn",
     "activationDelaySeconds": 0,
     "connectivity": { "mode": "queue" },
-    "notifiers": ["ntfy-main"]
+    "notifiers": ["Crew ntfy"]
   },
   "connectivity": {
     "enabled": true,
@@ -298,6 +301,12 @@ connectivity management. Per-alert notifier selection, minimum severity, activat
 delay, one-time behavior, and connectivity policy are stored from the Alert center's
 **Settings** dialog. A notifier's global `minSeverity` is a hard floor; an alert-level
 override cannot make that notifier send at a lower severity.
+
+Each entry under **Notification services** has a unique, human-readable `name`. That
+name appears in the per-alert Settings dialog and is used by the default alert policy.
+Renaming a service does not rewrite saved alert policies, so reselect the renamed
+service on affected alerts. The Signal K form presents separate ntfy, PagerDuty, and
+Discord entry types and only asks for credentials relevant to that service.
 
 Repeated updates coalesce by notification path and available source identifier. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
 

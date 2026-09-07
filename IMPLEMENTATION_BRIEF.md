@@ -426,7 +426,7 @@ Configuration:
 
 ```yaml
 notifiers:
-  ntfy-main:
+  - name: Crew ntfy
     type: ntfy
     enabled: true
     minSeverity: warn
@@ -434,13 +434,13 @@ notifiers:
     topic: ...
     token: ...
 
-  pagerduty-critical:
+  - name: Emergency PagerDuty
     type: pagerduty
     enabled: true
     minSeverity: alarm
     routingKey: ...
 
-  discord-boat:
+  - name: Boat Discord
     type: discord
     enabled: true
     minSeverity: alert
@@ -449,7 +449,8 @@ notifiers:
 
 Instantiate each notifier independently.
 
-The scheduler addresses notifier **instance IDs**, not only notifier type.
+The scheduler uses the configured notification service **name** as its stable key,
+not only the service type.
 
 This permits multiple ntfy topics, multiple Discord channels, etc.
 
@@ -736,19 +737,19 @@ connectivity:
     url: https://example.com/generate_204
 
 notifiers:
-  ntfy-main:
+  - name: Crew ntfy
     type: ntfy
     server: https://ntfy.sh
     topic: ...
     token: ...
     minSeverity: warn
 
-  pagerduty-critical:
+  - name: Emergency PagerDuty
     type: pagerduty
     routingKey: ...
     minSeverity: alarm
 
-  discord-boat:
+  - name: Boat Discord
     type: discord
     webhookUrl: ...
     minSeverity: alert
@@ -760,7 +761,7 @@ defaults:
   connectivity:
     mode: queue
   notifiers:
-    - ntfy-main
+    - Crew ntfy
 ```
 
 Adapt final schema to Signal K plugin configuration conventions.

@@ -407,10 +407,10 @@ function openPolicy(id) {
     ? state.notifiers
         .map((notifier) => {
           const id = typeof notifier === "string" ? notifier : notifier.id;
-          return `<label class="check-label"><input type="checkbox" name="notifier" value="${escapeHtml(id)}" ${(policy.notifierIds ?? []).includes(id) ? "checked" : ""} /> ${escapeHtml(id)} <small>${escapeHtml(notifier.type ?? "")}${notifier.minimumSeverity ? ` · global minimum ${escapeHtml(notifier.minimumSeverity)}` : ""}</small></label>`;
+          return `<label class="check-label"><input type="checkbox" name="notifier" value="${escapeHtml(id)}" ${(policy.notifierIds ?? []).includes(id) ? "checked" : ""} /> ${escapeHtml(notifier.name ?? id)} <small>${escapeHtml(notifier.type ?? "")}${notifier.minimumSeverity ? ` · sends ${escapeHtml(notifier.minimumSeverity)} and above` : ""}</small></label>`;
         })
         .join("")
-    : '<p class="alert-meta">No notifier instances configured.</p>';
+    : '<p class="alert-meta">No notification services are configured. Add one in the Signal K plugin settings first.</p>';
   elements.policyDialog.showModal();
 }
 async function forgetDefinition() {

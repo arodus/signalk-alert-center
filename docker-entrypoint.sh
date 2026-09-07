@@ -51,11 +51,26 @@ if [ ! -f /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.jso
     "storage": { "path": "/home/node/.signalk/persistent-notifier.sqlite" },
     "discovery": { "zoneRefreshSeconds": $zone_refresh_seconds },
     "connectivity": { "enabled": false },
-    "notifiers": {}
+    "notifiers": []
   }
 }
 EOF
 fi
+
+# Convert the pre-list development format without dropping locally stored
+# credentials. New installations and the Signal K form always write an array.
+node - /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json <<'NODE'
+const fs = require("node:fs");
+const filename = process.argv[2];
+const saved = JSON.parse(fs.readFileSync(filename, "utf8"));
+const notifiers = saved.configuration?.notifiers;
+if (notifiers && !Array.isArray(notifiers) && typeof notifiers === "object") {
+  saved.configuration.notifiers = Object.entries(notifiers).map(
+    ([name, configuration]) => ({ name, ...configuration }),
+  );
+  fs.writeFileSync(filename, `${JSON.stringify(saved, null, 2)}\n`);
+}
+NODE
 
 if [ -d /opt/signalk-test-fixture ]; then
   fixture_seed_on_start="${SIGNALK_FIXTURE_SEED_ON_START:-false}"

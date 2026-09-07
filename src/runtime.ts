@@ -196,9 +196,16 @@ export class PersistentNotifierRuntime {
       normalized.path,
       normalized.severity,
     );
-    const notifierIds = policy.notifierIds.filter(
-      (id) => this.config.notifiers?.[id]?.enabled !== false,
+    const configuredNotifiers = new Map(
+      (this.config.notifiers ?? []).map((notifier) => [
+        notifier.name,
+        notifier,
+      ]),
     );
+    const notifierIds = policy.notifierIds.filter((id) => {
+      const notifier = configuredNotifiers.get(id);
+      return Boolean(notifier && notifier.enabled !== false);
+    });
     const occurrence = new AlertLifecycle(this.db(), []).ingest(
       normalized,
       policy.enabled ? notifierIds : [],
@@ -213,7 +220,7 @@ export class PersistentNotifierRuntime {
         notifierMinimumSeverities: Object.fromEntries(
           notifierIds.map((id) => [
             id,
-            this.config.notifiers?.[id]?.minSeverity ?? "normal",
+            configuredNotifiers.get(id)?.minSeverity ?? "normal",
           ]),
         ),
       },
@@ -502,11 +509,11 @@ export class PersistentNotifierRuntime {
     this.policy = new AlertPolicyResolver(this.database, options);
 
     this.transports = new Map<string, NotificationTransport>();
-    for (const [id, notifier] of Object.entries(options.notifiers ?? {})) {
+    for (const notifier of options.notifiers ?? []) {
       if (notifier.enabled === false) continue;
       if (notifier.type === "ntfy")
         this.transports.set(
-          id,
+          notifier.name,
           new NtfyTransport({
             server: String(notifier.server),
             topic: String(notifier.topic),
@@ -515,12 +522,12 @@ export class PersistentNotifierRuntime {
         );
       if (notifier.type === "pagerduty")
         this.transports.set(
-          id,
+          notifier.name,
           new PagerDutyTransport(String(notifier.routingKey)),
         );
       if (notifier.type === "discord")
         this.transports.set(
-          id,
+          notifier.name,
           new DiscordTransport(String(notifier.webhookUrl)),
         );
     }
@@ -624,10 +631,11 @@ export class PersistentNotifierRuntime {
     registerAlertCenterRoutes(compatible, {
       repository: () => (this.database ? repository : undefined),
       listNotifiers: () =>
-        Object.entries(this.config.notifiers ?? {})
-          .filter(([, notifier]) => notifier.enabled !== false)
-          .map(([id, notifier]) => ({
-            id,
+        (this.config.notifiers ?? [])
+          .filter((notifier) => notifier.enabled !== false)
+          .map((notifier) => ({
+            id: notifier.name,
+            name: notifier.name,
             type: notifier.type,
             enabled: true,
             minimumSeverity: notifier.minSeverity ?? "normal",

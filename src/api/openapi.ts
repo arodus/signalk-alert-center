@@ -416,9 +416,14 @@ export function getAlertCenterOpenApi() {
         },
         Notifier: {
           type: "object",
-          required: ["id", "type"],
+          required: ["id", "name", "type", "enabled"],
           properties: {
             id: { type: "string" },
+            name: {
+              type: "string",
+              description:
+                "Human-readable service name shown in alert Settings; also used as the stable policy key.",
+            },
             type: { type: "string" },
             enabled: { type: "boolean" },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },

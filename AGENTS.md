@@ -525,9 +525,9 @@ A per-alert policy may target more than one transport:
 
 ```yaml
 notifiers:
-  - ntfy-main
-  - pagerduty-critical
-  - discord-boat
+  - Crew ntfy
+  - Emergency PagerDuty
+  - Boat Discord
 ```
 
 All matching targets are scheduled independently.
@@ -595,19 +595,19 @@ alerts:
   - path: "notifications.environment.inside.fridge.temperature"
     minSeverity: warn
     connectivity: queue
-    notifiers: [ntfy-main]
+    notifiers: [Crew ntfy]
 
   - path: "notifications.electrical.shorePower.lost"
     minSeverity: alarm
     connectivity:
       mode: wake_after
       delaySeconds: 600
-    notifiers: [ntfy-main, discord-boat]
+    notifiers: [Crew ntfy, Boat Discord]
 
   - path: "notifications.bilge.highWater"
     minSeverity: emergency
     connectivity: wake
-    notifiers: [ntfy-main, pagerduty-critical, discord-boat]
+    notifiers: [Crew ntfy, Emergency PagerDuty, Boat Discord]
 ```
 
 ## Connectivity manager

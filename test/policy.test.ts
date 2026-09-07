@@ -7,9 +7,14 @@ describe("AlertPolicyResolver", () => {
   it("uses global defaults until a discovered alert gets a dashboard override", () => {
     const database = new AlertDatabase();
     const config: PluginConfig = {
-      notifiers: {
-        primary: { type: "ntfy", server: "http://ntfy", topic: "boat" },
-      },
+      notifiers: [
+        {
+          name: "primary",
+          type: "ntfy",
+          server: "http://ntfy",
+          topic: "boat",
+        },
+      ],
       defaults: { minSeverity: "warn", notifiers: ["primary"] },
     };
     const resolver = new AlertPolicyResolver(database, config);
