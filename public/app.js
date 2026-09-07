@@ -45,6 +45,10 @@ const formatDate = (value) =>
         timeStyle: "short",
       }).format(new Date(value))
     : "—";
+const latestTimestamp = (...values) =>
+  values.filter(Boolean).reduce((latest, value) => {
+    return !latest || new Date(value) > new Date(latest) ? value : latest;
+  }, undefined);
 const pageItems = (value) =>
   Array.isArray(value) ? value : (value?.items ?? []);
 const mergeById = (...collections) => [
@@ -164,7 +168,7 @@ function renderDefinitions() {
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
             <td data-label="Alert"><strong class="cell-title">${escapeHtml(item.name ?? item.pathPattern)}</strong><span class="cell-detail">${escapeHtml(item.pathPattern)}${occurrence ? ` · ${escapeHtml(sourceName(occurrence.sourceKey))}` : ` · ${escapeHtml(definitionOrigin(item.sourceType))}`}</span>${latest?.message ? `<span class="cell-detail message-detail">${escapeHtml(latest.message)}</span>` : ""}</td>
             <td data-label="Current status">${status}</td>
-            <td data-label="Last activity">${formatDate(latest?.lastSeenAt ?? latest?.startedAt ?? item.lastFiredAt)}</td>
+            <td data-label="Last activity">${formatDate(latestTimestamp(latest?.dismissedAt, latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
             <td data-label="Delivery">${policy.enabled === false ? '<span class="muted">Off</span>' : `<strong>${escapeHtml(policy.minimumSeverity ?? "normal")}+</strong><span class="cell-detail">${policy.activationDelaySeconds ?? 0}s delay · ${notifierCount} notifier${notifierCount === 1 ? "" : "s"}</span>`}</td>
             <td class="action-cell"><button class="button button-quiet button-small policy-button" data-id="${escapeHtml(item.id)}" type="button">Settings</button></td>
           </tr>`;

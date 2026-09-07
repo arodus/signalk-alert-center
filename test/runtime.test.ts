@@ -157,6 +157,17 @@ describe("PersistentNotifierRuntime", () => {
         runtime as unknown as { database: AlertDatabase }
       ).database.listWakeRequests(),
     ).toEqual([]);
+    expect(
+      await repository.dismissOccurrence(active.items[0].id),
+    ).toMatchObject({ status: "dismissed" });
+    const definitions = (await repository.listDefinitions({
+      limit: 10,
+    })) as Page<{ id: string; lastActivityAt?: Date }>;
+    expect(
+      definitions.items.find(
+        (definition) => definition.id === active.items[0].definitionId,
+      )?.lastActivityAt,
+    ).toBeInstanceOf(Date);
     subscriber?.({
       updates: [
         {

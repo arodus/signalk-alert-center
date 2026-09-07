@@ -365,6 +365,7 @@ export function getAlertCenterOpenApi() {
             zone: { type: "string" },
             oneTime: { type: "boolean" },
             lastFiredAt: { type: "string", format: "date-time" },
+            lastActivityAt: { type: "string", format: "date-time" },
             fireCount: { type: "integer", minimum: 0 },
             policy: { $ref: "#/components/schemas/Policy" },
           },

@@ -46,6 +46,7 @@ interface DefinitionView extends AlertDefinitionRecord {
   oneTime: boolean;
   fireCount: number;
   lastFiredAt?: Date;
+  lastActivityAt?: Date;
   policy: EffectivePolicy;
 }
 
@@ -240,6 +241,27 @@ export class PersistentNotifierRuntime {
           : latest,
       undefined,
     );
+    const lastActivityAt = occurrences.reduce<Date | undefined>(
+      (latest, occurrence) => {
+        const candidate = [
+          occurrence.lastSeenAt,
+          occurrence.clearedAt,
+          occurrence.acknowledgedAt,
+          occurrence.silencedAt,
+          occurrence.dismissedAt,
+        ].reduce<Date | undefined>(
+          (occurrenceLatest, timestamp) =>
+            timestamp && (!occurrenceLatest || timestamp > occurrenceLatest)
+              ? timestamp
+              : occurrenceLatest,
+          undefined,
+        );
+        return candidate && (!latest || candidate > latest)
+          ? candidate
+          : latest;
+      },
+      undefined,
+    );
     return {
       ...definition,
       description:
@@ -250,6 +272,7 @@ export class PersistentNotifierRuntime {
       oneTime: policy.oneTime,
       fireCount: occurrences.length,
       lastFiredAt,
+      lastActivityAt,
       policy,
     };
   }
