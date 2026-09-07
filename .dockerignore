@@ -9,4 +9,3 @@ data
 *.sqlite-shm
 *.sqlite-wal
 npm-debug.log*
-
