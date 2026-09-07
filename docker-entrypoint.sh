@@ -18,28 +18,60 @@ done
 # baked into that path at image build time. Install the plugin here on
 # every start instead so mounted (persistent) or ephemeral data dirs both
 # end up with it; this mirrors a real "npm install --prefix .signalk" install.
-rm -rf /home/node/.signalk/node_modules/signalk-persistent-notifier
-cp -r /opt/signalk-persistent-notifier /home/node/.signalk/node_modules/signalk-persistent-notifier
+install_plugin() {
+  source_dir="$1"
+  package_name="$2"
+  destination="/home/node/.signalk/node_modules/$package_name"
+  rm -rf "$destination"
+  cp -R "$source_dir" "$destination"
+}
+
+install_plugin /opt/signalk-persistent-notifier signalk-persistent-notifier
+if [ -d /opt/signalk-test-fixture ]; then
+  install_plugin /opt/signalk-test-fixture signalk-test-fixture
+fi
 
 if [ ! -f /home/node/.signalk/settings.json ]; then
   cat > /home/node/.signalk/settings.json <<'EOF'
 {
   "port": 3000,
   "host": "0.0.0.0",
-  "plugins": {
-    "signalk-persistent-notifier": {
-      "storage": {
-        "path": "/home/node/.signalk/persistent-notifier.sqlite"
-      },
-      "connectivity": {
-        "enabled": false
-      },
-      "notifiers": {},
-      "rules": []
-    }
+  "plugins": {}
+}
+EOF
+fi
+
+mkdir -p /home/node/.signalk/plugin-config-data
+if [ ! -f /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json ]; then
+  zone_refresh_seconds="${SIGNALK_ZONE_REFRESH_SECONDS:-300}"
+  cat > /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json <<EOF
+{
+  "enabled": true,
+  "configuration": {
+    "storage": { "path": "/home/node/.signalk/persistent-notifier.sqlite" },
+    "discovery": { "zoneRefreshSeconds": $zone_refresh_seconds },
+    "connectivity": { "enabled": false },
+    "notifiers": {},
+    "rules": []
   }
 }
 EOF
+fi
+
+if [ -d /opt/signalk-test-fixture ] && [ ! -f /home/node/.signalk/plugin-config-data/signalk-test-fixture.json ]; then
+  cat > /home/node/.signalk/plugin-config-data/signalk-test-fixture.json <<'EOF'
+{
+  "enabled": true,
+  "configuration": {}
+}
+EOF
+fi
+
+if [ "${SIGNALK_DISABLE_SECURITY:-0}" = "1" ]; then
+  # Acceptance containers are isolated on a private Compose network. Skipping
+  # the image wrapper avoids its unconditional --securityenabled flag and lets
+  # tests exercise mutation routes without baking credentials into fixtures.
+  exec /home/node/signalk/node_modules/signalk-server/bin/signalk-server "$@"
 fi
 
 exec /home/node/signalk/startup.sh "$@"

@@ -1,0 +1,9 @@
+{
+  "name": "signalk-test-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.js",
+  "keywords": [
+    "signalk-node-server-plugin"
+  ]
+}

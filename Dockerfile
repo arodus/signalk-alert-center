@@ -1,16 +1,29 @@
-# Build the plugin on Node 22 (matches this repo's engines requirement), then
-# install it into the official signalk-server image the same declarative way
-# real plugin deployments do it. See:
-# https://github.com/SignalK/signalk-server/blob/master/docker/README.md
-FROM node:22-alpine AS build
-WORKDIR /build
-COPY . .
-RUN npm install && npm run build && npm prune --omit=dev
+ARG SIGNALK_SERVER_IMAGE=cr.signalk.io/signalk/signalk-server:v2.31.1
 
-FROM cr.signalk.io/signalk/signalk-server:latest
+# Keep the compiler image deterministic and copy only package inputs. In
+# particular, never put the persistent Signal K data directory in an image.
+FROM node:22.14.0-alpine3.21 AS build
+WORKDIR /build
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci
+COPY src ./src
+COPY public ./public
+COPY README.md ./README.md
+RUN npm run build && npm prune --omit=dev
+
+FROM ${SIGNALK_SERVER_IMAGE} AS runtime
 # Baked outside /home/node/.signalk: that path is normally bind-mounted for
 # persistence, which would otherwise shadow a plugin copied directly into it.
 # The entrypoint installs it into the mounted volume on first run instead.
-COPY --from=build --chown=node:node /build /opt/signalk-persistent-notifier
+COPY --from=build --chown=node:node /build/package.json /build/README.md /opt/signalk-persistent-notifier/
+COPY --from=build --chown=node:node /build/dist /opt/signalk-persistent-notifier/dist
+COPY --from=build --chown=node:node /build/public /opt/signalk-persistent-notifier/public
+COPY --from=build --chown=node:node /build/node_modules /opt/signalk-persistent-notifier/node_modules
 COPY --chown=node:node --chmod=755 docker-entrypoint.sh /home/node/docker-entrypoint.sh
 ENTRYPOINT ["/home/node/docker-entrypoint.sh"]
+
+# Test-only target. The default final image does not contain the fixture plugin.
+FROM runtime AS acceptance
+COPY --chown=node:node test/integration/fixture-plugin /opt/signalk-test-fixture
+
+FROM runtime AS final
