@@ -353,6 +353,28 @@ fresh development database:
 docker compose -f docker-compose.live.yml down -v
 ```
 
+To start the same local server with a test-only fixture plugin and populate it
+with realistic demo alerts, run:
+
+```sh
+npm run demo
+```
+
+The fixture publishes active refrigerator, bilge, battery, engine, anchor, and
+security alerts, plus cleared and recurring occurrences and two independent
+sources on the same bilge path. It never contacts external services or vessel
+hardware. Open the alert dashboard after a few seconds to browse the generated
+definitions and history.
+
+You can add another batch while the demo fixture is installed with:
+
+```sh
+curl -X POST http://localhost:3000/plugins/signalk-test-fixture/seed
+```
+
+If Signal K security is enabled, invoke that endpoint from an authenticated client
+or simply rerun `npm run demo`, which seeds automatically on fixture startup.
+
 ## Development
 
 `npm test` runs the lifecycle, persistence, API, policy, runtime, scheduler, and

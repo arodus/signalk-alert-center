@@ -58,11 +58,12 @@ if [ ! -f /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.jso
 EOF
 fi
 
-if [ -d /opt/signalk-test-fixture ] && [ ! -f /home/node/.signalk/plugin-config-data/signalk-test-fixture.json ]; then
-  cat > /home/node/.signalk/plugin-config-data/signalk-test-fixture.json <<'EOF'
+if [ -d /opt/signalk-test-fixture ]; then
+  fixture_seed_on_start="${SIGNALK_FIXTURE_SEED_ON_START:-false}"
+  cat > /home/node/.signalk/plugin-config-data/signalk-test-fixture.json <<EOF
 {
   "enabled": true,
-  "configuration": {}
+  "configuration": { "seedOnStart": $fixture_seed_on_start }
 }
 EOF
 fi

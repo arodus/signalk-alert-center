@@ -1,0 +1,6 @@
+services:
+  signalk:
+    build:
+      target: acceptance
+    environment:
+      SIGNALK_FIXTURE_SEED_ON_START: "true"

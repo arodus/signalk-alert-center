@@ -170,4 +170,23 @@ const repeated = await eventually(
 assert.notEqual(repeated.items[0].id, occurrence.id);
 assert.equal(Boolean(repeated.items[0].dismissedAt), false);
 
+const seeded = await json(`${signalkUrl}/plugins/signalk-test-fixture/seed`, {
+  method: "POST",
+});
+assert.equal(seeded.published, 12);
+const demoOccurrences = await eventually(
+  () =>
+    json(
+      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
+    ),
+  (page) => page.items.length >= 10,
+  "demo deltas were not persisted",
+);
+assert.equal(
+  demoOccurrences.items.filter(
+    (item) => item.path === "notifications.bilge.highWater",
+  ).length,
+  2,
+);
+
 console.log("Docker acceptance smoke test passed");
