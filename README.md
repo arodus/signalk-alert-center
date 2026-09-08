@@ -250,7 +250,6 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
 
 ```json
 {
-  "storage": { "path": "/var/lib/signalk/persistent-notifier/alerts.sqlite" },
   "notifiers": [
     {
       "name": "Crew ntfy",
@@ -297,6 +296,11 @@ The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newe
   }
 }
 ```
+
+By default, the database is `persistent-notifier.sqlite` inside Signal K's data
+directory, so the configuration works across native and container installations.
+When `storage.path` is relative, it is resolved from that data directory. An absolute
+path remains supported when you intentionally manage the database elsewhere.
 
 The Signal K plugin form contains only global configuration: storage/discovery,
 retry behavior, notifier connections and secrets, global defaults, and optional

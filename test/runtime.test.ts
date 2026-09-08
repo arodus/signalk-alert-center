@@ -19,6 +19,29 @@ describe("PersistentNotifierRuntime", () => {
     directories.length = 0;
   });
 
+  it("resolves relative database paths inside the Signal K data directory", () => {
+    const dataDirectory = join(tmpdir(), "signalk-data");
+    const runtime = new PersistentNotifierRuntime({
+      getDataDirPath: () => dataDirectory,
+    } as unknown as ServerAPI);
+    const databasePath = (
+      runtime as unknown as {
+        databasePath(options: { storage?: { path?: string } }): string;
+      }
+    ).databasePath.bind(runtime);
+    const absolutePath = join(tmpdir(), "external-alerts.sqlite");
+
+    expect(databasePath({})).toBe(
+      join(dataDirectory, "persistent-notifier.sqlite"),
+    );
+    expect(databasePath({ storage: { path: "notifier/alerts.sqlite" } })).toBe(
+      join(dataDirectory, "notifier/alerts.sqlite"),
+    );
+    expect(databasePath({ storage: { path: absolutePath } })).toBe(
+      absolutePath,
+    );
+  });
+
   it("discovers zones and persists source-aware recurring occurrences", async () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-runtime-"));
     directories.push(directory);

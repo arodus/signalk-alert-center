@@ -41,7 +41,9 @@ export const pluginConfigSchema = {
         path: {
           type: "string",
           title: "SQLite database file path",
-          default: "/home/node/.signalk/persistent-notifier.sqlite",
+          description:
+            "Relative paths are stored inside Signal K's data directory. Use an absolute path only when the database must live elsewhere.",
+          default: "persistent-notifier.sqlite",
         },
       },
     },
