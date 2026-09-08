@@ -202,12 +202,20 @@ function renderDefinitions() {
     .sort(
       (left, right) =>
         Number(right.active) - Number(left.active) ||
+        (left.active && right.active
+          ? ["normal", "warn", "alert", "alarm", "emergency"].indexOf(
+              right.latest?.currentSeverity,
+            ) -
+            ["normal", "warn", "alert", "alarm", "emergency"].indexOf(
+              left.latest?.currentSeverity,
+            )
+          : 0) ||
         String(left.definition.name).localeCompare(
           String(right.definition.name),
         ),
     );
   $("#list-summary").textContent =
-    `${visible.length} shown · ${showActive ? "Active alerts" : "All known alerts"}${$("#dismissed-filter").checked ? " · including dismissed" : " · dismissed hidden"}`;
+    `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first${$("#dismissed-filter").checked ? " · including dismissed" : ""}`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
             <thead><tr><th>Alert</th><th>Status</th><th>Last activity</th><th>Notify via</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
@@ -219,18 +227,15 @@ function renderDefinitions() {
             const hasHistory = Boolean(latest || item.fireCount);
             const alertSummary = [
               latest?.message,
-              occurrence
-                ? sourceName(occurrence.sourceKey)
-                : definitionOrigin(item.sourceType),
               definitionZones(item).length
-                ? `${definitionZones(item).length} zone thresholds`
+                ? `Configured zone · ${definitionZones(item).length} thresholds`
                 : "",
             ]
               .filter(Boolean)
               .join(" · ");
             const status = active
               ? `<span class="status-summary"><span class="alert-severity ${escapeHtml(latest.currentSeverity)}">${escapeHtml(latest.currentSeverity)}</span><span class="muted">Active${latest.acknowledgedAt ? " · acknowledged" : ""}${latest.silencedAt ? " · silenced" : ""}${latest.dismissedAt ? " · dismissed" : ""}</span></span>`
-              : `<span class="muted">${hasHistory ? "Inactive" : "Never fired"}</span>`;
+              : `<span class="muted">${hasHistory ? "Inactive" : "No alert recorded"}</span>`;
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Status">${status}</td>
@@ -240,7 +245,7 @@ function renderDefinitions() {
           </tr>`;
           })
           .join("")}</tbody></table>`
-    : `<div class="empty"><strong>${search || severity ? "No matching alerts" : showActive ? "No active alerts to show" : "No known alerts yet"}</strong><p>${search || severity ? "Try another search or choose All severities." : showActive ? "Choose All known alerts to view inactive alerts and configured zone thresholds." : "Alerts appear when Signal K reports a notification or defines a zone threshold."}</p></div>`;
+    : `<div class="empty"><strong>${search || severity ? "No matching alerts" : showActive ? "No active alerts to show" : "No known alerts yet"}</strong><p>${search || severity ? "Try another search or choose All severities." : showActive ? "Choose All alerts and zones to view inactive alerts and configured thresholds." : "Alerts appear when Signal K reports a notification or defines a zone threshold."}</p></div>`;
   document.querySelectorAll("[data-definition-id]").forEach((row) => {
     const open = () =>
       row.dataset.occurrenceId

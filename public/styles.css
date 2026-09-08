@@ -558,9 +558,47 @@ fieldset {
 }
 .dialog-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 22px;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+dialog .button {
+  padding: 6px 10px;
+  min-height: 32px;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+#policy-forget {
+  margin-right: auto;
+}
+dialog .drawer-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+dialog .drawer-header > div {
+  min-width: 0;
+}
+dialog h2 {
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+dialog .icon-button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  line-height: 1;
+}
+dialog .form-field {
+  margin: 12px 0;
+}
+dialog input[type="checkbox"] {
+  flex: none;
 }
 .form-result {
   min-height: 1.4em;

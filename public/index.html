@@ -46,16 +46,17 @@
           <div>
             <h2>Alerts</h2>
             <p>
-              Open an alert for history and zone thresholds. Use Settings to
-              choose where and when to notify.
+              All configured zones and discovered alerts, with active alerts
+              first. Open a row for thresholds and history, or Settings for
+              notifications.
             </p>
           </div>
         </div>
         <form id="history-filters" class="filter-row">
           <label for="state-filter">Show</label
           ><select id="state-filter" name="state">
-            <option value="active" selected>Active alerts</option>
-            <option value="">All known alerts</option>
+            <option value="" selected>All alerts and zones</option>
+            <option value="active">Active alerts only</option>
           </select>
           <label for="alert-search" class="visually-hidden"
             >Search alerts</label

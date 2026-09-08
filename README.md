@@ -347,15 +347,19 @@ bounded cursor pagination and validated filters. The complete request and respon
 contract is returned through the plugin's OpenAPI document.
 
 The dashboard is served at `/signalk-persistent-notifier`. One compact table puts
-active alerts first and can switch to all known definitions. Select an alert to open
+all known definitions together with active alerts first. Select an alert to open
 its current information and recent event timeline; alert actions and **Settings** are
 available there as well as directly from the row. Acknowledge and silence apply only
 to active occurrences. **Include dismissed** updates the table immediately. Inactive
 discovered definitions can be permanently forgotten from Settings; active alerts and
 Signal K zone definitions cannot be forgotten.
 
-Use **All known alerts** to include inactive alerts and zone definitions that have
-never fired. Search matches alert names, paths, sources, and loaded messages.
+The default **All alerts and zones** view includes inactive alerts and zone
+definitions that have never fired. Active alerts appear first, highest severity
+first. **Active alerts only** is an optional filter. **No alert recorded** means
+there is no recorded notification; it does not claim the sensor is currently normal.
+Search matches alert names, paths, sources, and loaded messages.
+Source names are shown in alert details, not in the table.
 Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert, with **Settings** for changes.
