@@ -27,6 +27,12 @@ describe("validateConfig", () => {
     ).toBe("https://www.gstatic.com/generate_204");
   });
 
+  it("uses a portable database filename by default", () => {
+    const storagePath = pluginConfigSchema.properties.storage.properties.path;
+    expect(storagePath.default).toBe("persistent-notifier.sqlite");
+    expect(storagePath.description).toContain("Signal K's data directory");
+  });
+
   it("rejects zone refresh intervals below one second", () => {
     expect(() =>
       validateConfig({ discovery: { zoneRefreshSeconds: 0 } }),

@@ -75,10 +75,11 @@ export class PersistentNotifierRuntime {
   }
 
   private databasePath(options: PluginConfig): string {
-    return (
-      options.storage?.path ??
-      path.join(this.app.getDataDirPath(), "persistent-notifier.sqlite")
-    );
+    const configuredPath =
+      options.storage?.path?.trim() || "persistent-notifier.sqlite";
+    return path.isAbsolute(configuredPath)
+      ? configuredPath
+      : path.join(this.app.getDataDirPath(), configuredPath);
   }
 
   resetDatabase(options: PluginConfig): void {
