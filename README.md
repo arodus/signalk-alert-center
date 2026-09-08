@@ -350,6 +350,10 @@ to active occurrences. **Include dismissed** updates the table immediately. Inac
 discovered definitions can be permanently forgotten from Settings; active alerts and
 Signal K zone definitions cannot be forgotten.
 
+The collapsed **Defined zones** panel above the alert table lists every path with
+Signal K `meta.zones` and its state/threshold ranges without grouping or filtering the
+alert list. The same zone ranges appear in an alert's detail drawer.
+
 Policy edits apply to future occurrences. The occurrence snapshots the effective
 one-time, severity, activation, rearm, connectivity, and notifier policy so a later
 settings edit cannot rewrite history or silently retarget pending work.

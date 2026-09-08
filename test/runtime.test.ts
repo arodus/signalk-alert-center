@@ -164,12 +164,21 @@ describe("PersistentNotifierRuntime", () => {
     ).toMatchObject({ status: "dismissed" });
     const definitions = (await repository.listDefinitions({
       limit: 10,
-    })) as Page<{ id: string; lastActivityAt?: Date }>;
+    })) as Page<{
+      id: string;
+      lastActivityAt?: Date;
+      metadata?: { zones?: Array<{ upper?: number; state: string }> };
+    }>;
     expect(
       definitions.items.find(
         (definition) => definition.id === active.items[0].definitionId,
       )?.lastActivityAt,
     ).toBeInstanceOf(Date);
+    expect(
+      definitions.items.find(
+        (definition) => definition.id === active.items[0].definitionId,
+      )?.metadata?.zones,
+    ).toEqual([{ upper: 281.15, state: "alarm" }]);
     subscriber?.({
       updates: [
         {
