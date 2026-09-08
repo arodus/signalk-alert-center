@@ -113,12 +113,6 @@ export const pluginConfigSchema = {
             "Newly discovered alerts inherit this value until their Settings are changed in the Alert center.",
           default: true,
         },
-        oneTime: {
-          type: "boolean",
-          title: "Mark new occurrences as one-time",
-          description:
-            "Stores the one-time label on new occurrences. A later Signal K raise/clear cycle still creates a new occurrence.",
-        },
         minSeverity: {
           type: "string",
           title: "Lowest severity sent by default",
@@ -186,6 +180,7 @@ export const pluginConfigSchema = {
         "Add each ntfy, PagerDuty, or Discord connection once. Alerts select these connections by their service name.",
       default: [],
       items: {
+        title: "Service type",
         oneOf: [
           {
             type: "object",
@@ -316,6 +311,16 @@ export const pluginConfigSchema = {
           default: 300,
         },
       },
+    },
+  },
+};
+
+// Signal K passes this to its configuration form renderer.
+export const pluginUiSchema = {
+  "ui:order": ["*", "maintenance"],
+  notifiers: {
+    items: {
+      type: { "ui:widget": "hidden" },
     },
   },
 };

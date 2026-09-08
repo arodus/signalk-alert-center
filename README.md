@@ -16,7 +16,7 @@ One-time behavior is snapshotted when an occurrence starts. The occurrence remai
 visible until **Dismiss** is selected; dismissal is soft, so its history
 and pending delivery work remain intact. A later raise creates a visible new
 occurrence. Per-definition settings cover enabled state, minimum severity,
-notifiers, activation delay, one-time/rearm behavior, and connectivity mode.
+notifiers, activation delay, repeat interval, and connectivity mode.
 
 Local sound/TTS playback is intentionally not implemented. The remaining roadmap
 is transport resolve semantics, richer global history filters/observability,
@@ -85,7 +85,7 @@ discovered definitions and permanently removes their history and settings. Defin
 derived from current Signal K zone metadata cannot be forgotten.
 
 The definition settings panel controls enabled state, notification services, minimum
-severity, connectivity mode, one-time/rearm behavior, and
+severity, connectivity mode, repeat interval, and
 `activationDelaySeconds`. Overrides are stored by this plugin; Signal K
 `meta.zones` remain authoritative input metadata and are not rewritten. Settings
 apply to future occurrences by default so changing a policy does not silently
@@ -312,7 +312,10 @@ re-initializes the schema; discovers current Signal K definitions again; and
 automatically turns the reset control back off. Global plugin configuration,
 including notification service secrets, is retained.
 
-Per-alert notifier selection, minimum severity, activation delay, one-time behavior,
+Database maintenance appears last in the plugin settings. Each notification
+service has one service-type selector; its stored type field is hidden.
+
+Per-alert notifier selection, minimum severity, activation delay, repeat interval,
 and connectivity policy are stored from the Alert center's **Settings** dialog. A
 notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
 that notifier send at a lower severity.
@@ -347,15 +350,19 @@ bounded cursor pagination and validated filters. The complete request and respon
 contract is returned through the plugin's OpenAPI document.
 
 The dashboard is served at `/signalk-persistent-notifier`. One compact table puts
-active alerts first and can switch to all known definitions. Select an alert to open
+all known definitions together with active alerts first. Select an alert to open
 its current information and recent event timeline; alert actions and **Settings** are
 available there as well as directly from the row. Acknowledge and silence apply only
 to active occurrences. **Include dismissed** updates the table immediately. Inactive
 discovered definitions can be permanently forgotten from Settings; active alerts and
 Signal K zone definitions cannot be forgotten.
 
-Use **All known alerts** to include inactive alerts and zone definitions that have
-never fired. Search matches alert names, paths, sources, and loaded messages.
+The default **All alerts and zones** view includes inactive alerts and zone
+definitions that have never fired. Active alerts appear first, highest severity
+first. **Active alerts only** is an optional filter. **No alert recorded** means
+there is no recorded notification; it does not claim the sensor is currently normal.
+Search matches alert names, paths, sources, and loaded messages.
+Source names are shown in alert details, not in the table.
 Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert, with **Settings** for changes.
