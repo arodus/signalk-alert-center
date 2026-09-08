@@ -312,6 +312,12 @@ re-initializes the schema; discovers current Signal K definitions again; and
 automatically turns the reset control back off. Global plugin configuration,
 including notification service secrets, is retained.
 
+Database maintenance appears last in the plugin settings. Each notification
+service has one service-type selector; its stored type field is hidden.
+The **one-time** option is informational only: it labels the stored alert and does
+not change delivery, retries, or repeating. A condition that clears and returns
+can create another alert and send notifications again.
+
 Per-alert notifier selection, minimum severity, activation delay, one-time behavior,
 and connectivity policy are stored from the Alert center's **Settings** dialog. A
 notifier's global `minSeverity` is a hard floor; an alert-level override cannot make

@@ -115,9 +115,9 @@ export const pluginConfigSchema = {
         },
         oneTime: {
           type: "boolean",
-          title: "Mark new occurrences as one-time",
+          title: "Label new alerts as one-time (informational only)",
           description:
-            "Stores the one-time label on new occurrences. A later Signal K raise/clear cycle still creates a new occurrence.",
+            "Adds a label to the alert record only. It does not limit notifications, change retries, or disable repeating. For example, if a high-temperature alert clears and the temperature rises again, a new alert is recorded and can notify you again.",
         },
         minSeverity: {
           type: "string",
@@ -186,6 +186,7 @@ export const pluginConfigSchema = {
         "Add each ntfy, PagerDuty, or Discord connection once. Alerts select these connections by their service name.",
       default: [],
       items: {
+        title: "Service type",
         oneOf: [
           {
             type: "object",
@@ -316,6 +317,16 @@ export const pluginConfigSchema = {
           default: 300,
         },
       },
+    },
+  },
+};
+
+// Signal K passes this to its configuration form renderer.
+export const pluginUiSchema = {
+  "ui:order": ["*", "maintenance"],
+  notifiers: {
+    items: {
+      type: { "ui:widget": "hidden" },
     },
   },
 };

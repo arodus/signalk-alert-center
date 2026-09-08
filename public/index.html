@@ -202,12 +202,13 @@
         >
         <div class="form-field">
           <label class="check-label"
-            ><input id="policy-one-time" type="checkbox" /> Mark occurrences as
-            one-time</label
+            ><input id="policy-one-time" type="checkbox" /> One-time label
+            (informational only)</label
           >
           <small class="field-help"
-            >This label is stored with each occurrence; a later Signal K
-            raise/clear cycle still creates a new occurrence.</small
+            >Adds a label only. It does not change sending, retries, or
+            repeating. If the condition clears and returns, a new alert can
+            notify you again.</small
           >
         </div>
         <label class="form-field"

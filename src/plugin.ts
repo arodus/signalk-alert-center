@@ -1,7 +1,7 @@
 import { Plugin, ServerAPI } from "@signalk/server-api";
 import { getAlertCenterOpenApi } from "./api/openapi";
 import { PluginConfig } from "./config";
-import { pluginConfigSchema } from "./config-schema";
+import { pluginConfigSchema, pluginUiSchema } from "./config-schema";
 import { PersistentNotifierRuntime } from "./runtime";
 
 export = function persistentNotifier(app: ServerAPI): Plugin {
@@ -12,6 +12,7 @@ export = function persistentNotifier(app: ServerAPI): Plugin {
     name: "Persistent notifier",
     description: "Offline-first durable Signal K alert delivery",
     schema: pluginConfigSchema,
+    uiSchema: pluginUiSchema,
     start(options: object, restart: (newConfiguration: object) => void) {
       const config = options as PluginConfig;
       if (config.maintenance?.resetDatabase) {
