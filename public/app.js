@@ -14,8 +14,6 @@ const elements = {
   pendingCount: $("#pending-count"),
   connectivityNote: $("#connectivity-note"),
   definitions: $("#definition-list"),
-  zoneCount: $("#zone-count"),
-  zones: $("#zone-list"),
   deliveries: $("#delivery-list"),
   updated: $("#updated"),
   error: $("#error"),
@@ -102,6 +100,15 @@ function definitionFor(occurrence) {
     (definition) => definition.id === occurrence.definitionId,
   );
 }
+function alertName(definition) {
+  const name = definition.name ?? definition.pathPattern;
+  if (name !== definition.pathPattern) return name;
+  return name
+    .replace(/^notifications\./, "")
+    .split(".")
+    .map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2"))
+    .join(" › ");
+}
 function definitionOrigin(sourceType) {
   return (
     {
@@ -149,30 +156,10 @@ function zoneBadges(definition) {
     )
     .join("");
 }
-function renderZones() {
-  const definitions = state.definitions.filter(
-    (definition) => definitionZones(definition).length > 0,
-  );
-  const zoneCount = definitions.reduce(
-    (count, definition) => count + definitionZones(definition).length,
-    0,
-  );
-  elements.zoneCount.textContent = definitions.length
-    ? `${definitions.length} path${definitions.length === 1 ? "" : "s"} · ${zoneCount} range${zoneCount === 1 ? "" : "s"}`
-    : "None";
-  elements.zones.innerHTML = definitions.length
-    ? definitions
-        .map(
-          (definition) =>
-            `<div class="zone-row"><div class="zone-name"><strong>${escapeHtml(definition.name ?? definition.pathPattern)}</strong><span title="${escapeHtml(definition.pathPattern)}">${escapeHtml(definition.pathPattern)}</span></div><div class="zone-ranges">${zoneBadges(definition)}</div></div>`,
-        )
-        .join("")
-    : '<div class="empty zone-empty">No Signal K metadata zones are currently defined.</div>';
-}
-
 function renderDefinitions() {
   const showActive = $("#state-filter").value === "active";
   const severity = $("#severity-filter").value;
+  const search = $("#alert-search").value.trim().toLocaleLowerCase();
   const visible = state.definitions
     .flatMap((definition) => {
       const occurrences = state.occurrences.filter(
@@ -200,8 +187,17 @@ function renderDefinitions() {
       ];
     })
     .filter((entry) => !showActive || entry.active)
-    .filter(
-      ({ occurrence }) => !severity || occurrence?.currentSeverity === severity,
+    .filter(({ latest }) => !severity || latest?.currentSeverity === severity)
+    .filter(({ definition, latest }) =>
+      [
+        definition.name,
+        definition.pathPattern,
+        latest?.message,
+        latest?.sourceKey,
+      ]
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(search),
     )
     .sort(
       (left, right) =>
@@ -210,9 +206,11 @@ function renderDefinitions() {
           String(right.definition.name),
         ),
     );
+  $("#list-summary").textContent =
+    `${visible.length} shown · ${showActive ? "Active alerts" : "All known alerts"}${$("#dismissed-filter").checked ? " · including dismissed" : " · dismissed hidden"}`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
-        <thead><tr><th>Alert</th><th>Status</th><th>Last activity</th><th>Delivery</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+            <thead><tr><th>Alert</th><th>Status</th><th>Last activity</th><th>Notify via</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>${visible
           .map((definition) => {
             const { definition: item, occurrence, active, latest } = definition;
@@ -220,11 +218,13 @@ function renderDefinitions() {
             const notifierCount = (policy.notifierIds ?? []).length;
             const hasHistory = Boolean(latest || item.fireCount);
             const alertSummary = [
-              item.pathPattern,
+              latest?.message,
               occurrence
                 ? sourceName(occurrence.sourceKey)
                 : definitionOrigin(item.sourceType),
-              latest?.message,
+              definitionZones(item).length
+                ? `${definitionZones(item).length} zone thresholds`
+                : "",
             ]
               .filter(Boolean)
               .join(" · ");
@@ -232,15 +232,15 @@ function renderDefinitions() {
               ? `<span class="status-summary"><span class="alert-severity ${escapeHtml(latest.currentSeverity)}">${escapeHtml(latest.currentSeverity)}</span><span class="muted">Active${latest.acknowledgedAt ? " · acknowledged" : ""}${latest.silencedAt ? " · silenced" : ""}${latest.dismissedAt ? " · dismissed" : ""}</span></span>`
               : `<span class="muted">${hasHistory ? "Inactive" : "Never fired"}</span>`;
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
-            <td data-label="Alert"><strong class="cell-title">${escapeHtml(item.name ?? item.pathPattern)}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
+            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Status">${status}</td>
             <td data-label="Last activity">${formatDate(latestTimestamp(latest?.dismissedAt, latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
-            <td data-label="Delivery">${policy.enabled === false ? '<span class="muted">Off</span>' : `<span class="delivery-summary"><strong>${escapeHtml(policy.minimumSeverity ?? "normal")}+</strong><span class="muted">${policy.activationDelaySeconds ?? 0}s · ${notifierCount} notifier${notifierCount === 1 ? "" : "s"}</span></span>`}</td>
+            <td data-label="Notify via">${policy.enabled === false ? '<span class="muted">Notifications off</span>' : notifierCount === 0 ? '<span class="muted">No services selected</span>' : `<span class="cell-title" title="${escapeHtml(policy.notifierIds.join(", "))}">${escapeHtml(policy.notifierIds.join(", "))}</span><span class="cell-detail">${escapeHtml(policy.minimumSeverity ?? "normal")} and above · ${policy.activationDelaySeconds ? `after ${policy.activationDelaySeconds}s` : "no delay"}</span>`}</td>
             <td class="action-cell"><button class="button button-quiet button-small policy-button" data-id="${escapeHtml(item.id)}" type="button">Settings</button></td>
           </tr>`;
           })
           .join("")}</tbody></table>`
-    : `<div class="empty">${showActive ? "No active alerts match these filters." : "No alerts have been configured or discovered."}</div>`;
+    : `<div class="empty"><strong>${search || severity ? "No matching alerts" : showActive ? "No active alerts to show" : "No known alerts yet"}</strong><p>${search || severity ? "Try another search or choose All severities." : showActive ? "Choose All known alerts to view inactive alerts and configured zone thresholds." : "Alerts appear when Signal K reports a notification or defines a zone threshold."}</p></div>`;
   document.querySelectorAll("[data-definition-id]").forEach((row) => {
     const open = () =>
       row.dataset.occurrenceId
@@ -250,6 +250,7 @@ function renderDefinitions() {
       if (!event.target.closest("button")) open();
     });
     row.addEventListener("keydown", (event) => {
+      if (event.target !== row) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         open();
@@ -328,7 +329,6 @@ async function load() {
       : "delivery intents waiting";
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     elements.moreOccurrences.hidden = !state.occurrenceCursor;
-    renderZones();
     renderDefinitions();
     renderDeliveries(deliveries);
   } catch (error) {
@@ -450,6 +450,7 @@ function openPolicy(id) {
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
   const policy = definition.policy ?? {};
+  $("#policy-title").textContent = definition.name ?? definition.pathPattern;
   $("#policy-definition-id").value = id;
   $("#activation-delay").value = policy.activationDelaySeconds ?? 0;
   $("#minimum-severity").value = policy.minimumSeverity ?? "normal";
@@ -548,6 +549,7 @@ $("#history-filters").addEventListener("submit", (event) => {
   event.preventDefault();
 });
 $("#state-filter").addEventListener("change", renderDefinitions);
+$("#alert-search").addEventListener("input", renderDefinitions);
 $("#severity-filter").addEventListener("change", renderDefinitions);
 $("#dismissed-filter").addEventListener("change", () => renderDefinitions());
 elements.moreOccurrences.addEventListener("click", () =>
