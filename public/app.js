@@ -460,7 +460,6 @@ function openPolicy(id) {
   $("#activation-delay").value = policy.activationDelaySeconds ?? 0;
   $("#minimum-severity").value = policy.minimumSeverity ?? "normal";
   $("#policy-enabled").checked = policy.enabled !== false;
-  $("#policy-one-time").checked = policy.oneTime ?? definition.oneTime ?? false;
   $("#rearm-after").value = policy.rearmAfterSeconds ?? "";
   $("#connectivity-mode").value = policy.connectivity?.mode ?? "queue";
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
@@ -517,7 +516,6 @@ async function savePolicy(event) {
   const mode = $("#connectivity-mode").value;
   const body = {
     enabled: $("#policy-enabled").checked,
-    oneTime: $("#policy-one-time").checked,
     rearmAfterSeconds:
       $("#rearm-after").value === "" ? null : Number($("#rearm-after").value),
     activationDelaySeconds: Number($("#activation-delay").value),

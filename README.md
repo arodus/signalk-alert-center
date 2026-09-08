@@ -16,7 +16,7 @@ One-time behavior is snapshotted when an occurrence starts. The occurrence remai
 visible until **Dismiss** is selected; dismissal is soft, so its history
 and pending delivery work remain intact. A later raise creates a visible new
 occurrence. Per-definition settings cover enabled state, minimum severity,
-notifiers, activation delay, one-time/rearm behavior, and connectivity mode.
+notifiers, activation delay, repeat interval, and connectivity mode.
 
 Local sound/TTS playback is intentionally not implemented. The remaining roadmap
 is transport resolve semantics, richer global history filters/observability,
@@ -85,7 +85,7 @@ discovered definitions and permanently removes their history and settings. Defin
 derived from current Signal K zone metadata cannot be forgotten.
 
 The definition settings panel controls enabled state, notification services, minimum
-severity, connectivity mode, one-time/rearm behavior, and
+severity, connectivity mode, repeat interval, and
 `activationDelaySeconds`. Overrides are stored by this plugin; Signal K
 `meta.zones` remain authoritative input metadata and are not rewritten. Settings
 apply to future occurrences by default so changing a policy does not silently
@@ -314,11 +314,8 @@ including notification service secrets, is retained.
 
 Database maintenance appears last in the plugin settings. Each notification
 service has one service-type selector; its stored type field is hidden.
-The **one-time** option is informational only: it labels the stored alert and does
-not change delivery, retries, or repeating. A condition that clears and returns
-can create another alert and send notifications again.
 
-Per-alert notifier selection, minimum severity, activation delay, one-time behavior,
+Per-alert notifier selection, minimum severity, activation delay, repeat interval,
 and connectivity policy are stored from the Alert center's **Settings** dialog. A
 notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
 that notifier send at a lower severity.

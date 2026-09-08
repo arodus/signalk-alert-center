@@ -113,12 +113,6 @@ export const pluginConfigSchema = {
             "Newly discovered alerts inherit this value until their Settings are changed in the Alert center.",
           default: true,
         },
-        oneTime: {
-          type: "boolean",
-          title: "Label new alerts as one-time (informational only)",
-          description:
-            "Adds a label to the alert record only. It does not limit notifications, change retries, or disable repeating. For example, if a high-temperature alert clears and the temperature rises again, a new alert is recorded and can notify you again.",
-        },
         minSeverity: {
           type: "string",
           title: "Lowest severity sent by default",
