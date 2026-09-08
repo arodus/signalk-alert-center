@@ -21,9 +21,7 @@
             >← Back to Signal K</a
           ><span id="updated" class="updated">Loading…</span
           ><button id="refresh" class="button button-quiet" type="button">
-            Refresh</button
-          ><button id="retry" class="button button-primary" type="button">
-            Retry pending
+            Refresh
           </button>
         </div>
       </header>
@@ -33,7 +31,7 @@
           <strong id="active-count">--</strong><span>Active alerts</span>
         </div>
         <div class="status-item">
-          <strong id="definition-count">--</strong><span>Definitions</span>
+          <strong id="definition-count">--</strong><span>Known alerts</span>
         </div>
         <div class="status-item">
           <strong id="pending-count">--</strong><span>Pending delivery</span>
@@ -47,15 +45,26 @@
         <div class="section-heading">
           <div>
             <h2>Alerts</h2>
-            <p>Current status, history, and delivery settings in one place.</p>
+            <p>
+              Open an alert for history and zone thresholds. Use Settings to
+              choose where and when to notify.
+            </p>
           </div>
         </div>
         <form id="history-filters" class="filter-row">
           <label for="state-filter">Show</label
           ><select id="state-filter" name="state">
-            <option value="active" selected>Active</option>
+            <option value="active" selected>Active alerts</option>
             <option value="">All known alerts</option>
           </select>
+          <label for="alert-search" class="visually-hidden"
+            >Search alerts</label
+          >
+          <input
+            id="alert-search"
+            type="search"
+            placeholder="Search alerts, messages, or paths"
+          />
           <label for="severity-filter">Severity</label
           ><select id="severity-filter" name="severity">
             <option value="">All</option>
@@ -70,12 +79,7 @@
             dismissed</label
           >
         </form>
-        <details class="zone-panel">
-          <summary>
-            Defined zones <span id="zone-count" class="zone-count"></span>
-          </summary>
-          <div id="zone-list" class="zone-list" aria-live="polite"></div>
-        </details>
+        <p id="list-summary" class="field-help" role="status"></p>
         <div id="definition-list" class="table-shell" aria-live="polite"></div>
         <button
           id="history-more"
@@ -90,8 +94,16 @@
       <section class="workspace delivery-section">
         <div class="section-heading">
           <div>
-            <h2>Delivery queue</h2>
+            <h2>Notification deliveries</h2>
+            <p>Delivery results and retries for your notification services.</p>
           </div>
+          <button
+            id="retry"
+            class="button button-quiet button-small"
+            type="button"
+          >
+            Retry pending deliveries
+          </button>
         </div>
         <div id="delivery-list" class="delivery-list" aria-live="polite"></div>
       </section>
@@ -125,6 +137,7 @@
       </div>
       <div id="drawer-body"></div>
       <p id="drawer-result" class="form-result" role="status"></p>
+      <h3>Recent history</h3>
       <div id="event-list" class="event-list" aria-live="polite"></div>
       <button
         id="events-more"
@@ -141,7 +154,7 @@
         <div class="drawer-header">
           <div>
             <p class="eyebrow">Delivery settings</p>
-            <h2 id="policy-title">Alert policy</h2>
+            <h2 id="policy-title">Alert settings</h2>
           </div>
           <button
             id="policy-close"
@@ -153,9 +166,13 @@
           </button>
         </div>
         <input id="policy-definition-id" type="hidden" />
+        <p class="field-help">
+          Changes apply the next time this alert fires. Deliveries already in
+          progress keep their original settings.
+        </p>
         <label class="form-field"
           ><span
-            >Wait before sending
+            >Wait before sending (seconds)
             <small class="field-help"
               >The alert must remain active for this many seconds before any
               notification is sent.</small
@@ -194,7 +211,7 @@
         </div>
         <label class="form-field"
           ><span
-            >Repeat while still active
+            >Repeat while still active (seconds)
             <small class="field-help"
               >Start a new occurrence after this many seconds if the condition
               never clears. Leave blank to disable repeating.</small
