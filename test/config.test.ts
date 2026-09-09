@@ -54,6 +54,21 @@ describe("validateConfig", () => {
     ).toThrow("retention.batchSize");
   });
 
+  it("exposes and validates bounded delivery concurrency", () => {
+    const delivery = pluginConfigSchema.properties.delivery;
+    expect(delivery.properties.batchSize.default).toBe(50);
+    expect(delivery.properties.concurrency.default).toBe(4);
+    expect(() =>
+      validateConfig({ delivery: { batchSize: 200, concurrency: 32 } }),
+    ).not.toThrow();
+    expect(() => validateConfig({ delivery: { batchSize: 201 } })).toThrow(
+      "delivery.batchSize",
+    );
+    expect(() => validateConfig({ delivery: { concurrency: 0 } })).toThrow(
+      "delivery.concurrency",
+    );
+  });
+
   it("rejects invalid notifier credentials", () => {
     expect(() =>
       validateConfig({

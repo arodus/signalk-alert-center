@@ -74,6 +74,32 @@ export const pluginConfigSchema = {
         },
       },
     },
+    delivery: {
+      type: "object",
+      title: "Notification delivery",
+      description:
+        "Controls bounded parallel sending. Each delivery is saved and claimed independently before its notification service is contacted.",
+      properties: {
+        batchSize: {
+          type: "integer",
+          minimum: 1,
+          maximum: 200,
+          title: "Maximum deliveries checked per run",
+          description:
+            "Limits how many due deliveries are loaded from the database in one scheduler run.",
+          default: 50,
+        },
+        concurrency: {
+          type: "integer",
+          minimum: 1,
+          maximum: 32,
+          title: "Simultaneous notification sends",
+          description:
+            "Maximum number of notification services contacted at once. Four is a safe default for small Signal K servers.",
+          default: 4,
+        },
+      },
+    },
     retention: {
       type: "object",
       title: "History retention",

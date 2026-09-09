@@ -731,7 +731,7 @@ export class PersistentNotifierRuntime {
   start(options: PluginConfig): void {
     validateConfig(options);
     this.debug(
-      `Starting: configuredServices=${options.notifiers?.length ?? 0}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
+      `Starting: configuredServices=${options.notifiers?.length ?? 0}, deliveryBatchSize=${options.delivery?.batchSize ?? 50}, deliveryConcurrency=${options.delivery?.concurrency ?? 4}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
     );
     this.config = options;
     this.database = new AlertDatabase(this.databasePath(options));
@@ -763,12 +763,20 @@ export class PersistentNotifierRuntime {
           new DiscordTransport(String(notifier.webhookUrl)),
         );
     }
-    this.scheduler = new DeliveryScheduler(this.database, this.transports, {
-      initialSeconds: options.retry?.initialSeconds ?? 10,
-      maxSeconds: options.retry?.maxSeconds ?? 1800,
-      multiplier: options.retry?.multiplier ?? 2,
-      jitter: options.retry?.jitter ?? 0.2,
-    });
+    this.scheduler = new DeliveryScheduler(
+      this.database,
+      this.transports,
+      {
+        initialSeconds: options.retry?.initialSeconds ?? 10,
+        maxSeconds: options.retry?.maxSeconds ?? 1800,
+        multiplier: options.retry?.multiplier ?? 2,
+        jitter: options.retry?.jitter ?? 0.2,
+      },
+      {
+        batchSize: options.delivery?.batchSize ?? 50,
+        concurrency: options.delivery?.concurrency ?? 4,
+      },
+    );
 
     const switchConfig = options.connectivity?.switch;
     if (options.connectivity?.enabled && switchConfig)

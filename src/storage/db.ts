@@ -1299,15 +1299,17 @@ export class AlertDatabase {
     ).map(deliveryRecord);
   }
 
-  claimDelivery(id: string, now = new Date()): void {
+  claimDelivery(id: string, now = new Date()): boolean {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = this.db
         .prepare(
           `UPDATE deliveries SET state='sending', attempt_count=attempt_count+1,
-           last_attempt_at=?, updated_at=? WHERE id=? AND state <> 'delivered'`,
+           last_attempt_at=?, updated_at=? WHERE id=?
+           AND state IN ('pending', 'waiting_connectivity', 'failed_retryable')
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`,
         )
-        .run(now.toISOString(), now.toISOString(), id);
+        .run(now.toISOString(), now.toISOString(), id, now.toISOString());
       if (result.changes) {
         const row = this.db
           .prepare("SELECT attempt_count FROM deliveries WHERE id=?")
@@ -1319,6 +1321,7 @@ export class AlertDatabase {
           .run(id, Number(row.attempt_count), now.toISOString());
       }
       this.db.exec("COMMIT");
+      return result.changes > 0;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;

@@ -336,7 +336,12 @@ describe("occurrence storage", () => {
     });
 
     const delivery = db.listDeliveries()[0];
-    db.claimDelivery(delivery.id, new Date("2026-01-01T00:02:00Z"));
+    expect(
+      db.claimDelivery(delivery.id, new Date("2026-01-01T00:02:00Z")),
+    ).toBe(true);
+    expect(
+      db.claimDelivery(delivery.id, new Date("2026-01-01T00:02:01Z")),
+    ).toBe(false);
     db.recordDeliveryFailure(
       delivery.id,
       "TIMEOUT",
