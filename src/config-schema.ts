@@ -22,13 +22,15 @@ const serviceMinimumSeverity = {
   enum: [...severities],
   default: "normal",
 };
-const serviceType = (value: string, label: string) => ({
+const serviceType = {
   type: "string",
   title: "Service type",
-  description: `Send notifications using ${label}.`,
-  enum: [value],
-  default: value,
-});
+  description:
+    "Choose where this service sends notifications. The matching connection fields appear below.",
+  enum: ["ntfy", "pagerduty", "discord"],
+  enumNames: ["ntfy", "PagerDuty", "Discord"],
+  default: "ntfy",
+};
 
 // JSON Schema shown by the Signal K admin UI's plugin config form.
 export const pluginConfigSchema = {
@@ -244,79 +246,72 @@ export const pluginConfigSchema = {
         "Add each ntfy, PagerDuty, or Discord connection once. Alerts select these connections by their service name.",
       default: [],
       items: {
-        title: "Service type",
-        oneOf: [
-          {
-            type: "object",
-            title: "ntfy",
-            additionalProperties: false,
-            properties: {
-              name: serviceName,
-              type: serviceType("ntfy", "ntfy"),
-              enabled: serviceEnabled,
-              minSeverity: serviceMinimumSeverity,
-              server: {
-                type: "string",
-                title: "ntfy server address",
-                description:
-                  "Base address of the ntfy server, for example https://ntfy.sh or your self-hosted server.",
-                default: "https://ntfy.sh",
+        type: "object",
+        properties: {
+          name: serviceName,
+          type: serviceType,
+          enabled: serviceEnabled,
+          minSeverity: serviceMinimumSeverity,
+        },
+        required: ["name", "type"],
+        dependencies: {
+          type: {
+            oneOf: [
+              {
+                properties: {
+                  type: { enum: ["ntfy"] },
+                  server: {
+                    type: "string",
+                    title: "ntfy server address",
+                    description:
+                      "Base address of the ntfy server, for example https://ntfy.sh or your self-hosted server.",
+                    default: "https://ntfy.sh",
+                  },
+                  topic: {
+                    type: "string",
+                    title: "ntfy topic",
+                    description:
+                      "Topic that receives the boat's notifications. Treat an unprotected topic name as public.",
+                  },
+                  token: {
+                    type: "string",
+                    title: "ntfy access token",
+                    description:
+                      "Optional access token required by a protected ntfy topic.",
+                    format: "password",
+                  },
+                },
+                required: ["server", "topic"],
               },
-              topic: {
-                type: "string",
-                title: "ntfy topic",
-                description:
-                  "Topic that receives the boat's notifications. Treat an unprotected topic name as public.",
+              {
+                properties: {
+                  type: { enum: ["pagerduty"] },
+                  routingKey: {
+                    type: "string",
+                    title: "PagerDuty Events API integration key",
+                    description:
+                      "Integration key from the PagerDuty service's Events API v2 integration.",
+                    format: "password",
+                  },
+                },
+                required: ["routingKey"],
               },
-              token: {
-                type: "string",
-                title: "ntfy access token",
-                description:
-                  "Optional access token required by a protected ntfy topic.",
-                format: "password",
+              {
+                properties: {
+                  type: { enum: ["discord"] },
+                  webhookUrl: {
+                    type: "string",
+                    title: "Discord channel webhook address",
+                    description:
+                      "Webhook address created in the Discord channel that should receive alerts.",
+                    format: "password",
+                  },
+                },
+                required: ["webhookUrl"],
               },
-            },
-            required: ["name", "type", "server", "topic"],
+            ],
           },
-          {
-            type: "object",
-            title: "PagerDuty",
-            additionalProperties: false,
-            properties: {
-              name: serviceName,
-              type: serviceType("pagerduty", "PagerDuty"),
-              enabled: serviceEnabled,
-              minSeverity: serviceMinimumSeverity,
-              routingKey: {
-                type: "string",
-                title: "PagerDuty Events API integration key",
-                description:
-                  "Integration key from the PagerDuty service's Events API v2 integration.",
-                format: "password",
-              },
-            },
-            required: ["name", "type", "routingKey"],
-          },
-          {
-            type: "object",
-            title: "Discord",
-            additionalProperties: false,
-            properties: {
-              name: serviceName,
-              type: serviceType("discord", "Discord"),
-              enabled: serviceEnabled,
-              minSeverity: serviceMinimumSeverity,
-              webhookUrl: {
-                type: "string",
-                title: "Discord channel webhook address",
-                description:
-                  "Webhook address created in the Discord channel that should receive alerts.",
-                format: "password",
-              },
-            },
-            required: ["name", "type", "webhookUrl"],
-          },
-        ],
+        },
       },
     },
     connectivity: {
@@ -382,9 +377,4 @@ export const pluginConfigSchema = {
 // Signal K passes this to its configuration form renderer.
 export const pluginUiSchema = {
   "ui:order": ["*", "maintenance"],
-  notifiers: {
-    items: {
-      type: { "ui:widget": "hidden" },
-    },
-  },
 };

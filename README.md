@@ -342,7 +342,8 @@ automatically turns the reset control back off. Global plugin configuration,
 including notification service secrets, is retained.
 
 Database maintenance appears last in the plugin settings. Each notification
-service has one service-type selector; its stored type field is hidden.
+service has one **Service type** selector. Changing it immediately replaces the
+connection fields with those required by ntfy, PagerDuty, or Discord.
 
 Per-alert notifier selection, minimum severity, activation delay, repeat interval,
 and connectivity policy are stored from the Alert center's **Settings** dialog. A
@@ -352,8 +353,8 @@ that notifier send at a lower severity.
 Each entry under **Notification services** has a unique, human-readable `name`. That
 name appears in the per-alert Settings dialog and is used by the default alert policy.
 Renaming a service does not rewrite saved alert policies, so reselect the renamed
-service on affected alerts. The Signal K form presents separate ntfy, PagerDuty, and
-Discord entry types and only asks for credentials relevant to that service.
+service on affected alerts. The Signal K form only asks for credentials relevant to
+the selected service type.
 
 Repeated updates coalesce by notification path and available source identifier. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
 

@@ -64,3 +64,29 @@ test("surfaces authentication failures", async ({ page }) => {
   await expect(page.locator("#login")).toBeVisible();
   await expect(page.locator("#error")).toContainText("Sign in to Signal K");
 });
+
+test("saves a notification service after changing its type", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop",
+    "Configuration is shared by both browser projects.",
+  );
+
+  await page.goto("/admin/#/apps/configuration/signalk-persistent-notifier");
+  const services = page.locator("#root_configuration_notifiers");
+  await services.getByRole("button").last().click();
+  await page.locator("#root_configuration_notifiers_0_name").fill("Bridge");
+  await page
+    .locator("#root_configuration_notifiers_0_type")
+    .selectOption({ label: "PagerDuty" });
+  await page
+    .locator("#root_configuration_notifiers_0_routingKey")
+    .fill("browser-test-integration-key");
+  await page.getByRole("button", { name: "Save Configuration" }).click();
+
+  await expect(
+    page.getByText("Configuration saved successfully!"),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Errors" })).toHaveCount(0);
+});
