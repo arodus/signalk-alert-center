@@ -21,6 +21,22 @@ const date = (value: unknown): Date | undefined =>
 const json = (value: unknown): unknown | undefined =>
   value === null || value === undefined ? undefined : JSON.parse(String(value));
 
+const deliveryRecord = (row: Row): DeliveryRecord => ({
+  id: String(row.id),
+  alertId: String(row.alert_id),
+  transportInstanceId: String(row.transport_instance_id),
+  state: row.state as DeliveryRecord["state"],
+  attemptCount: Number(row.attempt_count),
+  nextAttemptAt: date(row.next_attempt_at),
+  lastAttemptAt: date(row.last_attempt_at),
+  deliveredAt: date(row.delivered_at),
+  lastErrorCode: row.last_error_code ? String(row.last_error_code) : undefined,
+  lastErrorMessage: row.last_error_message
+    ? String(row.last_error_message)
+    : undefined,
+  remoteId: row.remote_id ? String(row.remote_id) : undefined,
+});
+
 export class AlertDatabase {
   readonly db: DatabaseSync;
 
@@ -108,7 +124,11 @@ export class AlertDatabase {
          ON CONFLICT(id) DO UPDATE SET
           source_type=excluded.source_type, path_pattern=excluded.path_pattern,
           name=excluded.name, metadata_json=excluded.metadata_json,
-          updated_at=excluded.updated_at`,
+          updated_at=excluded.updated_at
+         WHERE alert_definitions.source_type IS NOT excluded.source_type
+            OR alert_definitions.path_pattern IS NOT excluded.path_pattern
+            OR alert_definitions.name IS NOT excluded.name
+            OR alert_definitions.metadata_json IS NOT excluded.metadata_json`,
       )
       .run(
         definition.id,
@@ -168,6 +188,48 @@ export class AlertDatabase {
         .prepare("SELECT id FROM alert_definitions ORDER BY name, id")
         .all() as Row[]
     ).map((row) => this.getDefinition(String(row.id)));
+  }
+
+  definitionStats(id: string): {
+    fireCount: number;
+    lastFiredAt?: Date;
+    lastActivityAt?: Date;
+  } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS fire_count, MAX(started_at) AS last_fired_at,
+                MAX(updated_at) AS last_activity_at
+         FROM alert_occurrences WHERE definition_id=?`,
+      )
+      .get(id) as Row;
+    return {
+      fireCount: Number(row.fire_count),
+      lastFiredAt: date(row.last_fired_at),
+      lastActivityAt: date(row.last_activity_at),
+    };
+  }
+
+  alertStats(): { total: number; active: number; pendingActivation: number } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN current_state='active' AND dismissed_at IS NULL THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN activation_state='pending' THEN 1 ELSE 0 END) AS pending_activation
+         FROM alert_occurrences`,
+      )
+      .get() as Row;
+    return {
+      total: Number(row.total),
+      active: Number(row.active ?? 0),
+      pendingActivation: Number(row.pending_activation ?? 0),
+    };
+  }
+
+  definitionCount(): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS count FROM alert_definitions")
+      .get() as Row;
+    return Number(row.count);
   }
 
   forgetDiscoveredDefinition(
@@ -751,6 +813,14 @@ export class AlertDatabase {
         query.dismissed ? "dismissed_at IS NOT NULL" : "dismissed_at IS NULL",
       );
     }
+    if (query.from) {
+      clauses.push("started_at >= ?");
+      parameters.push(query.from.toISOString());
+    }
+    if (query.to) {
+      clauses.push("started_at <= ?");
+      parameters.push(query.to.toISOString());
+    }
     if (query.cursor) {
       const cursor = this.db
         .prepare("SELECT started_at, id FROM alert_occurrences WHERE id=?")
@@ -990,23 +1060,29 @@ export class AlertDatabase {
     const rows = this.db
       .prepare("SELECT * FROM deliveries ORDER BY rowid")
       .all() as Row[];
-    return rows.map((row) => ({
-      id: String(row.id),
-      alertId: String(row.alert_id),
-      transportInstanceId: String(row.transport_instance_id),
-      state: row.state as DeliveryRecord["state"],
-      attemptCount: Number(row.attempt_count),
-      nextAttemptAt: date(row.next_attempt_at),
-      lastAttemptAt: date(row.last_attempt_at),
-      deliveredAt: date(row.delivered_at),
-      lastErrorCode: row.last_error_code
-        ? String(row.last_error_code)
-        : undefined,
-      lastErrorMessage: row.last_error_message
-        ? String(row.last_error_message)
-        : undefined,
-      remoteId: row.remote_id ? String(row.remote_id) : undefined,
-    }));
+    return rows.map(deliveryRecord);
+  }
+
+  listDeliveriesForAlert(alertId: string): DeliveryRecord[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM deliveries WHERE alert_id=? ORDER BY rowid")
+        .all(alertId) as Row[]
+    ).map(deliveryRecord);
+  }
+
+  listDueDeliveries(now = new Date(), limit = 50): DeliveryRecord[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM deliveries
+           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending')
+             AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+           ORDER BY COALESCE(next_attempt_at, created_at), rowid
+           LIMIT ?`,
+        )
+        .all(now.toISOString(), Math.max(1, Math.min(200, limit))) as Row[]
+    ).map(deliveryRecord);
   }
 
   claimDelivery(id: string, now = new Date()): void {

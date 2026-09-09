@@ -28,14 +28,8 @@ export class DeliveryScheduler {
     if (this.stopped || this.running) return this.activeRun;
     this.running = true;
     const run = (async () => {
-      for (const delivery of this.database.listDeliveries()) {
+      for (const delivery of this.database.listDueDeliveries(now)) {
         if (this.stopped) break;
-        if (
-          delivery.state === "delivered" ||
-          delivery.state === "failed_terminal"
-        )
-          continue;
-        if (delivery.nextAttemptAt && delivery.nextAttemptAt > now) continue;
         const transport = this.transports.get(delivery.transportInstanceId);
         if (!transport) {
           this.database.recordDeliveryFailure(

@@ -71,6 +71,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS occurrence_active_source_idx
   ON alert_occurrences(source_key) WHERE current_state = 'active';
 CREATE INDEX IF NOT EXISTS occurrence_history_idx
   ON alert_occurrences(started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS occurrence_definition_history_idx
+  ON alert_occurrences(definition_id, started_at DESC, updated_at DESC);
 CREATE INDEX IF NOT EXISTS occurrence_activation_idx
   ON alert_occurrences(activation_state, activation_due_at);
 
