@@ -358,21 +358,23 @@ contract is returned through the plugin's OpenAPI document.
 
 The dashboard is served at `/signalk-persistent-notifier`. One compact table puts
 all known definitions together with active alerts first. Select an alert to open
-its current information and recent event timeline; alert actions and **Settings** are
-available there as well as directly from the row. Acknowledge and silence apply only
+its current information, recent event timeline, and **Settings**. Acknowledge and
+Silence are available directly in active rows, with completed actions shown disabled.
+Inactive rows use a neutral status badge. Acknowledge and silence apply only
 to active occurrences. **Include dismissed** updates the table immediately. Inactive
 discovered definitions can be permanently forgotten from Settings; active alerts and
 Signal K zone definitions cannot be forgotten.
 
 The default **All alerts and zones** view includes inactive alerts and zone
 definitions that have never fired. Active alerts appear first, highest severity
-first. **Active alerts only** is an optional filter. **No alert recorded** means
-there is no recorded notification; it does not claim the sensor is currently normal.
+first. **Active alerts only** is an optional filter. **Inactive** means there is
+no displayed active notification; it does not claim the sensor is currently normal.
 Search matches alert names, paths, sources, and loaded messages.
 Source names are shown in alert details, not in the table.
 Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
-are shown in plain language beside each alert, with **Settings** for changes.
+are shown in plain language beside each alert. Open the alert and select **Settings**
+to change them.
 The dashboard receives lightweight server-sent change events and reloads data only
 after alerts, policies, definitions, or deliveries change. Browsers automatically
 reconnect the same-origin stream; while it is unavailable, the UI uses a slow

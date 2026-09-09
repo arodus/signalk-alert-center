@@ -363,11 +363,11 @@ h2 {
 }
 .alert-table th:nth-child(1),
 .alert-table td:nth-child(1) {
-  width: 40%;
+  width: 32%;
 }
 .alert-table th:nth-child(2),
 .alert-table td:nth-child(2) {
-  width: 16%;
+  width: 12%;
 }
 .alert-table th:nth-child(3),
 .alert-table td:nth-child(3) {
@@ -375,11 +375,28 @@ h2 {
 }
 .alert-table th:nth-child(4),
 .alert-table td:nth-child(4) {
-  width: 18%;
+  width: 16%;
 }
 .alert-table th:nth-child(5),
 .alert-table td:nth-child(5) {
-  width: 8%;
+  width: 22%;
+}
+.table-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.table-actions .button {
+  padding: 5px 7px;
+  font-size: 0.72rem;
+}
+.alert-severity.inactive {
+  color: #53646b;
+  background: #e8edef;
+}
+#action-result:empty {
+  display: none;
 }
 .clickable-row {
   cursor: pointer;
