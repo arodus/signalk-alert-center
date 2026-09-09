@@ -55,6 +55,7 @@ export function normalizeNotification(
     // of collapsing them into a single alert.
     sourceKey: source ? `${path}@${source}` : path,
     path,
+    source,
     severity,
     state,
     message,

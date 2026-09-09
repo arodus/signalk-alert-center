@@ -15,6 +15,8 @@ export interface OccurrenceQuery {
   limit: number;
   cursor?: string;
   definitionId?: string;
+  path?: string;
+  source?: string;
   state?: "active" | "cleared";
   severity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
   dismissed?: boolean;
@@ -246,6 +248,8 @@ function parseOccurrences(request: RequestLike): OccurrenceQuery {
   return {
     ...pagination(q),
     definitionId: textParam(q.definitionId, "definitionId"),
+    path: textParam(q.path, "path"),
+    source: textParam(q.source, "source"),
     state: enumParam(q.state, "state", ["active", "cleared"] as const),
     severity: enumParam(q.severity, "severity", [
       "normal",

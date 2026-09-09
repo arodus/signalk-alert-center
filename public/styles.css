@@ -187,6 +187,7 @@ h2 {
   font-weight: 700;
 }
 .filter-row select,
+.filter-row input,
 .form-field input,
 .form-field select {
   border: 1px solid var(--line);
@@ -195,6 +196,31 @@ h2 {
   color: var(--ink);
   background: var(--panel);
   font: inherit;
+}
+.advanced-filters {
+  position: relative;
+}
+.advanced-filters summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.advanced-filter-fields {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(220px, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: min(430px, 80vw);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 12px 28px rgb(13 42 45 / 16%);
 }
 #alert-search {
   flex: 1;

@@ -187,6 +187,8 @@ export function getAlertCenterOpenApi() {
           parameters: [
             ...pageParameters,
             { name: "definitionId", in: "query", schema: { type: "string" } },
+            { name: "path", in: "query", schema: { type: "string" } },
+            { name: "source", in: "query", schema: { type: "string" } },
             {
               name: "state",
               in: "query",

@@ -87,7 +87,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(1);
+    expect(db.schemaVersion()).toBe(2);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
@@ -308,6 +308,70 @@ describe("occurrence storage", () => {
     const occurrence = db.ingest(active({ sourceTimestamp }), [], receivedAt)!;
     expect(occurrence.sourceTimestamp).toEqual(sourceTimestamp);
     expect(occurrence.receivedAt).toEqual(receivedAt);
+  });
+
+  it("filters history by exact path and source with a stable cursor", () => {
+    const db = database();
+    const first = db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.one",
+        path: "notifications.test",
+        source: "gps.one",
+      }),
+      [],
+      new Date("2026-01-01T00:00:00Z"),
+    )!;
+    db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.one",
+        path: "notifications.test",
+        source: "gps.one",
+        state: "cleared",
+        severity: "normal",
+      }),
+      [],
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    const second = db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.one",
+        path: "notifications.test",
+        source: "gps.one",
+      }),
+      [],
+      new Date("2026-01-01T00:02:00Z"),
+    )!;
+    db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.two",
+        path: "notifications.test",
+        source: "gps.two",
+      }),
+      [],
+      new Date("2026-01-01T00:03:00Z"),
+    );
+
+    const page = db.queryOccurrences({
+      path: "notifications.test",
+      source: "gps.one",
+      limit: 1,
+    });
+    expect(page).toMatchObject({
+      items: [{ id: second.id, source: "gps.one" }],
+      nextCursor: second.id,
+    });
+    expect(
+      db.queryOccurrences({
+        path: "notifications.test",
+        source: "gps.one",
+        cursor: page.nextCursor,
+        limit: 1,
+      }).items,
+    ).toMatchObject([{ id: first.id }]);
+    expect(
+      db.queryOccurrences({ path: "notifications.test", source: "gps.two" })
+        .items,
+    ).toHaveLength(1);
   });
 
   it("forgets only inactive discovered definitions and their history", () => {

@@ -57,6 +57,7 @@
           ><select id="state-filter" name="state">
             <option value="" selected>All alerts and zones</option>
             <option value="active">Active alerts only</option>
+            <option value="cleared">Cleared history only</option>
           </select>
           <label for="alert-search" class="visually-hidden"
             >Search alerts</label
@@ -79,6 +80,35 @@
             ><input id="dismissed-filter" type="checkbox" /> Include
             dismissed</label
           >
+          <details class="advanced-filters">
+            <summary>More filters</summary>
+            <div class="advanced-filter-fields">
+              <label for="path-filter">Signal K path</label>
+              <select id="path-filter" name="path">
+                <option value="">All paths</option>
+              </select>
+              <label for="source-filter">Signal K source</label>
+              <input
+                id="source-filter"
+                name="source"
+                placeholder="Exact source, for example gps.primary"
+              />
+              <label for="from-filter">Started after</label>
+              <input id="from-filter" name="from" type="datetime-local" />
+              <label for="to-filter">Started before</label>
+              <input id="to-filter" name="to" type="datetime-local" />
+            </div>
+          </details>
+          <button class="button button-primary button-small" type="submit">
+            Apply
+          </button>
+          <button
+            id="filters-clear"
+            class="button button-quiet button-small"
+            type="button"
+          >
+            Clear
+          </button>
         </form>
         <p id="list-summary" class="field-help" role="status"></p>
         <p id="action-result" class="field-help" role="status"></p>

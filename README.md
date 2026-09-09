@@ -367,6 +367,10 @@ read-only access and mutations require read-write access. Collection endpoints u
 bounded cursor pagination and validated filters. The complete request and response
 contract is returned through the plugin's OpenAPI document.
 
+`GET /occurrences` accepts exact `definitionId`, `path`, and `source` filters,
+plus `state`, `severity`, `dismissed`, `from`, and `to`. Filters can be combined;
+cursor ordering remains stable by occurrence start time and id.
+
 The dashboard is served at `/signalk-persistent-notifier`. One compact table puts
 all known definitions together with active alerts first. Select an alert to open
 its current information, recent event timeline, and **Settings**. Acknowledge and
@@ -382,6 +386,8 @@ first. **Active alerts only** is an optional filter. **Inactive** means there is
 no displayed active notification; it does not claim the sensor is currently normal.
 Search matches alert names, paths, sources, and loaded messages.
 Source names are shown in alert details, not in the table.
+Use **More filters** for an exact Signal K path or source and a started-at time
+range. These filters are evaluated by the server and work with **Load more**.
 Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert. Open the alert and select **Settings**
