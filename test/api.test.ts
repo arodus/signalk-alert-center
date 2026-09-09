@@ -155,6 +155,9 @@ describe("alert-center routes", () => {
       query: {
         limit: "25",
         cursor: "opaque",
+        definitionId: "anchor",
+        path: "notifications.navigation.anchor",
+        source: "gps.primary",
         state: "active",
         dismissed: "false",
         from: "2026-09-01T00:00:00Z",
@@ -164,6 +167,9 @@ describe("alert-center routes", () => {
     expect(queries[0]).toMatchObject({
       limit: 25,
       cursor: "opaque",
+      definitionId: "anchor",
+      path: "notifications.navigation.anchor",
+      source: "gps.primary",
       state: "active",
       dismissed: false,
     });

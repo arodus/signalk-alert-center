@@ -1,6 +1,24 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 1;
+export const currentSchemaVersion = 2;
+
+export const migrations: Array<{ version: number; sql: string }> = [
+  {
+    version: 2,
+    sql: `
+ALTER TABLE alert_occurrences ADD COLUMN source TEXT;
+UPDATE alert_occurrences
+SET source = CASE
+  WHEN source_key LIKE path || '@%' THEN substr(source_key, length(path) + 2)
+  ELSE NULL
+END;
+CREATE INDEX occurrence_path_history_idx
+  ON alert_occurrences(path, started_at DESC, id DESC);
+CREATE INDEX occurrence_source_history_idx
+  ON alert_occurrences(source, started_at DESC, id DESC);
+`,
+  },
+];
 
 export const schema = `
 CREATE TABLE IF NOT EXISTS schema_migrations (

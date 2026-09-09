@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { NormalizedAlert } from "../src/alerts/types";
 import { AlertDatabase } from "../src/storage/db";
+import { schema } from "../src/storage/schema";
 
 const active = (overrides: Partial<NormalizedAlert> = {}): NormalizedAlert => ({
   sourceKey: "notifications.navigation.anchor",
@@ -31,6 +33,37 @@ describe("occurrence storage", () => {
     databases.push(result);
     return result;
   };
+
+  it("migrates a version-one database and installs history indexes", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-migration-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(schema);
+    legacy
+      .prepare(
+        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
+      )
+      .run(new Date("2026-01-01T00:00:00Z").toISOString());
+    legacy.close();
+
+    const migrated = new AlertDatabase(filename);
+    databases.push(migrated);
+    expect(migrated.schemaVersion()).toBe(2);
+    const columns = migrated.db
+      .prepare("PRAGMA table_info(alert_occurrences)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain("source");
+    const indexes = migrated.db
+      .prepare("PRAGMA index_list(alert_occurrences)")
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "occurrence_path_history_idx",
+        "occurrence_source_history_idx",
+      ]),
+    );
+  });
 
   it("stores raise-clear-raise as distinct occurrences and keeps dismissal history", () => {
     const db = database();
@@ -87,7 +120,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(1);
+    expect(db.schemaVersion()).toBe(2);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
@@ -310,6 +343,70 @@ describe("occurrence storage", () => {
     expect(occurrence.receivedAt).toEqual(receivedAt);
   });
 
+  it("filters history by exact path and source with a stable cursor", () => {
+    const db = database();
+    const first = db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.one",
+        path: "notifications.test",
+        source: "gps.one",
+      }),
+      [],
+      new Date("2026-01-01T00:00:00Z"),
+    )!;
+    db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.one",
+        path: "notifications.test",
+        source: "gps.one",
+        state: "cleared",
+        severity: "normal",
+      }),
+      [],
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    const second = db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.one",
+        path: "notifications.test",
+        source: "gps.one",
+      }),
+      [],
+      new Date("2026-01-01T00:02:00Z"),
+    )!;
+    db.ingest(
+      active({
+        sourceKey: "notifications.test@gps.two",
+        path: "notifications.test",
+        source: "gps.two",
+      }),
+      [],
+      new Date("2026-01-01T00:03:00Z"),
+    );
+
+    const page = db.queryOccurrences({
+      path: "notifications.test",
+      source: "gps.one",
+      limit: 1,
+    });
+    expect(page).toMatchObject({
+      items: [{ id: second.id, source: "gps.one" }],
+      nextCursor: second.id,
+    });
+    expect(
+      db.queryOccurrences({
+        path: "notifications.test",
+        source: "gps.one",
+        cursor: page.nextCursor,
+        limit: 1,
+      }).items,
+    ).toMatchObject([{ id: first.id }]);
+    expect(
+      db.queryOccurrences({ path: "notifications.test", source: "gps.two" })
+        .items,
+    ).toHaveLength(1);
+  });
+
   it("forgets only inactive discovered definitions and their history", () => {
     const db = database();
     const occurrence = db.ingest(active(), ["ntfy"])!;
@@ -351,5 +448,50 @@ describe("occurrence storage", () => {
     );
 
     expect(unchanged.updatedAt).toEqual(new Date("2026-01-01T00:00:00Z"));
+  });
+
+  it("prunes only old completed occurrences without unfinished work", () => {
+    const db = database();
+    const old = new Date("2025-01-01T00:00:00Z");
+    const clear = new Date("2025-01-01T00:01:00Z");
+    const cutoff = new Date("2026-01-01T00:00:00Z");
+
+    const removable = db.ingest(active({ sourceKey: "removable" }), [], old)!;
+    db.ingest(
+      active({ sourceKey: "removable", state: "cleared", severity: "normal" }),
+      [],
+      clear,
+    );
+    const activeOccurrence = db.ingest(
+      active({ sourceKey: "still-active" }),
+      [],
+      old,
+    )!;
+    const pending = db.ingest(
+      active({ sourceKey: "pending-delivery" }),
+      ["ntfy"],
+      old,
+    )!;
+    db.ingest(
+      active({
+        sourceKey: "pending-delivery",
+        state: "cleared",
+        severity: "normal",
+      }),
+      [],
+      clear,
+    );
+
+    expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(1);
+    expect(db.pruneOccurrences(cutoff, 10)).toEqual([removable.id]);
+    expect(
+      db
+        .listOccurrences()
+        .map((item) => item.id)
+        .sort(),
+    ).toEqual([activeOccurrence.id, pending.id].sort());
+    expect(db.listDefinitions()).toHaveLength(3);
+    expect(db.listDeliveries()).toHaveLength(1);
+    expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(0);
   });
 });

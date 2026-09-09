@@ -19,6 +19,7 @@ export interface AlertRecord {
   occurrenceNumber?: number;
   sourceKey: string;
   path: string;
+  source?: string;
   firstSeenAt: Date;
   /** Timestamp supplied by Signal K for the latest meaningful source update. */
   sourceTimestamp?: Date;
@@ -131,6 +132,8 @@ export interface IngestOptions {
 
 export interface OccurrenceQuery {
   definitionId?: string;
+  path?: string;
+  source?: string;
   state?: AlertState;
   severity?: Severity;
   dismissed?: boolean;
@@ -149,6 +152,7 @@ export interface OccurrencePage {
 export interface NormalizedAlert {
   sourceKey: string;
   path: string;
+  source?: string;
   severity: Severity;
   state: AlertState;
   message?: string;

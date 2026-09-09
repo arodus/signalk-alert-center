@@ -65,6 +65,12 @@ describe("PersistentNotifierRuntime", () => {
     const getPath = vi.fn((path: string) =>
       path === "vessels.self.notifications" ? self.notifications : self,
     );
+    const notificationStatus = {
+      canAcknowledge: true,
+      canSilence: true,
+      acknowledged: false,
+      silenced: false,
+    };
     const app = {
       debug: vi.fn(),
       error: vi.fn(),
@@ -74,10 +80,14 @@ describe("PersistentNotifierRuntime", () => {
         path === "notifications" ? self.notifications : self,
       notifications: {
         getId: vi.fn(() => ({
-          value: { status: { canAcknowledge: true, canSilence: true } },
+          value: { status: notificationStatus },
         })),
-        acknowledge: vi.fn(),
-        silence: vi.fn(),
+        acknowledge: vi.fn(() => {
+          notificationStatus.acknowledged = true;
+        }),
+        silence: vi.fn(async () => {
+          notificationStatus.silenced = true;
+        }),
       },
       selfContext: "vessels.self",
       setPluginStatus: vi.fn(),

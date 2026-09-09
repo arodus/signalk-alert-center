@@ -2,6 +2,8 @@ services:
   notifier-mock:
     build: ./test/integration/mock-server
     init: true
+    ports:
+      - "${NOTIFIER_MOCK_PORT:-18080}:8080"
     healthcheck:
       test:
         [
@@ -26,6 +28,8 @@ services:
     environment:
       SIGNALK_DISABLE_SECURITY: "1"
       SIGNALK_ZONE_REFRESH_SECONDS: "1"
+    ports:
+      - "${SIGNALK_ACCEPTANCE_PORT:-3300}:3000"
     volumes:
       - signalk-test-data:/home/node/.signalk
     depends_on:

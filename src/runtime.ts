@@ -40,6 +40,7 @@ import { PagerDutyTransport } from "./transports/pagerduty";
 import { NotificationTransport } from "./transports/transport";
 
 const MAX_TIMER_DELAY = 2_147_000_000;
+const UPSTREAM_ACTION_TIMEOUT_MS = 5_000;
 
 interface DefinitionView extends AlertDefinitionRecord {
   description?: string;
@@ -60,12 +61,20 @@ export class PersistentNotifierRuntime {
   private activationTimer?: ReturnType<typeof setTimeout>;
   private deliveryTimer?: ReturnType<typeof setTimeout>;
   private zoneRefreshTimer?: ReturnType<typeof setInterval>;
+  private retentionTimer?: ReturnType<typeof setInterval>;
   private reconcilingStartup = false;
   private startupEntries: SignalKNotificationInput[] = [];
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
   private changeRevision = 0;
   private changeListeners = new Set<(change: AlertCenterChange) => void>();
+  private retentionState?: {
+    lastRunAt: Date;
+    cutoff: Date;
+    eligibleOccurrences: number;
+    deletedOccurrences: number;
+    remainingEligibleOccurrences: number;
+  };
 
   constructor(private readonly app: ServerAPI) {}
 
@@ -106,6 +115,8 @@ export class PersistentNotifierRuntime {
             switchOn: this.connectivity.switchOn,
             ownedByPlugin: this.connectivity.ownedByPlugin,
             lastError: this.connectivity.lastError,
+            shutdownDeferredReason:
+              this.connectivity.lastShutdownDeferredReason,
           }
         : { state: "OFF", switchOn: undefined, ownedByPlugin: false },
       alerts: {
@@ -116,6 +127,13 @@ export class PersistentNotifierRuntime {
         pendingDelivery: this.database?.pendingDeliveryCount() ?? 0,
       },
       schemaVersion: this.database?.schemaVersion(),
+      retention: {
+        enabled: this.config.retention?.enabled ?? false,
+        maxAgeDays: this.config.retention?.maxAgeDays ?? 365,
+        batchSize: this.config.retention?.batchSize ?? 100,
+        intervalHours: this.config.retention?.intervalHours ?? 24,
+        ...this.retentionState,
+      },
     };
   }
 
@@ -215,6 +233,27 @@ export class PersistentNotifierRuntime {
 
   private seedDefinitions(): void {
     this.policies().seedDefinitions(listConfiguredZones(this.app));
+  }
+
+  private runRetention(now = new Date()): void {
+    if (!this.config.retention?.enabled || !this.database) return;
+    const maxAgeDays = this.config.retention.maxAgeDays ?? 365;
+    const batchSize = this.config.retention.batchSize ?? 100;
+    const cutoff = new Date(now.getTime() - maxAgeDays * 86_400_000);
+    const before = this.database.retentionStatus(cutoff);
+    const deleted = this.database.pruneOccurrences(cutoff, batchSize);
+    const after = this.database.retentionStatus(cutoff);
+    this.retentionState = {
+      lastRunAt: now,
+      cutoff,
+      eligibleOccurrences: before.eligibleOccurrences,
+      deletedOccurrences: deleted.length,
+      remainingEligibleOccurrences: after.eligibleOccurrences,
+    };
+    this.debug(
+      `Retention cleanup: eligible=${before.eligibleOccurrences}, deleted=${deleted.length}, remaining=${after.eligibleOccurrences}`,
+    );
+    if (deleted.length) this.emitChange("retention");
   }
 
   private async applyConnectivityPolicy(
@@ -325,6 +364,7 @@ export class PersistentNotifierRuntime {
     this.scheduleNextWake();
     this.scheduleNextActivation();
     await this.runScheduler();
+    this.runRetention();
     this.debug(
       `Startup reconciliation complete: snapshotEntries=${entries.length}, queuedEntries=${queuedCount}, durationMs=${Date.now() - startedAt}`,
     );
@@ -398,10 +438,10 @@ export class PersistentNotifierRuntime {
     }
   }
 
-  private upstreamAction(
+  private async upstreamAction(
     occurrence: AlertRecord,
     action: "acknowledge" | "silence",
-  ): Pick<ActionResult, "upstream" | "message"> {
+  ): Promise<Pick<ActionResult, "upstream" | "message">> {
     if (!occurrence.notificationId) return { upstream: "not_requested" };
     try {
       const notificationId = occurrence.notificationId as NotificationId;
@@ -424,9 +464,41 @@ export class PersistentNotifierRuntime {
           upstream: "unsupported",
           message: `Signal K does not allow ${action} for this notification`,
         };
-      this.app.notifications[action](notificationId);
+      const operation = (
+        this.app.notifications[action] as (
+          id: NotificationId,
+        ) => unknown | Promise<unknown>
+      )(notificationId);
+      if (
+        operation &&
+        typeof (operation as PromiseLike<unknown>).then === "function"
+      )
+        await Promise.race([
+          Promise.resolve(operation),
+          new Promise<never>((_resolve, reject) =>
+            setTimeout(
+              () => reject(new Error("UPSTREAM_ACTION_TIMEOUT")),
+              UPSTREAM_ACTION_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+      const refreshed = this.app.notifications.getId(notificationId);
+      const confirmed =
+        action === "acknowledge"
+          ? refreshed?.value.status?.acknowledged
+          : refreshed?.value.status?.silenced;
+      if (!confirmed)
+        return {
+          upstream: "failed",
+          message: `Signal K did not confirm ${action}`,
+        };
       return { upstream: "applied" };
     } catch (error) {
+      if (error instanceof Error && error.message === "UPSTREAM_ACTION_TIMEOUT")
+        return {
+          upstream: "timed_out",
+          message: `Signal K ${action} timed out after ${UPSTREAM_ACTION_TIMEOUT_MS / 1000} seconds`,
+        };
       return {
         upstream: "failed",
         message: error instanceof Error ? error.message : String(error),
@@ -519,11 +591,11 @@ export class PersistentNotifierRuntime {
         this.emitChange("occurrence");
         return { status: "dismissed", upstream: "not_requested" };
       },
-      acknowledgeOccurrence: (id) => {
+      acknowledgeOccurrence: async (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
         if (occurrence.currentState !== "active") return "inactive";
-        const upstream = this.upstreamAction(occurrence, "acknowledge");
+        const upstream = await this.upstreamAction(occurrence, "acknowledge");
         this.db().acknowledgeAlert(id);
         this.db().recordOccurrenceEvent(
           id,
@@ -538,11 +610,11 @@ export class PersistentNotifierRuntime {
         this.emitChange("occurrence");
         return { status: "acknowledged", ...upstream };
       },
-      silenceOccurrence: (id) => {
+      silenceOccurrence: async (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
         if (occurrence.currentState !== "active") return "inactive";
-        const upstream = this.upstreamAction(occurrence, "silence");
+        const upstream = await this.upstreamAction(occurrence, "silence");
         this.db().silenceAlert(id);
         this.db().recordOccurrenceEvent(
           id,
@@ -620,6 +692,12 @@ export class PersistentNotifierRuntime {
           : undefined,
         (options.connectivity.bootTimeoutSeconds ?? 240) * 1000,
         (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
+        () => ({
+          pendingDelivery: (this.database?.pendingDeliveryCount() ?? 0) > 0,
+          activeWakeAlert: this.database?.hasActiveConnectivityAlert() ?? false,
+          scheduledWake: this.database?.hasWakeRequests() ?? false,
+          sendInFlight: this.scheduler?.isRunning ?? false,
+        }),
       );
 
     this.scheduleNextWake();
@@ -683,6 +761,20 @@ export class PersistentNotifierRuntime {
       },
       (options.discovery?.zoneRefreshSeconds ?? 300) * 1000,
     );
+    if (options.retention?.enabled)
+      this.retentionTimer = setInterval(
+        () => {
+          try {
+            this.runRetention();
+          } catch (error) {
+            this.reportAsyncError("Retention cleanup failed", error);
+          }
+        },
+        Math.min(
+          MAX_TIMER_DELAY,
+          (options.retention.intervalHours ?? 24) * 3_600_000,
+        ),
+      );
     this.app.setPluginStatus("Alert center active");
     this.debug("Started and subscribed to Signal K notifications");
   }
@@ -727,6 +819,7 @@ export class PersistentNotifierRuntime {
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     if (this.zoneRefreshTimer) clearInterval(this.zoneRefreshTimer);
+    if (this.retentionTimer) clearInterval(this.retentionTimer);
     await this.scheduler?.stop();
     this.connectivity?.stop();
     this.database?.close();

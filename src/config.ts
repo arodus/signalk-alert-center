@@ -25,6 +25,12 @@ export interface PluginConfig {
   storage?: { path?: string };
   maintenance?: { resetDatabase?: boolean };
   discovery?: { zoneRefreshSeconds?: number };
+  retention?: {
+    enabled?: boolean;
+    maxAgeDays?: number;
+    batchSize?: number;
+    intervalHours?: number;
+  };
   retry?: {
     initialSeconds?: number;
     maxSeconds?: number;
@@ -117,6 +123,25 @@ export function validateConfig(config: PluginConfig): void {
   validateRetry(config.retry);
   if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
     throw new Error("discovery.zoneRefreshSeconds must be at least 1");
+  if (
+    config.retention?.maxAgeDays !== undefined &&
+    (!Number.isInteger(config.retention.maxAgeDays) ||
+      config.retention.maxAgeDays < 1)
+  )
+    throw new Error("retention.maxAgeDays must be a positive integer");
+  if (
+    config.retention?.batchSize !== undefined &&
+    (!Number.isInteger(config.retention.batchSize) ||
+      config.retention.batchSize < 1 ||
+      config.retention.batchSize > 1000)
+  )
+    throw new Error("retention.batchSize must be an integer from 1 to 1000");
+  if (
+    config.retention?.intervalHours !== undefined &&
+    (!Number.isFinite(config.retention.intervalHours) ||
+      config.retention.intervalHours < 1)
+  )
+    throw new Error("retention.intervalHours must be at least 1");
   validatePolicy(config.defaults, "defaults", notifierNames);
   if (config.connectivity?.enabled && !config.connectivity.switch)
     throw new Error("Enabled connectivity requires a switch configuration");

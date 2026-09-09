@@ -13,7 +13,7 @@ import {
   OccurrenceQuery,
   severityRank,
 } from "../alerts/types";
-import { currentSchemaVersion, schema } from "./schema";
+import { currentSchemaVersion, migrations, schema } from "./schema";
 
 type Row = Record<string, unknown>;
 const date = (value: unknown): Date | undefined =>
@@ -50,7 +50,17 @@ export class AlertDatabase {
         .prepare(
           "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         )
-        .run(currentSchemaVersion, new Date().toISOString());
+        .run(1, new Date().toISOString());
+      const applied = this.schemaVersion();
+      for (const migration of migrations) {
+        if (migration.version <= applied) continue;
+        this.db.exec(migration.sql);
+        this.db
+          .prepare(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+          )
+          .run(migration.version, new Date().toISOString());
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -230,6 +240,82 @@ export class AlertDatabase {
       .prepare("SELECT COUNT(*) AS count FROM alert_definitions")
       .get() as Row;
     return Number(row.count);
+  }
+
+  retentionStatus(cutoff: Date): {
+    eligibleOccurrences: number;
+    oldestEligibleAt?: Date;
+  } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS eligible, MIN(started_at) AS oldest
+         FROM alert_occurrences o
+         WHERE o.current_state='cleared' AND o.cleared_at < ?
+           AND NOT EXISTS (
+             SELECT 1 FROM deliveries d
+             WHERE d.alert_id=o.id
+               AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
+           )`,
+      )
+      .get(cutoff.toISOString()) as Row;
+    return {
+      eligibleOccurrences: Number(row.eligible),
+      oldestEligibleAt: date(row.oldest),
+    };
+  }
+
+  pruneOccurrences(cutoff: Date, limit = 100): string[] {
+    const boundedLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const ids = (
+        this.db
+          .prepare(
+            `SELECT o.id FROM alert_occurrences o
+             WHERE o.current_state='cleared' AND o.cleared_at < ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM deliveries d
+                 WHERE d.alert_id=o.id
+                   AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
+               )
+             ORDER BY o.started_at, o.id LIMIT ?`,
+          )
+          .all(cutoff.toISOString(), boundedLimit) as Row[]
+      ).map((row) => String(row.id));
+      const remove = this.db.prepare(
+        "DELETE FROM alert_occurrences WHERE id=?",
+      );
+      for (const id of ids) {
+        this.db
+          .prepare(
+            "DELETE FROM delivery_attempts WHERE delivery_id IN (SELECT id FROM deliveries WHERE alert_id=?)",
+          )
+          .run(id);
+        this.db.prepare("DELETE FROM deliveries WHERE alert_id=?").run(id);
+        this.db.prepare("DELETE FROM alert_events WHERE alert_id=?").run(id);
+        this.db.prepare("DELETE FROM wake_requests WHERE alert_id=?").run(id);
+        this.db
+          .prepare("DELETE FROM occurrence_notifiers WHERE alert_id=?")
+          .run(id);
+        this.db
+          .prepare(
+            "DELETE FROM occurrence_notifier_thresholds WHERE alert_id=?",
+          )
+          .run(id);
+        remove.run(id);
+      }
+      this.db.exec("COMMIT");
+      return ids;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   forgetDiscoveredDefinition(
@@ -591,13 +677,13 @@ export class AlertDatabase {
         this.db
           .prepare(
             `INSERT INTO alert_occurrences
-              (id, definition_id, occurrence_number, source_key, path, started_at,
+              (id, definition_id, occurrence_number, source_key, path, source, started_at,
                source_timestamp, received_at, last_seen_at, cleared_at, current_state,
                current_severity, max_severity, message, source_payload_json,
                notification_id, one_time, minimum_severity,
                activation_delay_seconds, rearm_after_seconds, connectivity_json,
                activation_due_at, activation_state, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -605,6 +691,7 @@ export class AlertDatabase {
             occurrenceNumber,
             alert.sourceKey,
             alert.path,
+            alert.source ?? null,
             timestamp,
             alert.sourceTimestamp?.toISOString() ?? null,
             timestamp,
@@ -800,6 +887,14 @@ export class AlertDatabase {
       clauses.push("definition_id=?");
       parameters.push(query.definitionId);
     }
+    if (query.path) {
+      clauses.push("path=?");
+      parameters.push(query.path);
+    }
+    if (query.source) {
+      clauses.push("source=?");
+      parameters.push(query.source);
+    }
     if (query.state) {
       clauses.push("current_state=?");
       parameters.push(query.state);
@@ -869,6 +964,7 @@ export class AlertDatabase {
       occurrenceNumber: Number(row.occurrence_number),
       sourceKey: String(row.source_key),
       path: String(row.path),
+      source: row.source ? String(row.source) : undefined,
       firstSeenAt: new Date(String(row.started_at)),
       sourceTimestamp: date(row.source_timestamp),
       receivedAt: new Date(String(row.received_at)),
@@ -960,6 +1056,26 @@ export class AlertDatabase {
       )
       .get() as Row;
     return Number(row.count);
+  }
+
+  hasActiveConnectivityAlert(): boolean {
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1 FROM alert_occurrences
+           WHERE current_state='active'
+             AND activation_state <> 'suppressed'
+             AND json_extract(connectivity_json, '$.mode') IN ('wake', 'wake_after')
+           LIMIT 1`,
+        )
+        .get(),
+    );
+  }
+
+  hasWakeRequests(): boolean {
+    return Boolean(
+      this.db.prepare("SELECT 1 FROM wake_requests LIMIT 1").get(),
+    );
   }
 
   nextDeliveryDueAt(): Date | undefined {

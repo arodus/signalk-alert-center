@@ -316,7 +316,13 @@ path remains supported when you intentionally manage the database elsewhere.
 
 The Signal K plugin form contains only global configuration: storage/discovery,
 retry behavior, notifier connections and secrets, global defaults, and optional
-connectivity management. It also contains a destructive, one-shot database reset
+connectivity management. Optional **History retention** removes only cleared
+occurrences older than the configured age, in bounded batches. It is disabled by
+default and always protects active alerts, pending/retryable/in-flight deliveries,
+and persisted wake requests. Retention status and the most recent cleanup counts
+are available from `/status`.
+
+The form also contains a destructive, one-shot database reset
 under **Database maintenance**. Enable **Reset database when Save Configuration is
 clicked**, then click Signal K's **Save Configuration** button. The plugin deletes
 all alert definitions, occurrences, event and delivery history, and per-alert policy;
@@ -361,6 +367,10 @@ read-only access and mutations require read-write access. Collection endpoints u
 bounded cursor pagination and validated filters. The complete request and response
 contract is returned through the plugin's OpenAPI document.
 
+`GET /occurrences` accepts exact `definitionId`, `path`, and `source` filters,
+plus `state`, `severity`, `dismissed`, `from`, and `to`. Filters can be combined;
+cursor ordering remains stable by occurrence start time and id.
+
 The dashboard is served at `/signalk-persistent-notifier`. One compact table puts
 all known definitions together with active alerts first. Select an alert to open
 its current information, recent event timeline, and **Settings**. Acknowledge and
@@ -376,6 +386,8 @@ first. **Active alerts only** is an optional filter. **Inactive** means there is
 no displayed active notification; it does not claim the sensor is currently normal.
 Search matches alert names, paths, sources, and loaded messages.
 Source names are shown in alert details, not in the table.
+Use **More filters** for an exact Signal K path or source and a started-at time
+range. These filters are evaluated by the server and work with **Load more**.
 Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert. Open the alert and select **Settings**
@@ -412,6 +424,13 @@ plugin, publishes zone metadata and timestamped raise/clear deltas, changes a
 definition policy, checks recent history, dismisses a one-time occurrence, and
 verifies that a later raise creates a new visible occurrence. The separate mock
 service also verifies scripted retry responses and captured request bodies.
+
+Install Chromium once with `npx playwright install chromium`, then run
+`npm run test:browser` for desktop and tablet dashboard coverage. The command
+starts an isolated Docker project and removes its named test volume afterward.
+`npm run test:restart` separately verifies that pending activation, retryable
+delivery work, occurrence history, and event history survive Signal K restarts.
+Both suites use only the local fixture and mock notifier.
 
 For interactive UI testing:
 
@@ -455,4 +474,7 @@ or simply rerun `npm run demo`, which seeds automatically on fixture startup.
 `npm test` runs the lifecycle, persistence, API, policy, runtime, scheduler, and
 connectivity tests. `npm run format:check`, `npm run lint`, and `npm run build` are
 the required quality checks. Node 22.5 or newer is required; Docker acceptance is
-pinned to Signal K server 2.31.1.
+pinned to Signal K server 2.31.1. GitHub Actions runs those checks on pull requests,
+including browser and restart coverage; a non-blocking job also exercises the latest
+Signal K image. CI caches only npm downloads. Docker volumes, databases, browser
+traces, and test configuration are ephemeral and are not persisted as artifacts.

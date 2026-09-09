@@ -60,6 +60,36 @@ describe("connectivity ownership and durable wake requests", () => {
     expect(manager.state).toBe("OFF");
   });
 
+  it("re-checks live safety state before switching off", async () => {
+    const adapter = new FakeSwitch();
+    let pendingDelivery = true;
+    const manager = new ConnectivityManager(
+      adapter,
+      60_000,
+      async () => true,
+      240_000,
+      5_000,
+      () => ({
+        pendingDelivery,
+        activeWakeAlert: false,
+        scheduledWake: false,
+        sendInFlight: false,
+      }),
+    );
+    managers.push(manager);
+
+    await manager.requestWake();
+    manager.beginCooldown();
+    await manager.releaseIfSafe();
+    expect(adapter.commands).toEqual([true]);
+    expect(manager.lastShutdownDeferredReason).toBe("pending delivery");
+
+    pendingDelivery = false;
+    manager.beginCooldown();
+    await manager.releaseIfSafe();
+    expect(adapter.commands).toEqual([true, false]);
+  });
+
   it("preserves plugin ownership when another alert needs the active connection", async () => {
     const adapter = new FakeSwitch();
     const manager = new ConnectivityManager(adapter, 0);

@@ -119,7 +119,8 @@ function definitionOrigin(sourceType) {
     }[sourceType] ?? String(sourceType ?? "Definition").replaceAll("_", " ")
   );
 }
-function sourceName(sourceKey) {
+function sourceName(sourceKey, source) {
+  if (source) return source;
   const separator = String(sourceKey ?? "").indexOf("@");
   return separator >= 0 ? sourceKey.slice(separator + 1) : "Signal K";
 }
@@ -162,6 +163,14 @@ function renderDefinitions() {
   const showActive = $("#state-filter").value === "active";
   const severity = $("#severity-filter").value;
   const search = $("#alert-search").value.trim().toLocaleLowerCase();
+  const historyFiltered = [
+    "state-filter",
+    "severity-filter",
+    "path-filter",
+    "source-filter",
+    "from-filter",
+    "to-filter",
+  ].some((id) => $(`#${id}`).value);
   const visible = state.definitions
     .flatMap((definition) => {
       const occurrences = state.occurrences.filter(
@@ -172,6 +181,7 @@ function renderDefinitions() {
       const active = occurrences.filter(
         (occurrence) => occurrence.state === "active",
       );
+      if (historyFiltered && occurrences.length === 0) return [];
       if (active.length)
         return active.map((occurrence) => ({
           definition,
@@ -286,7 +296,37 @@ function renderDeliveries(deliveries) {
 function occurrenceParams(cursor) {
   const params = new URLSearchParams({ limit: "100" });
   if (cursor) params.set("cursor", cursor);
+  for (const id of ["state", "severity", "path", "source"]) {
+    const value = $(`#${id}-filter`).value.trim();
+    if (value) params.set(id, value);
+  }
+  for (const id of ["from", "to"]) {
+    const value = $(`#${id}-filter`).value;
+    if (value) params.set(id, new Date(value).toISOString());
+  }
+  if (!$("#dismissed-filter").checked) params.set("dismissed", "false");
   return params;
+}
+
+function hasHistoryFilters() {
+  return [
+    "state-filter",
+    "severity-filter",
+    "path-filter",
+    "source-filter",
+    "from-filter",
+    "to-filter",
+  ].some((id) => $(`#${id}`).value);
+}
+
+function renderPathOptions() {
+  const select = $("#path-filter");
+  const selected = select.value;
+  const paths = [
+    ...new Set(state.definitions.map((item) => item.pathPattern)),
+  ].sort();
+  select.innerHTML = `<option value="">All paths</option>${paths.map((path) => `<option value="${escapeHtml(path)}">${escapeHtml(path)}</option>`).join("")}`;
+  if (paths.includes(selected)) select.value = selected;
 }
 
 async function loadOccurrences(append = false) {
@@ -325,7 +365,10 @@ async function load() {
       api("/deliveries").catch(() => []),
     ]);
     state.definitions = definitions;
-    state.occurrences = mergeById(activeOccurrences, pageItems(occurrences));
+    renderPathOptions();
+    state.occurrences = hasHistoryFilters()
+      ? pageItems(occurrences)
+      : mergeById(activeOccurrences, pageItems(occurrences));
     state.notifiers = pageItems(notifiers);
     state.occurrenceCursor = occurrences.nextCursor;
     elements.activeCount.textContent = activeOccurrences.filter(
@@ -583,11 +626,16 @@ async function savePolicy(event) {
 $("#refresh").addEventListener("click", load);
 $("#history-filters").addEventListener("submit", (event) => {
   event.preventDefault();
+  void load();
 });
-$("#state-filter").addEventListener("change", renderDefinitions);
+$("#state-filter").addEventListener("change", load);
 $("#alert-search").addEventListener("input", renderDefinitions);
-$("#severity-filter").addEventListener("change", renderDefinitions);
-$("#dismissed-filter").addEventListener("change", () => renderDefinitions());
+$("#severity-filter").addEventListener("change", load);
+$("#dismissed-filter").addEventListener("change", load);
+$("#filters-clear").addEventListener("click", () => {
+  $("#history-filters").reset();
+  void load();
+});
 elements.moreOccurrences.addEventListener("click", () =>
   loadOccurrences(true).catch(showError),
 );

@@ -74,6 +74,44 @@ export const pluginConfigSchema = {
         },
       },
     },
+    retention: {
+      type: "object",
+      title: "History retention",
+      description:
+        "Optional bounded cleanup for old completed alert history. Active alerts and unfinished delivery or connectivity work are always protected.",
+      properties: {
+        enabled: {
+          type: "boolean",
+          title: "Automatically remove old completed history",
+          description:
+            "Disabled by default. When enabled, cleanup runs after startup and at the configured interval.",
+          default: false,
+        },
+        maxAgeDays: {
+          type: "integer",
+          minimum: 1,
+          title: "Keep completed history for at least (days)",
+          description:
+            "Only cleared occurrences older than this age can be removed.",
+          default: 365,
+        },
+        batchSize: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1000,
+          title: "Maximum occurrences removed per cleanup",
+          description:
+            "Limits each SQLite transaction so cleanup does not monopolize Signal K.",
+          default: 100,
+        },
+        intervalHours: {
+          type: "number",
+          minimum: 1,
+          title: "Cleanup interval (hours)",
+          default: 24,
+        },
+      },
+    },
     retry: {
       type: "object",
       title: "Retry policy",
