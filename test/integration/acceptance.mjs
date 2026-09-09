@@ -50,6 +50,21 @@ assert.deepEqual(captured[0].json, { attempt: 1 });
 assert.equal(captured[0].headers["x-fixture"], "one");
 
 await json(`${signalkUrl}/signalk`);
+const eventController = new AbortController();
+const eventResponse = await fetch(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/events`,
+  { signal: eventController.signal },
+);
+assert.equal(eventResponse.status, 200);
+assert.match(
+  eventResponse.headers.get("content-type") ?? "",
+  /text\/event-stream/,
+);
+const eventChunk = new TextDecoder().decode(
+  (await eventResponse.body.getReader().read()).value,
+);
+assert.match(eventChunk, /event: change/);
+eventController.abort();
 await json(`${signalkUrl}/plugins/signalk-test-fixture/reset`, {
   method: "POST",
 });

@@ -6,6 +6,8 @@ const state = {
   occurrenceCursor: undefined,
   eventCursor: undefined,
   selectedOccurrence: undefined,
+  loading: false,
+  reloadQueued: false,
 };
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -297,6 +299,11 @@ async function loadOccurrences(append = false) {
   renderDefinitions();
 }
 async function load() {
+  if (state.loading) {
+    state.reloadQueued = true;
+    return;
+  }
+  state.loading = true;
   elements.error.hidden = true;
   elements.login.hidden = true;
   try {
@@ -338,7 +345,36 @@ async function load() {
     renderDeliveries(deliveries);
   } catch (error) {
     showError(error);
+  } finally {
+    state.loading = false;
+    if (state.reloadQueued) {
+      state.reloadQueued = false;
+      void load();
+    }
   }
+}
+
+let reloadTimer;
+let fallbackTimer;
+function scheduleReload() {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => void load(), 150);
+}
+function enableFallbackPolling() {
+  if (!fallbackTimer) fallbackTimer = setInterval(() => void load(), 60_000);
+}
+function connectLiveUpdates() {
+  if (!("EventSource" in window)) {
+    enableFallbackPolling();
+    return;
+  }
+  const events = new EventSource(`${apiBase}/events`);
+  events.addEventListener("change", scheduleReload);
+  events.addEventListener("open", () => {
+    clearInterval(fallbackTimer);
+    fallbackTimer = undefined;
+  });
+  events.addEventListener("error", enableFallbackPolling);
 }
 
 async function mutateOccurrence(id, action) {
@@ -582,5 +618,5 @@ $("#retry").addEventListener("click", async () => {
     showError(error);
   }
 });
-load();
-setInterval(load, 30000);
+connectLiveUpdates();
+void load();

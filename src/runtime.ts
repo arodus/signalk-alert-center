@@ -13,6 +13,7 @@ import { AlertDefinitionRecord, AlertRecord } from "./alerts/types";
 import { listConfiguredZones } from "./alerts/zones";
 import {
   ActionResult,
+  AlertCenterChange,
   AlertCenterRepository,
   AlertPolicyPatch,
   DefinitionQuery,
@@ -63,6 +64,8 @@ export class PersistentNotifierRuntime {
   private startupEntries: SignalKNotificationInput[] = [];
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
+  private changeRevision = 0;
+  private changeListeners = new Set<(change: AlertCenterChange) => void>();
 
   constructor(private readonly app: ServerAPI) {}
 
@@ -121,11 +124,33 @@ export class PersistentNotifierRuntime {
     return `${current.alerts.active} active, ${current.alerts.pendingDelivery} deliveries pending`;
   }
 
+  private emitChange(reason: string): void {
+    const change = {
+      revision: ++this.changeRevision,
+      reason,
+      occurredAt: new Date().toISOString(),
+    };
+    for (const listener of this.changeListeners) listener(change);
+  }
+
+  private subscribeChanges(
+    listener: (change: AlertCenterChange) => void,
+  ): () => void {
+    this.changeListeners.add(listener);
+    listener({
+      revision: this.changeRevision,
+      reason: "connected",
+      occurredAt: new Date().toISOString(),
+    });
+    return () => this.changeListeners.delete(listener);
+  }
+
   private async runScheduler(): Promise<void> {
     await this.scheduler?.runOnce();
     if (this.connectivity && this.database?.pendingDeliveryCount() === 0)
       this.connectivity.beginCooldown();
     this.scheduleNextDelivery();
+    this.emitChange("alerts");
   }
 
   private scheduleNextDelivery(): void {
@@ -414,10 +439,15 @@ export class PersistentNotifierRuntime {
           connectivity: patch.connectivity ?? current.policy.connectivity,
           notifierIds: patch.notifierIds ?? current.policy.notifierIds,
         });
-        return this.getDefinition(id);
+        const updated = this.getDefinition(id);
+        this.emitChange("policy");
+        return updated;
       },
-      forgetDefinition: (id: string) =>
-        this.db().forgetDiscoveredDefinition(id),
+      forgetDefinition: (id: string) => {
+        const result = this.db().forgetDiscoveredDefinition(id);
+        if (result === "deleted") this.emitChange("definition");
+        return result;
+      },
       listOccurrences: (query: OccurrenceQuery) => {
         const page = this.db().queryOccurrences(query);
         return {
@@ -453,6 +483,7 @@ export class PersistentNotifierRuntime {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
         this.db().dismissOccurrence(id);
+        this.emitChange("occurrence");
         return { status: "dismissed", upstream: "not_requested" };
       },
       acknowledgeOccurrence: (id) => {
@@ -468,6 +499,7 @@ export class PersistentNotifierRuntime {
             message: upstream.message,
           },
         );
+        this.emitChange("occurrence");
         return { status: "acknowledged", ...upstream };
       },
       silenceOccurrence: (id) => {
@@ -483,6 +515,7 @@ export class PersistentNotifierRuntime {
             message: upstream.message,
           },
         );
+        this.emitChange("occurrence");
         return { status: "silenced", ...upstream };
       },
     };
@@ -610,7 +643,10 @@ export class PersistentNotifierRuntime {
       });
     });
     this.zoneRefreshTimer = setInterval(
-      () => this.seedDefinitions(),
+      () => {
+        this.seedDefinitions();
+        this.emitChange("definitions");
+      },
       (options.discovery?.zoneRefreshSeconds ?? 300) * 1000,
     );
     this.app.setPluginStatus("Alert center active");
@@ -644,6 +680,7 @@ export class PersistentNotifierRuntime {
             enabled: true,
             minimumSeverity: notifier.minSeverity ?? "normal",
           })),
+      subscribeChanges: (listener) => this.subscribeChanges(listener),
     });
   }
 
@@ -658,6 +695,7 @@ export class PersistentNotifierRuntime {
     this.connectivity?.stop();
     this.database?.close();
     this.database = undefined;
+    this.changeListeners.clear();
     this.scheduler = undefined;
     this.connectivity = undefined;
     this.policy = undefined;
