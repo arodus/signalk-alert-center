@@ -236,14 +236,14 @@ function renderDefinitions() {
               .filter(Boolean)
               .join(" · ");
             const status = active
-              ? `<span class="status-summary"><span class="alert-severity ${escapeHtml(latest.currentSeverity)}">${escapeHtml(latest.currentSeverity)}</span><span class="muted">Active${latest.acknowledgedAt ? " · acknowledged" : ""}${latest.silencedAt ? " · silenced" : ""}${latest.dismissedAt ? " · dismissed" : ""}</span></span>`
-              : `<span class="muted">${hasHistory ? "Inactive" : "No alert recorded"}</span>`;
+              ? `<span class="status-summary"><span class="alert-severity ${escapeHtml(latest.currentSeverity)}">${escapeHtml(latest.currentSeverity)}</span>${latest.dismissedAt ? '<span class="muted">Dismissed</span>' : ""}</span>`
+              : `<span class="alert-severity inactive" title="${hasHistory ? "No active alert" : "No alert has been recorded for this definition"}">Inactive</span>`;
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Status">${status}</td>
             <td data-label="Last activity">${formatDate(latestTimestamp(latest?.dismissedAt, latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
             <td data-label="Notify via">${policy.enabled === false ? '<span class="muted">Notifications off</span>' : notifierCount === 0 ? '<span class="muted">No services selected</span>' : `<span class="cell-title" title="${escapeHtml(policy.notifierIds.join(", "))}">${escapeHtml(policy.notifierIds.join(", "))}</span><span class="cell-detail">${escapeHtml(policy.minimumSeverity ?? "normal")} and above · ${policy.activationDelaySeconds ? `after ${policy.activationDelaySeconds}s` : "no delay"}</span>`}</td>
-            <td class="action-cell"><button class="button button-quiet button-small policy-button" data-id="${escapeHtml(item.id)}" type="button">Settings</button></td>
+            <td class="action-cell">${active ? `<div class="table-actions"><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="acknowledge" type="button" ${latest.acknowledgedAt ? "disabled" : ""}>${latest.acknowledgedAt ? "Acknowledged" : "Acknowledge"}</button><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="silence" type="button" ${latest.silencedAt ? "disabled" : ""}>${latest.silencedAt ? "Silenced" : "Silence"}</button></div>` : ""}</td>
           </tr>`;
           })
           .join("")}</tbody></table>`
@@ -264,11 +264,13 @@ function renderDefinitions() {
       }
     });
   });
-  document
-    .querySelectorAll(".policy-button")
-    .forEach((button) =>
-      button.addEventListener("click", () => openPolicy(button.dataset.id)),
-    );
+  document.querySelectorAll(".occurrence-action").forEach((button) =>
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      await mutateOccurrence(button.dataset.id, button.dataset.action);
+      if (button.isConnected) button.disabled = false;
+    }),
+  );
 }
 
 function renderDeliveries(deliveries) {
@@ -398,6 +400,7 @@ async function mutateOccurrence(id, action) {
       : result.upstream === "applied"
         ? `${localAction} locally and in Signal K.`
         : `${localAction} locally.`;
+    $("#action-result").textContent = elements.drawerResult.textContent;
   } catch (error) {
     showError(error);
   }
@@ -433,17 +436,11 @@ async function openOccurrence(id) {
     state.selectedOccurrence = id;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}${occurrence.dismissedAt ? " · dismissed" : ""}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}${occurrence.state === "active" && !occurrence.acknowledgedAt ? `<button class="button button-quiet drawer-ack" type="button">Acknowledge</button>` : ""}${occurrence.state === "active" && !occurrence.silencedAt ? `<button class="button button-quiet drawer-silence" type="button">Silence</button>` : ""}${!occurrence.dismissedAt ? `<button class="button button-quiet drawer-dismiss" type="button">Dismiss</button>` : ""}</div>${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}${occurrence.dismissedAt ? " · dismissed" : ""}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}${!occurrence.dismissedAt ? `<button class="button button-quiet drawer-dismiss" type="button">Dismiss</button>` : ""}</div>${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
     elements.drawerResult.textContent = "";
     elements.drawerBody
       .querySelector(".drawer-settings")
       ?.addEventListener("click", () => openPolicy(definition.id));
-    elements.drawerBody
-      .querySelector(".drawer-ack")
-      ?.addEventListener("click", () => mutateOccurrence(id, "acknowledge"));
-    elements.drawerBody
-      .querySelector(".drawer-silence")
-      ?.addEventListener("click", () => mutateOccurrence(id, "silence"));
     elements.drawerBody
       .querySelector(".drawer-dismiss")
       ?.addEventListener("click", () => mutateOccurrence(id, "dismiss"));
