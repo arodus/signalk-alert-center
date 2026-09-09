@@ -23,7 +23,9 @@ export = function persistentNotifier(app: ServerAPI): Plugin {
             resetDatabase: false,
           },
         };
+        app.debug("[persistent-notifier] Resetting alert database");
         runtime.resetDatabase(config);
+        app.debug("[persistent-notifier] Alert database reset complete");
         setImmediate(() => restart(nextConfiguration));
         return;
       }

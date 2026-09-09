@@ -124,6 +124,18 @@ export class PersistentNotifierRuntime {
     return `${current.alerts.active} active, ${current.alerts.pendingDelivery} deliveries pending`;
   }
 
+  private debug(message: string): void {
+    this.app.debug(`[persistent-notifier] ${message}`);
+  }
+
+  private reportAsyncError(context: string, error: unknown): void {
+    this.app.error(
+      `[persistent-notifier] ${context}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
   private emitChange(reason: string): void {
     const change = {
       revision: ++this.changeRevision,
@@ -146,7 +158,13 @@ export class PersistentNotifierRuntime {
   }
 
   private async runScheduler(): Promise<void> {
-    await this.scheduler?.runOnce();
+    const summary = await this.scheduler?.runOnce();
+    if (summary?.processed) {
+      const message = `Delivery batch: processed=${summary.processed}, succeeded=${summary.succeeded}, retryableFailures=${summary.retryableFailures}, terminalFailures=${summary.terminalFailures}`;
+      if (summary.retryableFailures || summary.terminalFailures)
+        this.app.error(`[persistent-notifier] ${message}`);
+      else this.debug(message);
+    }
     if (this.connectivity && this.database?.pendingDeliveryCount() === 0)
       this.connectivity.beginCooldown();
     this.scheduleNextDelivery();
@@ -164,7 +182,9 @@ export class PersistentNotifierRuntime {
     );
     this.deliveryTimer = setTimeout(() => {
       this.deliveryTimer = undefined;
-      void this.runScheduler();
+      void this.runScheduler().catch((error: unknown) =>
+        this.reportAsyncError("Delivery scheduler failed", error),
+      );
     }, delay);
   }
 
@@ -187,7 +207,9 @@ export class PersistentNotifierRuntime {
       this.activationTimer = undefined;
       this.database?.processDueActivations(new Date());
       this.scheduleNextActivation();
-      void this.runScheduler();
+      void this.runScheduler().catch((error: unknown) =>
+        this.reportAsyncError("Activation delivery failed", error),
+      );
     }, delay);
   }
 
@@ -278,6 +300,7 @@ export class PersistentNotifierRuntime {
 
   private async reconcileStartup(): Promise<void> {
     if (!this.database) return;
+    const startedAt = Date.now();
     this.seedDefinitions();
     const entries = snapshotNotificationEntries(
       this.app.getPath(`${this.app.selfContext}.notifications`),
@@ -288,8 +311,10 @@ export class PersistentNotifierRuntime {
       if ((index + 1) % 50 === 0)
         await new Promise<void>((resolve) => setImmediate(resolve));
     }
+    let queuedCount = 0;
     while (this.startupEntries.length > 0) {
       const queued = this.startupEntries.splice(0, 50);
+      queuedCount += queued.length;
       for (const entry of queued) {
         if (!this.database) return;
         await this.ingestEntry(entry, new Date(), false);
@@ -300,6 +325,9 @@ export class PersistentNotifierRuntime {
     this.scheduleNextWake();
     this.scheduleNextActivation();
     await this.runScheduler();
+    this.debug(
+      `Startup reconciliation complete: snapshotEntries=${entries.length}, queuedEntries=${queuedCount}, durationMs=${Date.now() - startedAt}`,
+    );
   }
 
   private definitionView(definition: AlertDefinitionRecord): DefinitionView {
@@ -440,12 +468,16 @@ export class PersistentNotifierRuntime {
           notifierIds: patch.notifierIds ?? current.policy.notifierIds,
         });
         const updated = this.getDefinition(id);
+        this.debug(`Updated alert policy: definitionId=${id}`);
         this.emitChange("policy");
         return updated;
       },
       forgetDefinition: (id: string) => {
         const result = this.db().forgetDiscoveredDefinition(id);
-        if (result === "deleted") this.emitChange("definition");
+        if (result === "deleted") {
+          this.debug(`Forgot discovered alert: definitionId=${id}`);
+          this.emitChange("definition");
+        }
         return result;
       },
       listOccurrences: (query: OccurrenceQuery) => {
@@ -483,6 +515,7 @@ export class PersistentNotifierRuntime {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
         this.db().dismissOccurrence(id);
+        this.debug(`Dismissed occurrence: occurrenceId=${id}`);
         this.emitChange("occurrence");
         return { status: "dismissed", upstream: "not_requested" };
       },
@@ -498,6 +531,9 @@ export class PersistentNotifierRuntime {
           {
             message: upstream.message,
           },
+        );
+        this.debug(
+          `Acknowledged occurrence: occurrenceId=${id}, upstream=${upstream.upstream}`,
         );
         this.emitChange("occurrence");
         return { status: "acknowledged", ...upstream };
@@ -515,6 +551,9 @@ export class PersistentNotifierRuntime {
             message: upstream.message,
           },
         );
+        this.debug(
+          `Silenced occurrence: occurrenceId=${id}, upstream=${upstream.upstream}`,
+        );
         this.emitChange("occurrence");
         return { status: "silenced", ...upstream };
       },
@@ -523,6 +562,9 @@ export class PersistentNotifierRuntime {
 
   start(options: PluginConfig): void {
     validateConfig(options);
+    this.debug(
+      `Starting: configuredServices=${options.notifiers?.length ?? 0}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
+    );
     this.config = options;
     this.database = new AlertDatabase(this.databasePath(options));
     this.policy = new AlertPolicyResolver(this.database, options);
@@ -593,11 +635,7 @@ export class PersistentNotifierRuntime {
       void (async () => {
         for (const entry of entries) await this.ingestEntry(entry);
       })().catch((error: unknown) =>
-        this.app.error(
-          `Could not ingest Signal K notification: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        ),
+        this.reportAsyncError("Could not ingest Signal K notification", error),
       );
     };
     const unsubscribes: Array<() => void> = [];
@@ -609,7 +647,7 @@ export class PersistentNotifierRuntime {
       },
       unsubscribes,
       (error: unknown) =>
-        this.app.error(`Notification subscription failed: ${error}`),
+        this.reportAsyncError("Notification subscription failed", error),
       handler,
     );
     this.unsubscribe = () => unsubscribes.forEach((stop) => stop());
@@ -621,10 +659,9 @@ export class PersistentNotifierRuntime {
       void this.reconcileStartup().catch((error: unknown) => {
         const queued = this.startupEntries.splice(0);
         this.reconcilingStartup = false;
-        this.app.error(
-          `Could not reconcile current notifications: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+        this.reportAsyncError(
+          "Could not reconcile current notifications",
+          error,
         );
         // The subscription is already live. Preserve deltas that arrived while
         // the failed snapshot reconciliation was running instead of leaving
@@ -632,12 +669,9 @@ export class PersistentNotifierRuntime {
         void (async () => {
           for (const entry of queued) await this.ingestEntry(entry);
         })().catch((queuedError: unknown) =>
-          this.app.error(
-            `Could not ingest queued Signal K notifications: ${
-              queuedError instanceof Error
-                ? queuedError.message
-                : String(queuedError)
-            }`,
+          this.reportAsyncError(
+            "Could not ingest queued Signal K notifications",
+            queuedError,
           ),
         );
       });
@@ -650,6 +684,7 @@ export class PersistentNotifierRuntime {
       (options.discovery?.zoneRefreshSeconds ?? 300) * 1000,
     );
     this.app.setPluginStatus("Alert center active");
+    this.debug("Started and subscribed to Signal K notifications");
   }
 
   registerWithRouter(router: PluginRouter): void {
@@ -685,6 +720,7 @@ export class PersistentNotifierRuntime {
   }
 
   async stop(): Promise<void> {
+    this.debug("Stopping");
     this.reconcilingStartup = false;
     this.startupEntries = [];
     this.unsubscribe?.();
@@ -700,5 +736,6 @@ export class PersistentNotifierRuntime {
     this.connectivity = undefined;
     this.policy = undefined;
     this.transports.clear();
+    this.debug("Stopped");
   }
 }

@@ -253,6 +253,11 @@ status, history pages, definition summaries, and the delivery scheduler use boun
 SQL queries so their cost does not grow with unrelated historical records. Unchanged
 zone definitions do not rewrite the database during periodic discovery.
 
+Operational errors and delivery batches are written to Signal K's server log
+without notification bodies, notifier credentials, tokens, or webhook URLs. Enable
+the plugin's debug namespace on Signal K's **Server Log** page to see startup,
+reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
+
 ## Configuration
 
 ```json
