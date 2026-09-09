@@ -246,6 +246,13 @@ hardware.
 
 The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newer. Install with `npm install`, compile with `npm run build`, and install the package through Signal K's normal plugin mechanism.
 
+Startup subscribes to notification deltas before reconciling the existing Signal K
+model. The model scan runs after plugin startup returns, processes notifications in
+bounded batches, and schedules pending delivery once after reconciliation. Runtime
+status, history pages, definition summaries, and the delivery scheduler use bounded
+SQL queries so their cost does not grow with unrelated historical records. Unchanged
+zone definitions do not rewrite the database during periodic discovery.
+
 ## Configuration
 
 ```json

@@ -134,6 +134,8 @@ export interface OccurrenceQuery {
   state?: AlertState;
   severity?: Severity;
   dismissed?: boolean;
+  from?: Date;
+  to?: Date;
   /** Exclusive occurrence id cursor in reverse chronological order. */
   cursor?: string;
   limit?: number;

@@ -59,6 +59,8 @@ export class PersistentNotifierRuntime {
   private activationTimer?: ReturnType<typeof setTimeout>;
   private deliveryTimer?: ReturnType<typeof setTimeout>;
   private zoneRefreshTimer?: ReturnType<typeof setInterval>;
+  private reconcilingStartup = false;
+  private startupEntries: SignalKNotificationInput[] = [];
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
 
@@ -93,6 +95,7 @@ export class PersistentNotifierRuntime {
   }
 
   status() {
+    const alertStats = this.database?.alertStats();
     return {
       connectivity: this.connectivity
         ? {
@@ -103,19 +106,13 @@ export class PersistentNotifierRuntime {
           }
         : { state: "OFF", switchOn: undefined, ownedByPlugin: false },
       alerts: {
-        definitions: this.database?.listDefinitions().length ?? 0,
-        total: this.database?.listAlerts().length ?? 0,
-        active:
-          this.database
-            ?.listAlerts()
-            .filter(
-              (alert) => alert.currentState === "active" && !alert.dismissedAt,
-            ).length ?? 0,
-        pendingActivation: this.database?.listActivationDeadlines().length ?? 0,
+        definitions: this.database?.definitionCount() ?? 0,
+        total: alertStats?.total ?? 0,
+        active: alertStats?.active ?? 0,
+        pendingActivation: alertStats?.pendingActivation ?? 0,
         pendingDelivery: this.database?.pendingDeliveryCount() ?? 0,
       },
       schemaVersion: this.database?.schemaVersion(),
-      deliveries: this.database?.listDeliveries() ?? [],
     };
   }
 
@@ -176,10 +173,11 @@ export class PersistentNotifierRuntime {
   private async applyConnectivityPolicy(
     occurrence: AlertRecord,
     now: Date,
+    schedule = true,
   ): Promise<void> {
     if (occurrence.currentState === "cleared") {
       this.db().clearWakeDue(occurrence.id);
-      this.scheduleNextWake();
+      if (schedule) this.scheduleNextWake();
       return;
     }
     if (occurrence.activationState === "suppressed") return;
@@ -195,14 +193,15 @@ export class PersistentNotifierRuntime {
           : undefined;
     if (!wakeAt) return;
     this.db().setWakeDue(occurrence.id, wakeAt, now);
-    this.scheduleNextWake();
-    if (wakeAt <= now && this.connectivity)
+    if (schedule) this.scheduleNextWake();
+    if (schedule && wakeAt <= now && this.connectivity)
       await this.connectivity.requestWake();
   }
 
   private async ingestEntry(
     entry: SignalKNotificationInput,
     receivedAt = new Date(),
+    schedule = true,
   ): Promise<AlertRecord | undefined> {
     const normalized = normalizeNotification(
       entry.path,
@@ -244,10 +243,38 @@ export class PersistentNotifierRuntime {
       },
     );
     if (!occurrence) return undefined;
-    await this.applyConnectivityPolicy(occurrence, receivedAt);
+    await this.applyConnectivityPolicy(occurrence, receivedAt, schedule);
+    if (schedule) {
+      this.scheduleNextActivation();
+      await this.runScheduler();
+    }
+    return occurrence;
+  }
+
+  private async reconcileStartup(): Promise<void> {
+    if (!this.database) return;
+    this.seedDefinitions();
+    const entries = snapshotNotificationEntries(
+      this.app.getPath(`${this.app.selfContext}.notifications`),
+    );
+    for (let index = 0; index < entries.length; index += 1) {
+      if (!this.database) return;
+      await this.ingestEntry(entries[index], new Date(), false);
+      if ((index + 1) % 50 === 0)
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    while (this.startupEntries.length > 0) {
+      const queued = this.startupEntries.splice(0, 50);
+      for (const entry of queued) {
+        if (!this.database) return;
+        await this.ingestEntry(entry, new Date(), false);
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    this.reconcilingStartup = false;
+    this.scheduleNextWake();
     this.scheduleNextActivation();
     await this.runScheduler();
-    return occurrence;
   }
 
   private definitionView(definition: AlertDefinitionRecord): DefinitionView {
@@ -256,37 +283,7 @@ export class PersistentNotifierRuntime {
         ? (definition.metadata as Record<string, unknown>)
         : {};
     const policy = this.policies().forDefinition(definition);
-    const occurrences = this.db()
-      .listAlerts()
-      .filter((occurrence) => occurrence.definitionId === definition.id);
-    const lastFiredAt = occurrences.reduce<Date | undefined>(
-      (latest, occurrence) =>
-        !latest || occurrence.firstSeenAt > latest
-          ? occurrence.firstSeenAt
-          : latest,
-      undefined,
-    );
-    const lastActivityAt = occurrences.reduce<Date | undefined>(
-      (latest, occurrence) => {
-        const candidate = [
-          occurrence.lastSeenAt,
-          occurrence.clearedAt,
-          occurrence.acknowledgedAt,
-          occurrence.silencedAt,
-          occurrence.dismissedAt,
-        ].reduce<Date | undefined>(
-          (occurrenceLatest, timestamp) =>
-            timestamp && (!occurrenceLatest || timestamp > occurrenceLatest)
-              ? timestamp
-              : occurrenceLatest,
-          undefined,
-        );
-        return candidate && (!latest || candidate > latest)
-          ? candidate
-          : latest;
-      },
-      undefined,
-    );
+    const stats = this.db().definitionStats(definition.id);
     return {
       ...definition,
       description:
@@ -295,25 +292,24 @@ export class PersistentNotifierRuntime {
           : undefined,
       zone: typeof metadata.zone === "string" ? metadata.zone : undefined,
       oneTime: policy.oneTime,
-      fireCount: occurrences.length,
-      lastFiredAt,
-      lastActivityAt,
+      ...stats,
       policy,
     };
   }
 
-  private occurrenceView(occurrence: AlertRecord) {
+  private occurrenceView(occurrence: AlertRecord, includeAttempts = false) {
     return {
       ...occurrence,
       state: occurrence.currentState,
       startedAt: occurrence.firstSeenAt,
       oneTime: occurrence.oneTime,
       deliveries: this.db()
-        .listDeliveries()
-        .filter((delivery) => delivery.alertId === occurrence.id)
+        .listDeliveriesForAlert(occurrence.id)
         .map((delivery) => ({
           ...delivery,
-          attempts: this.db().listDeliveryAttempts(delivery.id),
+          ...(includeAttempts
+            ? { attempts: this.db().listDeliveryAttempts(delivery.id) }
+            : {}),
         })),
     };
   }
@@ -423,40 +419,15 @@ export class PersistentNotifierRuntime {
       forgetDefinition: (id: string) =>
         this.db().forgetDiscoveredDefinition(id),
       listOccurrences: (query: OccurrenceQuery) => {
-        let items = this.db()
-          .listAlerts()
-          .sort(
-            (left, right) =>
-              right.firstSeenAt.getTime() - left.firstSeenAt.getTime() ||
-              right.id.localeCompare(left.id),
-          );
-        if (query.definitionId)
-          items = items.filter(
-            (item) => item.definitionId === query.definitionId,
-          );
-        if (query.state)
-          items = items.filter((item) => item.currentState === query.state);
-        if (query.severity)
-          items = items.filter(
-            (item) => item.currentSeverity === query.severity,
-          );
-        if (query.dismissed !== undefined)
-          items = items.filter(
-            (item) => Boolean(item.dismissedAt) === query.dismissed,
-          );
-        if (query.from)
-          items = items.filter((item) => item.firstSeenAt >= query.from!);
-        if (query.to)
-          items = items.filter((item) => item.firstSeenAt <= query.to!);
-        return this.page(
-          items.map((item) => this.occurrenceView(item)),
-          query.limit,
-          query.cursor,
-        );
+        const page = this.db().queryOccurrences(query);
+        return {
+          items: page.items.map((item) => this.occurrenceView(item)),
+          nextCursor: page.nextCursor,
+        };
       },
       getOccurrence: (id) => {
         const occurrence = this.getOccurrence(id);
-        return occurrence ? this.occurrenceView(occurrence) : undefined;
+        return occurrence ? this.occurrenceView(occurrence, true) : undefined;
       },
       listOccurrenceEvents: (id: string, query: EventQuery) => {
         if (!this.getOccurrence(id)) return undefined;
@@ -522,6 +493,8 @@ export class PersistentNotifierRuntime {
     this.config = options;
     this.database = new AlertDatabase(this.databasePath(options));
     this.policy = new AlertPolicyResolver(this.database, options);
+    this.reconcilingStartup = true;
+    this.startupEntries = [];
 
     this.transports = new Map<string, NotificationTransport>();
     for (const notifier of options.notifiers ?? []) {
@@ -574,15 +547,18 @@ export class PersistentNotifierRuntime {
         (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
       );
 
-    this.seedDefinitions();
     this.scheduleNextWake();
     this.database.processDueActivations();
     this.scheduleNextActivation();
 
     const handler = (delta: unknown): void => {
+      const entries = extractNotificationEntries(delta);
+      if (this.reconcilingStartup) {
+        this.startupEntries.push(...entries);
+        return;
+      }
       void (async () => {
-        for (const entry of extractNotificationEntries(delta))
-          await this.ingestEntry(entry);
+        for (const entry of entries) await this.ingestEntry(entry);
       })().catch((error: unknown) =>
         this.app.error(
           `Could not ingest Signal K notification: ${
@@ -605,25 +581,38 @@ export class PersistentNotifierRuntime {
     );
     this.unsubscribe = () => unsubscribes.forEach((stop) => stop());
 
-    // Subscribe first, then reconcile the full model. Duplicate observations
-    // pass through the same idempotent occurrence ingest path.
-    void (async () => {
-      for (const entry of snapshotNotificationEntries(
-        this.app.getPath(`${this.app.selfContext}.notifications`),
-      ))
-        await this.ingestEntry(entry);
-    })().catch((error: unknown) =>
-      this.app.error(
-        `Could not reconcile current notifications: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      ),
-    );
+    // Return control to Signal K before scanning the model. Deltas received
+    // after subscribing are queued and applied after the snapshot so an older
+    // startup value cannot overwrite a newer update.
+    setImmediate(() => {
+      void this.reconcileStartup().catch((error: unknown) => {
+        const queued = this.startupEntries.splice(0);
+        this.reconcilingStartup = false;
+        this.app.error(
+          `Could not reconcile current notifications: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        // The subscription is already live. Preserve deltas that arrived while
+        // the failed snapshot reconciliation was running instead of leaving
+        // them stranded in the startup queue.
+        void (async () => {
+          for (const entry of queued) await this.ingestEntry(entry);
+        })().catch((queuedError: unknown) =>
+          this.app.error(
+            `Could not ingest queued Signal K notifications: ${
+              queuedError instanceof Error
+                ? queuedError.message
+                : String(queuedError)
+            }`,
+          ),
+        );
+      });
+    });
     this.zoneRefreshTimer = setInterval(
       () => this.seedDefinitions(),
       (options.discovery?.zoneRefreshSeconds ?? 300) * 1000,
     );
-    void this.runScheduler();
     this.app.setPluginStatus("Alert center active");
   }
 
@@ -659,6 +648,8 @@ export class PersistentNotifierRuntime {
   }
 
   async stop(): Promise<void> {
+    this.reconcilingStartup = false;
+    this.startupEntries = [];
     this.unsubscribe?.();
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);

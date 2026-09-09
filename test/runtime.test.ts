@@ -62,11 +62,13 @@ describe("PersistentNotifierRuntime", () => {
       },
       notifications: {},
     };
+    const getPath = vi.fn((path: string) =>
+      path === "vessels.self.notifications" ? self.notifications : self,
+    );
     const app = {
       error: vi.fn(),
       getDataDirPath: () => directory,
-      getPath: (path: string) =>
-        path === "vessels.self.notifications" ? self.notifications : self,
+      getPath,
       getSelfPath: (path: string) =>
         path === "notifications" ? self.notifications : self,
       notifications: {
@@ -115,6 +117,7 @@ describe("PersistentNotifierRuntime", () => {
         notifiers: ["warning", "critical"],
       },
     });
+    expect(getPath).not.toHaveBeenCalled();
 
     const path = "notifications.environment.inside.refrigerator.temperature";
     subscriber?.({
@@ -136,13 +139,20 @@ describe("PersistentNotifierRuntime", () => {
       ],
     });
     await flush();
+    expect(getPath).toHaveBeenCalled();
     const repository = (
       runtime as unknown as { repository(): AlertCenterRepository }
     ).repository();
+    const runtimeDatabase = (runtime as unknown as { database: AlertDatabase })
+      .database;
+    const fullHistoryRead = vi.spyOn(runtimeDatabase, "listAlerts");
+    runtime.status();
+    expect(fullHistoryRead).not.toHaveBeenCalled();
     const active = (await repository.listOccurrences({
       limit: 10,
       state: "active",
     })) as Page<{ id: string; definitionId: string }>;
+    expect(fullHistoryRead).not.toHaveBeenCalled();
     expect(
       await repository.acknowledgeOccurrence(active.items[0].id),
     ).toMatchObject({ upstream: "applied" });

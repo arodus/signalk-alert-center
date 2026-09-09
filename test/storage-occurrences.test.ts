@@ -333,4 +333,23 @@ describe("occurrence storage", () => {
     });
     expect(db.forgetDiscoveredDefinition("zone:anchor")).toBe("not_discovered");
   });
+
+  it("does not rewrite an unchanged definition during discovery refresh", () => {
+    const db = database();
+    const definition = {
+      id: "zone:anchor",
+      sourceType: "zone" as const,
+      pathPattern: "notifications.navigation.anchor",
+      name: "Anchor",
+      metadata: { description: "Anchor alarm" },
+    };
+
+    db.upsertDefinition(definition, new Date("2026-01-01T00:00:00Z"));
+    const unchanged = db.upsertDefinition(
+      definition,
+      new Date("2026-01-01T00:05:00Z"),
+    );
+
+    expect(unchanged.updatedAt).toEqual(new Date("2026-01-01T00:00:00Z"));
+  });
 });
