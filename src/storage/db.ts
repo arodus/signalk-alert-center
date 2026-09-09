@@ -232,6 +232,82 @@ export class AlertDatabase {
     return Number(row.count);
   }
 
+  retentionStatus(cutoff: Date): {
+    eligibleOccurrences: number;
+    oldestEligibleAt?: Date;
+  } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS eligible, MIN(started_at) AS oldest
+         FROM alert_occurrences o
+         WHERE o.current_state='cleared' AND o.cleared_at < ?
+           AND NOT EXISTS (
+             SELECT 1 FROM deliveries d
+             WHERE d.alert_id=o.id
+               AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
+           )`,
+      )
+      .get(cutoff.toISOString()) as Row;
+    return {
+      eligibleOccurrences: Number(row.eligible),
+      oldestEligibleAt: date(row.oldest),
+    };
+  }
+
+  pruneOccurrences(cutoff: Date, limit = 100): string[] {
+    const boundedLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const ids = (
+        this.db
+          .prepare(
+            `SELECT o.id FROM alert_occurrences o
+             WHERE o.current_state='cleared' AND o.cleared_at < ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM deliveries d
+                 WHERE d.alert_id=o.id
+                   AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
+               )
+             ORDER BY o.started_at, o.id LIMIT ?`,
+          )
+          .all(cutoff.toISOString(), boundedLimit) as Row[]
+      ).map((row) => String(row.id));
+      const remove = this.db.prepare(
+        "DELETE FROM alert_occurrences WHERE id=?",
+      );
+      for (const id of ids) {
+        this.db
+          .prepare(
+            "DELETE FROM delivery_attempts WHERE delivery_id IN (SELECT id FROM deliveries WHERE alert_id=?)",
+          )
+          .run(id);
+        this.db.prepare("DELETE FROM deliveries WHERE alert_id=?").run(id);
+        this.db.prepare("DELETE FROM alert_events WHERE alert_id=?").run(id);
+        this.db.prepare("DELETE FROM wake_requests WHERE alert_id=?").run(id);
+        this.db
+          .prepare("DELETE FROM occurrence_notifiers WHERE alert_id=?")
+          .run(id);
+        this.db
+          .prepare(
+            "DELETE FROM occurrence_notifier_thresholds WHERE alert_id=?",
+          )
+          .run(id);
+        remove.run(id);
+      }
+      this.db.exec("COMMIT");
+      return ids;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   forgetDiscoveredDefinition(
     id: string,
   ): "deleted" | "active" | "not_discovered" | "not_found" {

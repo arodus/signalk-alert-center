@@ -61,12 +61,20 @@ export class PersistentNotifierRuntime {
   private activationTimer?: ReturnType<typeof setTimeout>;
   private deliveryTimer?: ReturnType<typeof setTimeout>;
   private zoneRefreshTimer?: ReturnType<typeof setInterval>;
+  private retentionTimer?: ReturnType<typeof setInterval>;
   private reconcilingStartup = false;
   private startupEntries: SignalKNotificationInput[] = [];
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
   private changeRevision = 0;
   private changeListeners = new Set<(change: AlertCenterChange) => void>();
+  private retentionState?: {
+    lastRunAt: Date;
+    cutoff: Date;
+    eligibleOccurrences: number;
+    deletedOccurrences: number;
+    remainingEligibleOccurrences: number;
+  };
 
   constructor(private readonly app: ServerAPI) {}
 
@@ -119,6 +127,13 @@ export class PersistentNotifierRuntime {
         pendingDelivery: this.database?.pendingDeliveryCount() ?? 0,
       },
       schemaVersion: this.database?.schemaVersion(),
+      retention: {
+        enabled: this.config.retention?.enabled ?? false,
+        maxAgeDays: this.config.retention?.maxAgeDays ?? 365,
+        batchSize: this.config.retention?.batchSize ?? 100,
+        intervalHours: this.config.retention?.intervalHours ?? 24,
+        ...this.retentionState,
+      },
     };
   }
 
@@ -218,6 +233,27 @@ export class PersistentNotifierRuntime {
 
   private seedDefinitions(): void {
     this.policies().seedDefinitions(listConfiguredZones(this.app));
+  }
+
+  private runRetention(now = new Date()): void {
+    if (!this.config.retention?.enabled || !this.database) return;
+    const maxAgeDays = this.config.retention.maxAgeDays ?? 365;
+    const batchSize = this.config.retention.batchSize ?? 100;
+    const cutoff = new Date(now.getTime() - maxAgeDays * 86_400_000);
+    const before = this.database.retentionStatus(cutoff);
+    const deleted = this.database.pruneOccurrences(cutoff, batchSize);
+    const after = this.database.retentionStatus(cutoff);
+    this.retentionState = {
+      lastRunAt: now,
+      cutoff,
+      eligibleOccurrences: before.eligibleOccurrences,
+      deletedOccurrences: deleted.length,
+      remainingEligibleOccurrences: after.eligibleOccurrences,
+    };
+    this.debug(
+      `Retention cleanup: eligible=${before.eligibleOccurrences}, deleted=${deleted.length}, remaining=${after.eligibleOccurrences}`,
+    );
+    if (deleted.length) this.emitChange("retention");
   }
 
   private async applyConnectivityPolicy(
@@ -328,6 +364,7 @@ export class PersistentNotifierRuntime {
     this.scheduleNextWake();
     this.scheduleNextActivation();
     await this.runScheduler();
+    this.runRetention();
     this.debug(
       `Startup reconciliation complete: snapshotEntries=${entries.length}, queuedEntries=${queuedCount}, durationMs=${Date.now() - startedAt}`,
     );
@@ -724,6 +761,20 @@ export class PersistentNotifierRuntime {
       },
       (options.discovery?.zoneRefreshSeconds ?? 300) * 1000,
     );
+    if (options.retention?.enabled)
+      this.retentionTimer = setInterval(
+        () => {
+          try {
+            this.runRetention();
+          } catch (error) {
+            this.reportAsyncError("Retention cleanup failed", error);
+          }
+        },
+        Math.min(
+          MAX_TIMER_DELAY,
+          (options.retention.intervalHours ?? 24) * 3_600_000,
+        ),
+      );
     this.app.setPluginStatus("Alert center active");
     this.debug("Started and subscribed to Signal K notifications");
   }
@@ -768,6 +819,7 @@ export class PersistentNotifierRuntime {
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     if (this.zoneRefreshTimer) clearInterval(this.zoneRefreshTimer);
+    if (this.retentionTimer) clearInterval(this.retentionTimer);
     await this.scheduler?.stop();
     this.connectivity?.stop();
     this.database?.close();

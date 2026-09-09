@@ -316,7 +316,13 @@ path remains supported when you intentionally manage the database elsewhere.
 
 The Signal K plugin form contains only global configuration: storage/discovery,
 retry behavior, notifier connections and secrets, global defaults, and optional
-connectivity management. It also contains a destructive, one-shot database reset
+connectivity management. Optional **History retention** removes only cleared
+occurrences older than the configured age, in bounded batches. It is disabled by
+default and always protects active alerts, pending/retryable/in-flight deliveries,
+and persisted wake requests. Retention status and the most recent cleanup counts
+are available from `/status`.
+
+The form also contains a destructive, one-shot database reset
 under **Database maintenance**. Enable **Reset database when Save Configuration is
 clicked**, then click Signal K's **Save Configuration** button. The plugin deletes
 all alert definitions, occurrences, event and delivery history, and per-alert policy;

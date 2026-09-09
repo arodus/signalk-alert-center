@@ -39,6 +39,21 @@ describe("validateConfig", () => {
     ).toThrow("discovery.zoneRefreshSeconds must be at least 1");
   });
 
+  it("keeps retention opt-in and validates bounded cleanup batches", () => {
+    const retention = pluginConfigSchema.properties.retention;
+    expect(retention.properties.enabled.default).toBe(false);
+    expect(retention.properties.maxAgeDays.default).toBe(365);
+    expect(() =>
+      validateConfig({ retention: { enabled: true, batchSize: 100 } }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({ retention: { enabled: true, maxAgeDays: 0 } }),
+    ).toThrow("retention.maxAgeDays");
+    expect(() =>
+      validateConfig({ retention: { enabled: true, batchSize: 1001 } }),
+    ).toThrow("retention.batchSize");
+  });
+
   it("rejects invalid notifier credentials", () => {
     expect(() =>
       validateConfig({

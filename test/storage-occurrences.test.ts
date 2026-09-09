@@ -352,4 +352,49 @@ describe("occurrence storage", () => {
 
     expect(unchanged.updatedAt).toEqual(new Date("2026-01-01T00:00:00Z"));
   });
+
+  it("prunes only old completed occurrences without unfinished work", () => {
+    const db = database();
+    const old = new Date("2025-01-01T00:00:00Z");
+    const clear = new Date("2025-01-01T00:01:00Z");
+    const cutoff = new Date("2026-01-01T00:00:00Z");
+
+    const removable = db.ingest(active({ sourceKey: "removable" }), [], old)!;
+    db.ingest(
+      active({ sourceKey: "removable", state: "cleared", severity: "normal" }),
+      [],
+      clear,
+    );
+    const activeOccurrence = db.ingest(
+      active({ sourceKey: "still-active" }),
+      [],
+      old,
+    )!;
+    const pending = db.ingest(
+      active({ sourceKey: "pending-delivery" }),
+      ["ntfy"],
+      old,
+    )!;
+    db.ingest(
+      active({
+        sourceKey: "pending-delivery",
+        state: "cleared",
+        severity: "normal",
+      }),
+      [],
+      clear,
+    );
+
+    expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(1);
+    expect(db.pruneOccurrences(cutoff, 10)).toEqual([removable.id]);
+    expect(
+      db
+        .listOccurrences()
+        .map((item) => item.id)
+        .sort(),
+    ).toEqual([activeOccurrence.id, pending.id].sort());
+    expect(db.listDefinitions()).toHaveLength(3);
+    expect(db.listDeliveries()).toHaveLength(1);
+    expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(0);
+  });
 });
