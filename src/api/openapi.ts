@@ -165,6 +165,21 @@ export function getAlertCenterOpenApi() {
           },
         },
       },
+      "/events": {
+        get: {
+          summary: "Stream alert-center change notifications",
+          responses: {
+            "200": {
+              description:
+                "Server-sent events that invalidate dashboard alert data",
+              content: {
+                "text/event-stream": { schema: { type: "string" } },
+              },
+            },
+            ...errors,
+          },
+        },
+      },
       "/occurrences": {
         get: {
           summary:

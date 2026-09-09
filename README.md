@@ -373,6 +373,10 @@ Source names are shown in alert details, not in the table.
 Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert, with **Settings** for changes.
+The dashboard receives lightweight server-sent change events and reloads data only
+after alerts, policies, definitions, or deliveries change. Browsers automatically
+reconnect the same-origin stream; while it is unavailable, the UI uses a slow
+60-second fallback poll.
 
 Policy edits apply to future occurrences. The occurrence snapshots the effective
 one-time, severity, activation, rearm, connectivity, and notifier policy so a later

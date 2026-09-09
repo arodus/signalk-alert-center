@@ -12,12 +12,30 @@ type Handler = (
 class FakeResponse {
   statusCode = 200;
   body: unknown;
+  headers = new Map<string, string>();
+  writes: string[] = [];
+  private closeListeners: Array<() => void> = [];
   status(code: number) {
     this.statusCode = code;
     return this;
   }
   json(value: unknown) {
     this.body = value;
+  }
+  setHeader(name: string, value: string) {
+    this.headers.set(name, value);
+  }
+  flushHeaders() {}
+  write(value: string) {
+    this.writes.push(value);
+    return true;
+  }
+  end() {}
+  on(event: "close", listener: () => void) {
+    if (event === "close") this.closeListeners.push(listener);
+  }
+  close() {
+    for (const listener of this.closeListeners) listener();
   }
 }
 
@@ -42,6 +60,14 @@ function fixture() {
     },
   };
   const queries: unknown[] = [];
+  let changeListener:
+    | ((change: {
+        revision: number;
+        reason: string;
+        occurredAt: string;
+      }) => void)
+    | undefined;
+  let unsubscribeCount = 0;
   const repository: AlertCenterRepository = {
     listDefinitions(query) {
       queries.push(query);
@@ -65,6 +91,17 @@ function fixture() {
   registerAlertCenterRoutes(router, {
     repository: () => repository,
     listNotifiers: () => [{ id: "ntfy-main", type: "ntfy" }],
+    subscribeChanges: (listener) => {
+      changeListener = listener;
+      listener({
+        revision: 0,
+        reason: "connected",
+        occurredAt: "2026-09-09T00:00:00.000Z",
+      });
+      return () => {
+        unsubscribeCount += 1;
+      };
+    },
   });
   const invoke = async (
     method: string,
@@ -76,7 +113,18 @@ function fixture() {
     await new Promise((resolve) => setTimeout(resolve, 0));
     return response;
   };
-  return { access, invoke, queries };
+  return {
+    access,
+    invoke,
+    queries,
+    emitChange: () =>
+      changeListener?.({
+        revision: 1,
+        reason: "alerts",
+        occurredAt: "2026-09-09T00:01:00.000Z",
+      }),
+    unsubscribeCount: () => unsubscribeCount,
+  };
 }
 
 describe("alert-center routes", () => {
@@ -84,8 +132,21 @@ describe("alert-center routes", () => {
     const { access } = fixture();
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
-    expect(access.filter((value) => value === "readonly")).toHaveLength(6);
+    expect(access.filter((value) => value === "readonly")).toHaveLength(7);
     expect(access.filter((value) => value === "readwrite")).toHaveLength(5);
+  });
+
+  it("streams change notifications and releases closed clients", async () => {
+    const current = fixture();
+    const response = await current.invoke("GET", "/events");
+
+    expect(response.headers.get("Content-Type")).toBe("text/event-stream");
+    expect(response.writes.join("")).toContain('"reason":"connected"');
+    current.emitChange();
+    expect(response.writes.join("")).toContain('"reason":"alerts"');
+
+    response.close();
+    expect(current.unsubscribeCount()).toBe(1);
   });
 
   it("parses bounded occurrence filters", async () => {

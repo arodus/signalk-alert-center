@@ -72,6 +72,11 @@ export interface AlertCenterRepository {
 interface ResponseLike {
   status(code: number): ResponseLike;
   json(value: unknown): void;
+  setHeader?(name: string, value: string): void;
+  flushHeaders?(): void;
+  write?(value: string): boolean;
+  end?(): void;
+  on?(event: "close", listener: () => void): void;
 }
 type Handler = (request: RequestLike, response: ResponseLike) => void;
 export interface RouterLike {
@@ -87,10 +92,19 @@ interface RequestLike {
   params?: Record<string, string | undefined>;
   query?: Record<string, unknown>;
   body?: unknown;
+  on?(event: "close", listener: () => void): void;
+}
+export interface AlertCenterChange {
+  revision: number;
+  reason: string;
+  occurredAt: string;
 }
 export interface AlertCenterDependencies {
   repository: () => AlertCenterRepository | undefined;
   listNotifiers?: () => MaybePromise<unknown[]>;
+  subscribeChanges?: (
+    listener: (change: AlertCenterChange) => void,
+  ) => () => void;
 }
 
 class ApiError extends Error {
@@ -352,6 +366,42 @@ export function registerAlertCenterRoutes(
   dependencies: AlertCenterDependencies,
 ): void {
   const repo = () => repository(dependencies.repository);
+  const subscribeChanges = dependencies.subscribeChanges;
+  if (subscribeChanges)
+    addRoute(router, "get", "/events", "readonly", (req, res) => {
+      if (!res.setHeader || !res.write)
+        return fail(
+          res,
+          501,
+          "STREAMING_UNAVAILABLE",
+          "This server cannot stream alert updates",
+        );
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
+      res.write("retry: 5000\n\n");
+
+      let closed = false;
+      const unsubscribe = subscribeChanges((change) => {
+        if (!closed)
+          res.write?.(`event: change\ndata: ${JSON.stringify(change)}\n\n`);
+      });
+      const heartbeat = setInterval(() => {
+        if (!closed) res.write?.(": keepalive\n\n");
+      }, 25_000);
+      heartbeat.unref?.();
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+        res.end?.();
+      };
+      req.on?.("close", close);
+      res.on?.("close", close);
+    });
   addRoute(
     router,
     "get",
