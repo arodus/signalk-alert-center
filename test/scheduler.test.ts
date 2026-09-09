@@ -5,6 +5,42 @@ import { AlertDatabase } from "../src/storage/db";
 import { NotificationTransport } from "../src/transports/transport";
 
 describe("DeliveryScheduler", () => {
+  it("records thrown transport errors and reports a retryable failure", async () => {
+    const database = new AlertDatabase();
+    const transport: NotificationTransport = {
+      type: "test",
+      send: vi.fn(async () => {
+        throw new Error("transport crashed");
+      }),
+    };
+    new AlertLifecycle(database, ["test"]).ingest({
+      sourceKey: "notifications.transport-error",
+      path: "notifications.transport-error",
+      severity: "alarm",
+      state: "active",
+    });
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map([["test", transport]]),
+      { initialSeconds: 60, maxSeconds: 60, multiplier: 1, jitter: 0 },
+    );
+
+    await expect(
+      scheduler.runOnce(new Date("2026-01-01T00:00:00Z")),
+    ).resolves.toMatchObject({
+      processed: 1,
+      succeeded: 0,
+      retryableFailures: 1,
+      terminalFailures: 0,
+    });
+    expect(database.listDeliveries()[0]).toMatchObject({
+      state: "failed_retryable",
+      lastErrorCode: "TRANSPORT_ERROR",
+      lastErrorMessage: "transport crashed",
+    });
+    database.close();
+  });
+
   it("queries only deliveries that are due", async () => {
     const database = new AlertDatabase();
     const send = vi.fn(async () => ({

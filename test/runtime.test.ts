@@ -66,6 +66,7 @@ describe("PersistentNotifierRuntime", () => {
       path === "vessels.self.notifications" ? self.notifications : self,
     );
     const app = {
+      debug: vi.fn(),
       error: vi.fn(),
       getDataDirPath: () => directory,
       getPath,
@@ -140,6 +141,10 @@ describe("PersistentNotifierRuntime", () => {
     });
     await flush();
     expect(getPath).toHaveBeenCalled();
+    await flush();
+    expect(app.debug).toHaveBeenCalledWith(
+      expect.stringContaining("Startup reconciliation complete"),
+    );
     const repository = (
       runtime as unknown as { repository(): AlertCenterRepository }
     ).repository();
