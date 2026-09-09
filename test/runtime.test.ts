@@ -155,6 +155,31 @@ describe("PersistentNotifierRuntime", () => {
     expect(app.debug).toHaveBeenCalledWith(
       expect.stringContaining("Startup reconciliation complete"),
     );
+    expect(runtime.status()).toMatchObject({
+      health: {
+        state: "degraded",
+        reasons: ["warning last failed (NETWORK)"],
+      },
+      reconciliation: {
+        state: "complete",
+        snapshotEntries: 0,
+        queuedEntries: 1,
+      },
+      scheduler: { running: false },
+      database: { healthy: true, schemaVersion: 3, expectedSchemaVersion: 3 },
+      services: [
+        {
+          id: "warning",
+          type: "ntfy",
+          pendingCount: 1,
+          lastFailureCode: "NETWORK",
+        },
+        { id: "critical", type: "ntfy", pendingCount: 0 },
+      ],
+    });
+    expect(app.setPluginStatus).toHaveBeenCalledWith(
+      expect.stringContaining("degraded:"),
+    );
     const repository = (
       runtime as unknown as { repository(): AlertCenterRepository }
     ).repository();

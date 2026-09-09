@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 2;
+export const currentSchemaVersion = 3;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -16,6 +16,17 @@ CREATE INDEX occurrence_path_history_idx
   ON alert_occurrences(path, started_at DESC, id DESC);
 CREATE INDEX occurrence_source_history_idx
   ON alert_occurrences(source, started_at DESC, id DESC);
+`,
+  },
+  {
+    version: 3,
+    sql: `
+CREATE INDEX deliveries_service_state_idx
+  ON deliveries(transport_instance_id, state, next_attempt_at);
+CREATE INDEX deliveries_service_success_idx
+  ON deliveries(transport_instance_id, delivered_at DESC);
+CREATE INDEX delivery_attempts_finished_idx
+  ON delivery_attempts(finished_at DESC, id DESC);
 `,
   },
 ];

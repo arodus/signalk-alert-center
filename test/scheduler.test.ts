@@ -5,6 +5,88 @@ import { AlertDatabase } from "../src/storage/db";
 import { NotificationTransport } from "../src/transports/transport";
 
 describe("DeliveryScheduler", () => {
+  it("reports per-service success, retry, terminal failure, and overdue activation", async () => {
+    const database = new AlertDatabase();
+    const now = new Date("2026-01-01T00:00:00Z");
+    const ingest = (sourceKey: string, transport: string, delay = 0) =>
+      database.ingest(
+        {
+          sourceKey,
+          path: sourceKey,
+          severity: "alarm",
+          state: "active",
+        },
+        [transport],
+        now,
+        { activationDelaySeconds: delay },
+      );
+    ingest("notifications.success", "success");
+    ingest("notifications.retry", "retry");
+    ingest("notifications.terminal", "terminal");
+    ingest("notifications.delayed", "success", 30);
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map([
+        [
+          "success",
+          {
+            type: "test",
+            send: vi.fn(async () => ({ kind: "success" as const })),
+          },
+        ],
+        [
+          "retry",
+          {
+            type: "test",
+            send: vi.fn(async () => ({
+              kind: "retryable" as const,
+              code: "OFFLINE",
+              message: "offline",
+            })),
+          },
+        ],
+        [
+          "terminal",
+          {
+            type: "test",
+            send: vi.fn(async () => ({
+              kind: "terminal" as const,
+              code: "REJECTED",
+              message: "rejected",
+            })),
+          },
+        ],
+      ]),
+      { initialSeconds: 60, maxSeconds: 60, multiplier: 1, jitter: 0 },
+    );
+
+    await scheduler.runOnce(now);
+    const status = database.operationalStatus(new Date("2026-01-01T00:01:01Z"));
+
+    expect(scheduler.status()).toMatchObject({
+      running: false,
+      lastRunStartedAt: now,
+      lastSummary: {
+        succeeded: 1,
+        retryableFailures: 1,
+        terminalFailures: 1,
+      },
+    });
+    expect(status.overdueActivationCount).toBe(1);
+    expect(status.oldestPendingDeliveryAt).toEqual(
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    expect(status.oldestDueDeliveryAt).toEqual(
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    expect(status.services).toMatchObject([
+      { id: "retry", pendingCount: 1, lastFailureCode: "OFFLINE" },
+      { id: "success", pendingCount: 0, lastSuccessAt: now },
+      { id: "terminal", pendingCount: 0, lastFailureCode: "REJECTED" },
+    ]);
+    database.close();
+  });
+
   it("records thrown transport errors and reports a retryable failure", async () => {
     const database = new AlertDatabase();
     const transport: NotificationTransport = {

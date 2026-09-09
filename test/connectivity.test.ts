@@ -60,6 +60,27 @@ describe("connectivity ownership and durable wake requests", () => {
     expect(manager.state).toBe("OFF");
   });
 
+  it("records connectivity transitions and failed probe diagnostics", async () => {
+    const adapter = new FakeSwitch();
+    const manager = new ConnectivityManager(
+      adapter,
+      0,
+      async () => false,
+      0,
+      1,
+    );
+    managers.push(manager);
+
+    await manager.requestWake();
+
+    expect(manager.state).toBe("FAULT");
+    expect(manager.lastTransitionFrom).toBe("WAITING_FOR_INTERNET");
+    expect(manager.lastTransitionAt).toBeInstanceOf(Date);
+    expect(manager.lastProbeAt).toBeInstanceOf(Date);
+    expect(manager.lastProbeSucceeded).toBe(false);
+    expect(manager.lastError).toBe("Internet readiness probe timed out");
+  });
+
   it("re-checks live safety state before switching off", async () => {
     const adapter = new FakeSwitch();
     let pendingDelivery = true;

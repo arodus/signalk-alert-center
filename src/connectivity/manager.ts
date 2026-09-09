@@ -33,6 +33,11 @@ export class ConnectivityManager {
   ownedByPlugin = false;
   lastError?: string;
   lastShutdownDeferredReason?: string;
+  lastTransitionAt = new Date();
+  lastTransitionFrom?: ConnectivityState;
+  lastProbeAt?: Date;
+  lastProbeSucceeded?: boolean;
+  lastProbeError?: string;
   private cooldownTimer?: ReturnType<typeof setTimeout>;
   private wakeTimer?: ReturnType<typeof setTimeout>;
   private wakeDueAt?: Date;
@@ -46,7 +51,19 @@ export class ConnectivityManager {
     private readonly safetyCheck: ConnectivitySafetyCheck = safeToRelease,
   ) {}
 
+  get scheduledWakeAt(): Date | undefined {
+    return this.wakeDueAt;
+  }
+
+  private transition(next: ConnectivityState): void {
+    if (this.state === next) return;
+    this.lastTransitionFrom = this.state;
+    this.state = next;
+    this.lastTransitionAt = new Date();
+  }
+
   async requestWake(): Promise<void> {
+    this.lastError = undefined;
     if (
       this.switchOn === true &&
       (this.state === "POWERED" ||
@@ -61,25 +78,25 @@ export class ConnectivityManager {
     this.switchOn = observed;
     if (observed === true) {
       this.ownedByPlugin = false;
-      this.state = "POWERED";
+      this.transition("POWERED");
       return this.waitForInternet();
     }
     if (observed !== false) {
       this.ownedByPlugin = false;
-      this.state = "FAULT";
+      this.transition("FAULT");
       this.lastError =
         "Switch state is unknown; leaving connectivity untouched";
       return;
     }
-    this.state = "REQUESTING_ON";
+    this.transition("REQUESTING_ON");
     try {
       await this.adapter.setState(true);
       this.ownedByPlugin = true;
       this.switchOn = true;
-      this.state = "POWERED";
+      this.transition("POWERED");
       await this.waitForInternet();
     } catch (error) {
-      this.state = "FAULT";
+      this.transition("FAULT");
       this.lastError = error instanceof Error ? error.message : String(error);
     }
   }
@@ -103,18 +120,30 @@ export class ConnectivityManager {
   }
 
   private async waitForInternet(): Promise<void> {
-    this.state = "WAITING_FOR_INTERNET";
+    this.transition("WAITING_FOR_INTERNET");
     const deadline = Date.now() + this.bootTimeoutMs;
     while (Date.now() <= deadline) {
-      if (await this.internetReady()) {
-        this.state = "ONLINE";
+      let ready = false;
+      try {
+        ready = await this.internetReady();
+        this.lastProbeError = undefined;
+      } catch (error) {
+        this.lastProbeError =
+          error instanceof Error ? error.message : String(error);
+      }
+      this.lastProbeAt = new Date();
+      this.lastProbeSucceeded = ready;
+      if (ready) {
+        this.transition("ONLINE");
         return;
       }
       if (Date.now() + this.checkIntervalMs > deadline) break;
       await new Promise((resolve) => setTimeout(resolve, this.checkIntervalMs));
     }
-    this.state = "FAULT";
-    this.lastError = "Internet readiness probe timed out";
+    this.transition("FAULT");
+    this.lastError = this.lastProbeError
+      ? `Internet readiness probe failed: ${this.lastProbeError}`
+      : "Internet readiness probe timed out";
   }
 
   beginCooldown(): void {
@@ -123,7 +152,7 @@ export class ConnectivityManager {
       (this.state !== "ONLINE" && this.state !== "IDLE_COOLDOWN")
     )
       return;
-    this.state = "IDLE_COOLDOWN";
+    this.transition("IDLE_COOLDOWN");
     this.lastShutdownDeferredReason = undefined;
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
     this.cooldownTimer = setTimeout(() => {
@@ -134,7 +163,7 @@ export class ConnectivityManager {
   cancelCooldown(): void {
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
     this.cooldownTimer = undefined;
-    if (this.state === "IDLE_COOLDOWN") this.state = "ONLINE";
+    if (this.state === "IDLE_COOLDOWN") this.transition("ONLINE");
   }
   async releaseIfSafe(): Promise<void> {
     const safety = await this.safetyCheck();
@@ -150,14 +179,14 @@ export class ConnectivityManager {
     }
     if (!this.ownedByPlugin || this.state !== "IDLE_COOLDOWN") return;
     this.lastShutdownDeferredReason = undefined;
-    this.state = "REQUESTING_OFF";
+    this.transition("REQUESTING_OFF");
     try {
       await this.adapter.setState(false);
       this.switchOn = false;
       this.ownedByPlugin = false;
-      this.state = "OFF";
+      this.transition("OFF");
     } catch (error) {
-      this.state = "FAULT";
+      this.transition("FAULT");
       this.lastError = error instanceof Error ? error.message : String(error);
     }
   }

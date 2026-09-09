@@ -154,6 +154,15 @@ const status = await json(
   `${signalkUrl}/plugins/signalk-persistent-notifier/status`,
 );
 assert.equal(status.alerts.total >= 1, true);
+assert.equal(
+  ["healthy", "degraded", "fault"].includes(status.health.state),
+  true,
+);
+assert.equal(status.database.healthy, true);
+assert.equal(status.database.schemaVersion, 3);
+assert.equal(status.reconciliation.state, "complete");
+assert.equal(typeof status.scheduler.running, "boolean");
+assert.equal(Array.isArray(status.services), true);
 const alerts = await json(
   `${signalkUrl}/plugins/signalk-persistent-notifier/alerts`,
 );
