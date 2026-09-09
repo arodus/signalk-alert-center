@@ -962,6 +962,26 @@ export class AlertDatabase {
     return Number(row.count);
   }
 
+  hasActiveConnectivityAlert(): boolean {
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1 FROM alert_occurrences
+           WHERE current_state='active'
+             AND activation_state <> 'suppressed'
+             AND json_extract(connectivity_json, '$.mode') IN ('wake', 'wake_after')
+           LIMIT 1`,
+        )
+        .get(),
+    );
+  }
+
+  hasWakeRequests(): boolean {
+    return Boolean(
+      this.db.prepare("SELECT 1 FROM wake_requests LIMIT 1").get(),
+    );
+  }
+
   nextDeliveryDueAt(): Date | undefined {
     const row = this.db
       .prepare(

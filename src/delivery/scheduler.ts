@@ -30,6 +30,9 @@ export class DeliveryScheduler {
   ) {
     this.database.recoverSending();
   }
+  get isRunning(): boolean {
+    return this.running;
+  }
   async stop(): Promise<void> {
     this.stopped = true;
     this.running = false;

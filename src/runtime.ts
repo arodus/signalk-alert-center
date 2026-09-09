@@ -107,6 +107,8 @@ export class PersistentNotifierRuntime {
             switchOn: this.connectivity.switchOn,
             ownedByPlugin: this.connectivity.ownedByPlugin,
             lastError: this.connectivity.lastError,
+            shutdownDeferredReason:
+              this.connectivity.lastShutdownDeferredReason,
           }
         : { state: "OFF", switchOn: undefined, ownedByPlugin: false },
       alerts: {
@@ -653,6 +655,12 @@ export class PersistentNotifierRuntime {
           : undefined,
         (options.connectivity.bootTimeoutSeconds ?? 240) * 1000,
         (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
+        () => ({
+          pendingDelivery: (this.database?.pendingDeliveryCount() ?? 0) > 0,
+          activeWakeAlert: this.database?.hasActiveConnectivityAlert() ?? false,
+          scheduledWake: this.database?.hasWakeRequests() ?? false,
+          sendInFlight: this.scheduler?.isRunning ?? false,
+        }),
       );
 
     this.scheduleNextWake();

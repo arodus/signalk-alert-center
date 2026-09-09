@@ -11,12 +11,28 @@ export interface SwitchAdapter {
   getState(): Promise<boolean | undefined>;
   setState(on: boolean): Promise<void>;
 }
+export interface ConnectivitySafetyState {
+  pendingDelivery: boolean;
+  activeWakeAlert: boolean;
+  scheduledWake: boolean;
+  sendInFlight: boolean;
+}
+type ConnectivitySafetyCheck = () =>
+  ConnectivitySafetyState | Promise<ConnectivitySafetyState>;
+
+const safeToRelease: ConnectivitySafetyCheck = () => ({
+  pendingDelivery: false,
+  activeWakeAlert: false,
+  scheduledWake: false,
+  sendInFlight: false,
+});
 
 export class ConnectivityManager {
   state: ConnectivityState = "OFF";
   switchOn?: boolean;
   ownedByPlugin = false;
   lastError?: string;
+  lastShutdownDeferredReason?: string;
   private cooldownTimer?: ReturnType<typeof setTimeout>;
   private wakeTimer?: ReturnType<typeof setTimeout>;
   private wakeDueAt?: Date;
@@ -27,6 +43,7 @@ export class ConnectivityManager {
     private readonly internetReady: () => Promise<boolean> = async () => true,
     private readonly bootTimeoutMs = 240_000,
     private readonly checkIntervalMs = 5_000,
+    private readonly safetyCheck: ConnectivitySafetyCheck = safeToRelease,
   ) {}
 
   async requestWake(): Promise<void> {
@@ -101,8 +118,13 @@ export class ConnectivityManager {
   }
 
   beginCooldown(): void {
-    if (!this.ownedByPlugin || this.state !== "ONLINE") return;
+    if (
+      !this.ownedByPlugin ||
+      (this.state !== "ONLINE" && this.state !== "IDLE_COOLDOWN")
+    )
+      return;
     this.state = "IDLE_COOLDOWN";
+    this.lastShutdownDeferredReason = undefined;
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
     this.cooldownTimer = setTimeout(() => {
       void this.releaseIfSafe();
@@ -114,19 +136,20 @@ export class ConnectivityManager {
     this.cooldownTimer = undefined;
     if (this.state === "IDLE_COOLDOWN") this.state = "ONLINE";
   }
-  async releaseIfSafe(
-    hasPending = false,
-    hasActiveWakeAlert = false,
-    sendInFlight = false,
-  ): Promise<void> {
-    if (
-      !this.ownedByPlugin ||
-      hasPending ||
-      hasActiveWakeAlert ||
-      sendInFlight ||
-      this.state !== "IDLE_COOLDOWN"
-    )
+  async releaseIfSafe(): Promise<void> {
+    const safety = await this.safetyCheck();
+    const blockers = [
+      safety.pendingDelivery ? "pending delivery" : undefined,
+      safety.activeWakeAlert ? "active wake alert" : undefined,
+      safety.scheduledWake ? "scheduled wake request" : undefined,
+      safety.sendInFlight ? "delivery in flight" : undefined,
+    ].filter((value): value is string => Boolean(value));
+    if (blockers.length) {
+      this.lastShutdownDeferredReason = blockers.join(", ");
       return;
+    }
+    if (!this.ownedByPlugin || this.state !== "IDLE_COOLDOWN") return;
+    this.lastShutdownDeferredReason = undefined;
     this.state = "REQUESTING_OFF";
     try {
       await this.adapter.setState(false);
