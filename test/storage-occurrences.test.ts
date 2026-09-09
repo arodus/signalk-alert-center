@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { NormalizedAlert } from "../src/alerts/types";
 import { AlertDatabase } from "../src/storage/db";
+import { schema } from "../src/storage/schema";
 
 const active = (overrides: Partial<NormalizedAlert> = {}): NormalizedAlert => ({
   sourceKey: "notifications.navigation.anchor",
@@ -31,6 +33,37 @@ describe("occurrence storage", () => {
     databases.push(result);
     return result;
   };
+
+  it("migrates a version-one database and installs history indexes", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-migration-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(schema);
+    legacy
+      .prepare(
+        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
+      )
+      .run(new Date("2026-01-01T00:00:00Z").toISOString());
+    legacy.close();
+
+    const migrated = new AlertDatabase(filename);
+    databases.push(migrated);
+    expect(migrated.schemaVersion()).toBe(2);
+    const columns = migrated.db
+      .prepare("PRAGMA table_info(alert_occurrences)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain("source");
+    const indexes = migrated.db
+      .prepare("PRAGMA index_list(alert_occurrences)")
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "occurrence_path_history_idx",
+        "occurrence_source_history_idx",
+      ]),
+    );
+  });
 
   it("stores raise-clear-raise as distinct occurrences and keeps dismissal history", () => {
     const db = database();

@@ -425,6 +425,13 @@ definition policy, checks recent history, dismisses a one-time occurrence, and
 verifies that a later raise creates a new visible occurrence. The separate mock
 service also verifies scripted retry responses and captured request bodies.
 
+Install Chromium once with `npx playwright install chromium`, then run
+`npm run test:browser` for desktop and tablet dashboard coverage. The command
+starts an isolated Docker project and removes its named test volume afterward.
+`npm run test:restart` separately verifies that pending activation, retryable
+delivery work, occurrence history, and event history survive Signal K restarts.
+Both suites use only the local fixture and mock notifier.
+
 For interactive UI testing:
 
 ```sh
@@ -467,4 +474,7 @@ or simply rerun `npm run demo`, which seeds automatically on fixture startup.
 `npm test` runs the lifecycle, persistence, API, policy, runtime, scheduler, and
 connectivity tests. `npm run format:check`, `npm run lint`, and `npm run build` are
 the required quality checks. Node 22.5 or newer is required; Docker acceptance is
-pinned to Signal K server 2.31.1.
+pinned to Signal K server 2.31.1. GitHub Actions runs those checks on pull requests,
+including browser and restart coverage; a non-blocking job also exercises the latest
+Signal K image. CI caches only npm downloads. Docker volumes, databases, browser
+traces, and test configuration are ephemeral and are not persisted as artifacts.
