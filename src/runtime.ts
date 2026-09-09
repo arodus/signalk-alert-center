@@ -40,6 +40,7 @@ import { PagerDutyTransport } from "./transports/pagerduty";
 import { NotificationTransport } from "./transports/transport";
 
 const MAX_TIMER_DELAY = 2_147_000_000;
+const UPSTREAM_ACTION_TIMEOUT_MS = 5_000;
 
 interface DefinitionView extends AlertDefinitionRecord {
   description?: string;
@@ -398,10 +399,10 @@ export class PersistentNotifierRuntime {
     }
   }
 
-  private upstreamAction(
+  private async upstreamAction(
     occurrence: AlertRecord,
     action: "acknowledge" | "silence",
-  ): Pick<ActionResult, "upstream" | "message"> {
+  ): Promise<Pick<ActionResult, "upstream" | "message">> {
     if (!occurrence.notificationId) return { upstream: "not_requested" };
     try {
       const notificationId = occurrence.notificationId as NotificationId;
@@ -424,9 +425,41 @@ export class PersistentNotifierRuntime {
           upstream: "unsupported",
           message: `Signal K does not allow ${action} for this notification`,
         };
-      this.app.notifications[action](notificationId);
+      const operation = (
+        this.app.notifications[action] as (
+          id: NotificationId,
+        ) => unknown | Promise<unknown>
+      )(notificationId);
+      if (
+        operation &&
+        typeof (operation as PromiseLike<unknown>).then === "function"
+      )
+        await Promise.race([
+          Promise.resolve(operation),
+          new Promise<never>((_resolve, reject) =>
+            setTimeout(
+              () => reject(new Error("UPSTREAM_ACTION_TIMEOUT")),
+              UPSTREAM_ACTION_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+      const refreshed = this.app.notifications.getId(notificationId);
+      const confirmed =
+        action === "acknowledge"
+          ? refreshed?.value.status?.acknowledged
+          : refreshed?.value.status?.silenced;
+      if (!confirmed)
+        return {
+          upstream: "failed",
+          message: `Signal K did not confirm ${action}`,
+        };
       return { upstream: "applied" };
     } catch (error) {
+      if (error instanceof Error && error.message === "UPSTREAM_ACTION_TIMEOUT")
+        return {
+          upstream: "timed_out",
+          message: `Signal K ${action} timed out after ${UPSTREAM_ACTION_TIMEOUT_MS / 1000} seconds`,
+        };
       return {
         upstream: "failed",
         message: error instanceof Error ? error.message : String(error),
@@ -519,11 +552,11 @@ export class PersistentNotifierRuntime {
         this.emitChange("occurrence");
         return { status: "dismissed", upstream: "not_requested" };
       },
-      acknowledgeOccurrence: (id) => {
+      acknowledgeOccurrence: async (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
         if (occurrence.currentState !== "active") return "inactive";
-        const upstream = this.upstreamAction(occurrence, "acknowledge");
+        const upstream = await this.upstreamAction(occurrence, "acknowledge");
         this.db().acknowledgeAlert(id);
         this.db().recordOccurrenceEvent(
           id,
@@ -538,11 +571,11 @@ export class PersistentNotifierRuntime {
         this.emitChange("occurrence");
         return { status: "acknowledged", ...upstream };
       },
-      silenceOccurrence: (id) => {
+      silenceOccurrence: async (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
         if (occurrence.currentState !== "active") return "inactive";
-        const upstream = this.upstreamAction(occurrence, "silence");
+        const upstream = await this.upstreamAction(occurrence, "silence");
         this.db().silenceAlert(id);
         this.db().recordOccurrenceEvent(
           id,

@@ -38,7 +38,8 @@ export interface AlertPolicyPatch {
 }
 export interface ActionResult {
   status: "dismissed" | "acknowledged" | "silenced";
-  upstream?: "applied" | "unsupported" | "failed" | "not_requested";
+  upstream?:
+    "applied" | "unsupported" | "failed" | "timed_out" | "not_requested";
   message?: string;
 }
 type MaybePromise<T> = T | Promise<T>;

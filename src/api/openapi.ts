@@ -454,7 +454,13 @@ export function getAlertCenterOpenApi() {
             },
             upstream: {
               type: "string",
-              enum: ["applied", "unsupported", "failed", "not_requested"],
+              enum: [
+                "applied",
+                "unsupported",
+                "failed",
+                "timed_out",
+                "not_requested",
+              ],
             },
             message: { type: "string" },
           },
