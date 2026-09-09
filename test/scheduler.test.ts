@@ -87,6 +87,207 @@ describe("DeliveryScheduler", () => {
     database.close();
   });
 
+  it("records a fast success while another notifier is still in flight", async () => {
+    const database = new AlertDatabase();
+    let releaseSlow!: () => void;
+    const slowFinished = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    let markSlowStarted!: () => void;
+    const slowStarted = new Promise<void>((resolve) => {
+      markSlowStarted = resolve;
+    });
+    const lifecycle = new AlertLifecycle(database, ["slow", "fast"]);
+    lifecycle.ingest({
+      sourceKey: "notifications.concurrent",
+      path: "notifications.concurrent",
+      severity: "alarm",
+      state: "active",
+    });
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map([
+        [
+          "slow",
+          {
+            type: "test",
+            async send() {
+              markSlowStarted();
+              await slowFinished;
+              return { kind: "success" as const };
+            },
+          },
+        ],
+        [
+          "fast",
+          {
+            type: "test",
+            send: vi.fn(async () => ({ kind: "success" as const })),
+          },
+        ],
+      ]),
+      undefined,
+      { concurrency: 2 },
+    );
+
+    const running = scheduler.runOnce(new Date("2026-01-01T00:00:00Z"));
+    await slowStarted;
+    await vi.waitFor(() => {
+      expect(
+        database
+          .listDeliveries()
+          .find((delivery) => delivery.transportInstanceId === "fast")?.state,
+      ).toBe("delivered");
+    });
+    expect(
+      database
+        .listDeliveries()
+        .find((delivery) => delivery.transportInstanceId === "slow")?.state,
+    ).toBe("sending");
+
+    releaseSlow();
+    await running;
+    database.close();
+  });
+
+  it("bounds simultaneous sends and records mixed outcomes independently", async () => {
+    const database = new AlertDatabase();
+    const notifierIds = ["success", "retry", "terminal", "timeout", "throw"];
+    new AlertLifecycle(database, notifierIds).ingest({
+      sourceKey: "notifications.mixed",
+      path: "notifications.mixed",
+      severity: "alarm",
+      state: "active",
+    });
+    let active = 0;
+    let maximumActive = 0;
+    const result = async <T>(value: T): Promise<T> => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return value;
+    };
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map([
+        [
+          "success",
+          { type: "test", send: () => result({ kind: "success" as const }) },
+        ],
+        [
+          "retry",
+          {
+            type: "test",
+            send: () =>
+              result({
+                kind: "retryable" as const,
+                code: "OFFLINE",
+                message: "offline",
+              }),
+          },
+        ],
+        [
+          "terminal",
+          {
+            type: "test",
+            send: () =>
+              result({
+                kind: "terminal" as const,
+                code: "REJECTED",
+                message: "rejected",
+              }),
+          },
+        ],
+        [
+          "timeout",
+          {
+            type: "test",
+            send: () =>
+              result({
+                kind: "retryable" as const,
+                code: "TIMEOUT",
+                message: "timed out",
+              }),
+          },
+        ],
+        [
+          "throw",
+          {
+            type: "test",
+            async send() {
+              await result(undefined);
+              throw new Error("adapter crashed");
+            },
+          },
+        ],
+      ]),
+      { initialSeconds: 60, maxSeconds: 60, multiplier: 1, jitter: 0 },
+      { batchSize: 5, concurrency: 2 },
+    );
+
+    await expect(
+      scheduler.runOnce(new Date("2026-01-01T00:00:00Z")),
+    ).resolves.toEqual({
+      processed: 5,
+      succeeded: 1,
+      retryableFailures: 3,
+      terminalFailures: 1,
+    });
+    expect(maximumActive).toBe(2);
+    expect(
+      Object.fromEntries(
+        database
+          .listDeliveries()
+          .map((delivery) => [delivery.transportInstanceId, delivery.state]),
+      ),
+    ).toEqual({
+      success: "delivered",
+      retry: "failed_retryable",
+      terminal: "failed_terminal",
+      timeout: "failed_retryable",
+      throw: "failed_retryable",
+    });
+    database.close();
+  });
+
+  it("loads no more than the configured due batch size", async () => {
+    const database = new AlertDatabase();
+    const notifierIds = ["one", "two", "three"];
+    new AlertLifecycle(database, notifierIds).ingest({
+      sourceKey: "notifications.batch-limit",
+      path: "notifications.batch-limit",
+      severity: "alarm",
+      state: "active",
+    });
+    const send = vi.fn(async () => ({ kind: "success" as const }));
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map(
+        notifierIds.map((id) => [
+          id,
+          { type: "test", send } satisfies NotificationTransport,
+        ]),
+      ),
+      undefined,
+      { batchSize: 2, concurrency: 2 },
+    );
+
+    await expect(
+      scheduler.runOnce(new Date("2026-01-01T00:00:00Z")),
+    ).resolves.toMatchObject({ processed: 2, succeeded: 2 });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(
+      database
+        .listDeliveries()
+        .filter((delivery) => delivery.state === "pending"),
+    ).toHaveLength(1);
+
+    await scheduler.runOnce(new Date("2026-01-01T00:00:00Z"));
+    expect(send).toHaveBeenCalledTimes(3);
+    database.close();
+  });
+
   it("records thrown transport errors and reports a retryable failure", async () => {
     const database = new AlertDatabase();
     const transport: NotificationTransport = {
@@ -153,20 +354,17 @@ describe("DeliveryScheduler", () => {
     database.close();
   });
 
-  it("waits for an in-flight send before stop returns", async () => {
+  it("waits for every in-flight send before stop returns", async () => {
     const database = new AlertDatabase();
-    let resolveSend!: () => void;
-    const sendFinished = new Promise<void>((resolve) => {
-      resolveSend = resolve;
+    let resolveFirst!: () => void;
+    const firstFinished = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
     });
-    const transport: NotificationTransport = {
-      type: "test",
-      async send() {
-        await sendFinished;
-        return { kind: "success" };
-      },
-    };
-    const lifecycle = new AlertLifecycle(database, ["test"]);
+    let resolveSecond!: () => void;
+    const secondFinished = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const lifecycle = new AlertLifecycle(database, ["first", "second"]);
     lifecycle.ingest({
       sourceKey: "notifications.test",
       path: "notifications.test",
@@ -175,7 +373,28 @@ describe("DeliveryScheduler", () => {
     });
     const scheduler = new DeliveryScheduler(
       database,
-      new Map([["test", transport]]),
+      new Map([
+        [
+          "first",
+          {
+            type: "test",
+            async send() {
+              await firstFinished;
+              return { kind: "success" as const };
+            },
+          },
+        ],
+        [
+          "second",
+          {
+            type: "test",
+            async send() {
+              await secondFinished;
+              return { kind: "success" as const };
+            },
+          },
+        ],
+      ]),
     );
 
     const sending = scheduler.runOnce();
@@ -186,10 +405,18 @@ describe("DeliveryScheduler", () => {
     await Promise.resolve();
     expect(stopped).toBe(false);
 
-    resolveSend();
+    resolveFirst();
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    resolveSecond();
     await Promise.all([sending, stopping]);
     expect(stopped).toBe(true);
-    expect(database.listDeliveries()[0].state).toBe("delivered");
+    expect(
+      database
+        .listDeliveries()
+        .every((delivery) => delivery.state === "delivered"),
+    ).toBe(true);
     database.close();
   });
 });

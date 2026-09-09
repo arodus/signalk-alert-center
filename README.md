@@ -253,6 +253,13 @@ status, history pages, definition summaries, and the delivery scheduler use boun
 SQL queries so their cost does not grow with unrelated historical records. Unchanged
 zone definitions do not rewrite the database during periodic discovery.
 
+The delivery scheduler loads at most 50 due deliveries per run and sends up to four
+at the same time by default. Both limits are global settings under **Notification
+delivery**. Every row is claimed and committed before its network request starts,
+and each result is recorded independently, so a slow or failed service does not
+hold up successful services. Plugin shutdown stops claiming new work and waits for
+all sends already in flight to finish.
+
 Operational errors and delivery batches are written to Signal K's server log
 without notification bodies, notifier credentials, tokens, or webhook URLs. Enable
 the plugin's debug namespace on Signal K's **Server Log** page to see startup,
@@ -291,6 +298,10 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
     "connectivity": { "mode": "queue" },
     "notifiers": ["Crew ntfy"]
   },
+  "delivery": {
+    "batchSize": 50,
+    "concurrency": 4
+  },
   "connectivity": {
     "enabled": true,
     "switch": {
@@ -315,12 +326,12 @@ When `storage.path` is relative, it is resolved from that data directory. An abs
 path remains supported when you intentionally manage the database elsewhere.
 
 The Signal K plugin form contains only global configuration: storage/discovery,
-retry behavior, notifier connections and secrets, global defaults, and optional
-connectivity management. Optional **History retention** removes only cleared
-occurrences older than the configured age, in bounded batches. It is disabled by
-default and always protects active alerts, pending/retryable/in-flight deliveries,
-and persisted wake requests. Retention status and the most recent cleanup counts
-are available from `/status`.
+delivery limits, retry behavior, notifier connections and secrets, global defaults,
+and optional connectivity management. Optional **History retention** removes only
+cleared occurrences older than the configured age, in bounded batches. It is
+disabled by default and always protects active alerts, pending/retryable/in-flight
+deliveries, and persisted wake requests. Retention status and the most recent
+cleanup counts are available from `/status`.
 
 The form also contains a destructive, one-shot database reset
 under **Database maintenance**. Enable **Reset database when Save Configuration is

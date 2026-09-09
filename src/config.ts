@@ -25,6 +25,10 @@ export interface PluginConfig {
   storage?: { path?: string };
   maintenance?: { resetDatabase?: boolean };
   discovery?: { zoneRefreshSeconds?: number };
+  delivery?: {
+    batchSize?: number;
+    concurrency?: number;
+  };
   retention?: {
     enabled?: boolean;
     maxAgeDays?: number;
@@ -121,6 +125,7 @@ export function validateConfig(config: PluginConfig): void {
     }
   }
   validateRetry(config.retry);
+  validateDelivery(config.delivery);
   if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
     throw new Error("discovery.zoneRefreshSeconds must be at least 1");
   if (
@@ -165,6 +170,24 @@ export function validateConfig(config: PluginConfig): void {
     throw new Error("internetCheckIntervalSeconds must be positive");
   if ((config.connectivity?.idleCooldownSeconds ?? 0) < 0)
     throw new Error("idleCooldownSeconds must be non-negative");
+}
+
+function validateDelivery(delivery: PluginConfig["delivery"]): void {
+  if (!delivery) return;
+  if (
+    delivery.batchSize !== undefined &&
+    (!Number.isInteger(delivery.batchSize) ||
+      delivery.batchSize < 1 ||
+      delivery.batchSize > 200)
+  )
+    throw new Error("delivery.batchSize must be an integer from 1 to 200");
+  if (
+    delivery.concurrency !== undefined &&
+    (!Number.isInteger(delivery.concurrency) ||
+      delivery.concurrency < 1 ||
+      delivery.concurrency > 32)
+  )
+    throw new Error("delivery.concurrency must be an integer from 1 to 32");
 }
 
 function validatePolicy(

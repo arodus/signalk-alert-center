@@ -22,6 +22,14 @@ export interface DeliverySchedulerStatus {
   lastError?: string;
 }
 
+export interface DeliverySchedulerOptions {
+  batchSize?: number;
+  concurrency?: number;
+}
+
+const DEFAULT_BATCH_SIZE = 50;
+const DEFAULT_CONCURRENCY = 4;
+
 export class DeliveryScheduler {
   private running = false;
   private stopped = false;
@@ -39,6 +47,7 @@ export class DeliveryScheduler {
       multiplier: 2,
       jitter: 0.2,
     },
+    private readonly options: DeliverySchedulerOptions = {},
   ) {
     this.database.recoverSending();
   }
@@ -56,7 +65,6 @@ export class DeliveryScheduler {
   }
   async stop(): Promise<void> {
     this.stopped = true;
-    this.running = false;
     await this.activeRun;
   }
   async runOnce(now = new Date()): Promise<DeliveryRunSummary | undefined> {
@@ -70,57 +78,34 @@ export class DeliveryScheduler {
         retryableFailures: 0,
         terminalFailures: 0,
       };
-      for (const delivery of this.database.listDueDeliveries(now)) {
-        if (this.stopped) break;
-        summary.processed += 1;
-        const transport = this.transports.get(delivery.transportInstanceId);
-        if (!transport) {
-          this.database.recordDeliveryFailure(
-            delivery.id,
-            "CONFIG",
-            "Transport is not configured",
-            false,
-            now,
-          );
-          summary.terminalFailures += 1;
-          continue;
+      const deliveries = this.database.listDueDeliveries(
+        now,
+        this.options.batchSize ?? DEFAULT_BATCH_SIZE,
+      );
+      const concurrency = Math.min(
+        this.options.concurrency ?? DEFAULT_CONCURRENCY,
+        deliveries.length,
+      );
+      let cursor = 0;
+      const errors: unknown[] = [];
+      const worker = async (): Promise<void> => {
+        while (!this.stopped) {
+          const delivery = deliveries[cursor];
+          cursor += 1;
+          if (!delivery) return;
+          try {
+            await this.processDelivery(delivery, summary, now);
+          } catch (error) {
+            errors.push(error);
+          }
         }
-        // Claim and commit before leaving the database for an external HTTP call.
-        this.database.claimDelivery(delivery.id, now);
-        const alert = this.database.getAlert(delivery.alertId);
-        let result: TransportResult;
-        try {
-          result = await transport.send(alert, delivery, {
-            rendered: renderAlert(alert),
-            now,
-          });
-        } catch (error) {
-          result = {
-            kind: "retryable" as const,
-            code: "TRANSPORT_ERROR",
-            message: error instanceof Error ? error.message : String(error),
-          };
-        }
-        if (result.kind === "success") {
-          this.database.recordDeliverySuccess(
-            delivery.id,
-            result.remoteId,
-            now,
-          );
-          summary.succeeded += 1;
-        } else {
-          this.database.recordDeliveryFailure(
-            delivery.id,
-            result.code,
-            result.message,
-            result.kind === "retryable",
-            nextRetry(delivery.attemptCount + 1, now, this.policy),
-            now,
-          );
-          if (result.kind === "retryable") summary.retryableFailures += 1;
-          else summary.terminalFailures += 1;
-        }
-      }
+      };
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      if (errors.length)
+        throw new AggregateError(
+          errors,
+          "One or more deliveries could not be processed",
+        );
       return summary;
     })();
     this.activeRun = run;
@@ -138,5 +123,59 @@ export class DeliveryScheduler {
       this.running = false;
       this.activeRun = undefined;
     }
+  }
+
+  private async processDelivery(
+    delivery: DeliveryRecord,
+    summary: DeliveryRunSummary,
+    now: Date,
+  ): Promise<void> {
+    // Claim and commit before leaving the database for external network I/O.
+    if (!this.database.claimDelivery(delivery.id, now)) return;
+    summary.processed += 1;
+    const transport = this.transports.get(delivery.transportInstanceId);
+    if (!transport) {
+      this.database.recordDeliveryFailure(
+        delivery.id,
+        "CONFIG",
+        "Transport is not configured",
+        false,
+        undefined,
+        now,
+      );
+      summary.terminalFailures += 1;
+      return;
+    }
+    const alert = this.database.getAlert(delivery.alertId);
+    let result: TransportResult;
+    try {
+      result = await transport.send(alert, delivery, {
+        rendered: renderAlert(alert),
+        now,
+      });
+    } catch (error) {
+      result = {
+        kind: "retryable",
+        code: "TRANSPORT_ERROR",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (result.kind === "success") {
+      this.database.recordDeliverySuccess(delivery.id, result.remoteId, now);
+      summary.succeeded += 1;
+      return;
+    }
+    this.database.recordDeliveryFailure(
+      delivery.id,
+      result.code,
+      result.message,
+      result.kind === "retryable",
+      result.kind === "retryable"
+        ? nextRetry(delivery.attemptCount + 1, now, this.policy)
+        : undefined,
+      now,
+    );
+    if (result.kind === "retryable") summary.retryableFailures += 1;
+    else summary.terminalFailures += 1;
   }
 }
