@@ -181,6 +181,57 @@ h2 {
   gap: 8px;
   margin: 8px 0 10px;
 }
+.system-diagnostics {
+  margin: -4px 0 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.system-diagnostics summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.health-pill {
+  display: inline-block;
+  margin: 0 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.health-pill.healthy {
+  background: #dff3e5;
+  color: #185c31;
+}
+.health-pill.degraded {
+  background: #fff0c7;
+  color: #725000;
+}
+.health-pill.fault {
+  background: #f9ddda;
+  color: #84251e;
+}
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.diagnostic-item {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+}
+.diagnostic-item strong,
+.diagnostic-item span {
+  display: block;
+}
+.diagnostic-item span {
+  margin-top: 2px;
+}
 .filter-row label {
   color: var(--muted);
   font-size: 0.82rem;

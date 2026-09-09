@@ -15,6 +15,8 @@ const elements = {
   definitionCount: $("#definition-count"),
   pendingCount: $("#pending-count"),
   connectivityNote: $("#connectivity-note"),
+  healthState: $("#health-state"),
+  diagnostics: $("#diagnostics-list"),
   definitions: $("#definition-list"),
   deliveries: $("#delivery-list"),
   updated: $("#updated"),
@@ -96,6 +98,50 @@ function showError(error) {
       ? error.message
       : "The request could not be completed.";
   elements.error.hidden = false;
+}
+function renderDiagnostics(status) {
+  const health = status.health?.state ?? "fault";
+  elements.healthState.textContent = health;
+  elements.healthState.className = `health-pill ${health}`;
+  const reconciliation = status.reconciliation ?? {};
+  const scheduler = status.scheduler ?? {};
+  const database = status.database ?? {};
+  const connectivity = status.connectivity ?? {};
+  const reasons = status.health?.reasons ?? [];
+  const services = status.services ?? [];
+  const items = [
+    [
+      "Startup reconciliation",
+      `${reconciliation.state ?? "unknown"}${reconciliation.durationMs === undefined ? "" : ` · ${reconciliation.durationMs} ms`} · ${reconciliation.snapshotEntries ?? 0} snapshot / ${reconciliation.queuedEntries ?? 0} queued`,
+    ],
+    [
+      "Delivery scheduler",
+      `${scheduler.running ? "Running" : "Idle"} · last completed ${formatDate(scheduler.lastRunCompletedAt)}${scheduler.lastError ? ` · ${scheduler.lastError}` : ""}`,
+    ],
+    [
+      "Pending work",
+      `${status.alerts?.pendingDelivery ?? 0} deliveries · oldest due ${formatDate(database.oldestDueDeliveryAt)} · ${database.overdueActivationCount ?? 0} overdue activations`,
+    ],
+    [
+      "Database",
+      `${database.healthy ? "Healthy" : "Fault"} · schema ${database.schemaVersion ?? "—"}/${database.expectedSchemaVersion ?? "—"}${database.error ? ` · ${database.error}` : ""}`,
+    ],
+    [
+      "Connectivity",
+      `${connectivity.state ?? "OFF"} · ${connectivity.ownedByPlugin ? "plugin-owned" : "not plugin-owned"} · last transition ${formatDate(connectivity.lastTransitionAt)} · ${connectivity.pendingWakeCount ?? 0} pending wake${connectivity.lastProbeAt ? ` · probe ${connectivity.lastProbeSucceeded ? "passed" : "failed"} ${formatDate(connectivity.lastProbeAt)}` : ""}${connectivity.lastError ? ` · ${connectivity.lastError}` : ""}`,
+    ],
+    ...services.map((service) => [
+      `Service: ${service.name}`,
+      `${service.enabled ? "Enabled" : "Disabled"} · ${service.pendingCount} pending · last success ${formatDate(service.lastSuccessAt)} · last failure ${formatDate(service.lastFailureAt)}${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
+    ]),
+  ];
+  if (reasons.length) items.unshift(["Health reason", reasons.join(" · ")]);
+  elements.diagnostics.innerHTML = items
+    .map(
+      ([label, value]) =>
+        `<div class="diagnostic-item"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`,
+    )
+    .join("");
 }
 function definitionFor(occurrence) {
   return state.definitions.find(
@@ -382,8 +428,9 @@ async function load() {
         (item) => !["delivered", "failed_terminal"].includes(item.state),
       ).length;
     elements.connectivityNote.textContent = status.connectivity?.state
-      ? `Connectivity ${status.connectivity.state.toLowerCase()}`
+      ? `${status.health?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
       : "delivery intents waiting";
+    renderDiagnostics(status);
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     elements.moreOccurrences.hidden = !state.occurrenceCursor;
     renderDefinitions();

@@ -14,10 +14,22 @@ export interface DeliveryRunSummary {
   terminalFailures: number;
 }
 
+export interface DeliverySchedulerStatus {
+  running: boolean;
+  lastRunStartedAt?: Date;
+  lastRunCompletedAt?: Date;
+  lastSummary?: DeliveryRunSummary;
+  lastError?: string;
+}
+
 export class DeliveryScheduler {
   private running = false;
   private stopped = false;
   private activeRun?: Promise<DeliveryRunSummary>;
+  private lastRunStartedAt?: Date;
+  private lastRunCompletedAt?: Date;
+  private lastSummary?: DeliveryRunSummary;
+  private lastError?: string;
   constructor(
     private readonly database: AlertDatabase,
     private readonly transports: Map<string, NotificationTransport>,
@@ -33,6 +45,15 @@ export class DeliveryScheduler {
   get isRunning(): boolean {
     return this.running;
   }
+  status(): DeliverySchedulerStatus {
+    return {
+      running: this.running,
+      lastRunStartedAt: this.lastRunStartedAt,
+      lastRunCompletedAt: this.lastRunCompletedAt,
+      lastSummary: this.lastSummary,
+      lastError: this.lastError,
+    };
+  }
   async stop(): Promise<void> {
     this.stopped = true;
     this.running = false;
@@ -41,6 +62,7 @@ export class DeliveryScheduler {
   async runOnce(now = new Date()): Promise<DeliveryRunSummary | undefined> {
     if (this.stopped || this.running) return this.activeRun;
     this.running = true;
+    this.lastRunStartedAt = now;
     const run = (async () => {
       const summary: DeliveryRunSummary = {
         processed: 0,
@@ -103,11 +125,18 @@ export class DeliveryScheduler {
     })();
     this.activeRun = run;
     try {
-      await run;
+      const result = await run;
+      this.lastRunCompletedAt = new Date();
+      this.lastSummary = result;
+      this.lastError = undefined;
+      return result;
+    } catch (error) {
+      this.lastRunCompletedAt = new Date();
+      this.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
     } finally {
       this.running = false;
       this.activeRun = undefined;
     }
-    return run;
   }
 }

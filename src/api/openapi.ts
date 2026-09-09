@@ -49,8 +49,7 @@ export function getAlertCenterOpenApi() {
           summary: "Get plugin, queue, database, and connectivity health",
           responses: {
             "200": response("Plugin status", {
-              type: "object",
-              additionalProperties: true,
+              $ref: "#/components/schemas/OperationalStatus",
             }),
             ...errors,
           },
@@ -273,6 +272,52 @@ export function getAlertCenterOpenApi() {
     },
     components: {
       schemas: {
+        OperationalStatus: {
+          type: "object",
+          required: [
+            "health",
+            "reconciliation",
+            "scheduler",
+            "connectivity",
+            "alerts",
+            "services",
+          ],
+          properties: {
+            health: {
+              type: "object",
+              required: ["state", "reasons"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: ["healthy", "degraded", "fault"],
+                },
+                reasons: { type: "array", items: { type: "string" } },
+              },
+            },
+            reconciliation: { type: "object", additionalProperties: true },
+            scheduler: { type: "object", additionalProperties: true },
+            connectivity: { type: "object", additionalProperties: true },
+            alerts: { type: "object", additionalProperties: true },
+            database: { type: "object", additionalProperties: true },
+            services: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "name", "type", "enabled", "pendingCount"],
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  type: { type: "string" },
+                  enabled: { type: "boolean" },
+                  pendingCount: { type: "integer", minimum: 0 },
+                  lastSuccessAt: { type: "string", format: "date-time" },
+                  lastFailureAt: { type: "string", format: "date-time" },
+                  lastFailureCode: { type: "string" },
+                },
+              },
+            },
+          },
+        },
         Severity: {
           type: "string",
           enum: ["normal", "warn", "alert", "alarm", "emergency"],

@@ -49,7 +49,7 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(2);
+    expect(migrated.schemaVersion()).toBe(3);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -63,6 +63,26 @@ describe("occurrence storage", () => {
         "occurrence_source_history_idx",
       ]),
     );
+    const deliveryIndexes = migrated.db
+      .prepare("PRAGMA index_list(deliveries)")
+      .all() as Array<{ name: string }>;
+    expect(deliveryIndexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "deliveries_service_state_idx",
+        "deliveries_service_success_idx",
+      ]),
+    );
+  });
+
+  it("reports a schema health fault without throwing from status", () => {
+    const db = database();
+    db.db.exec("DELETE FROM schema_migrations");
+
+    expect(db.operationalStatus()).toMatchObject({
+      healthy: false,
+      schemaVersion: 0,
+      expectedSchemaVersion: 3,
+    });
   });
 
   it("stores raise-clear-raise as distinct occurrences and keeps dismissal history", () => {
@@ -120,7 +140,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(2);
+    expect(db.schemaVersion()).toBe(3);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);

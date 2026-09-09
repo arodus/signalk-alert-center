@@ -16,6 +16,27 @@ import {
 import { currentSchemaVersion, migrations, schema } from "./schema";
 
 type Row = Record<string, unknown>;
+
+export interface ServiceOperationalStatus {
+  id: string;
+  pendingCount: number;
+  lastSuccessAt?: Date;
+  lastFailureAt?: Date;
+  lastFailureCode?: string;
+}
+
+export interface DatabaseOperationalStatus {
+  healthy: boolean;
+  schemaVersion: number;
+  expectedSchemaVersion: number;
+  oldestPendingDeliveryAt?: Date;
+  oldestDueDeliveryAt?: Date;
+  overdueActivationCount: number;
+  pendingWakeCount: number;
+  nextWakeAt?: Date;
+  services: ServiceOperationalStatus[];
+  error?: string;
+}
 const date = (value: unknown): Date | undefined =>
   value ? new Date(String(value)) : undefined;
 const json = (value: unknown): unknown | undefined =>
@@ -113,6 +134,83 @@ export class AlertDatabase {
       .prepare("SELECT MAX(version) AS version FROM schema_migrations")
       .get() as Row;
     return Number(row.version ?? 0);
+  }
+
+  operationalStatus(now = new Date()): DatabaseOperationalStatus {
+    try {
+      const queue = this.db
+        .prepare(
+          `SELECT MIN(COALESCE(next_attempt_at, created_at)) AS oldest,
+             MIN(CASE WHEN next_attempt_at IS NULL OR next_attempt_at <= ?
+               THEN COALESCE(next_attempt_at, created_at) END) AS oldest_due
+           FROM deliveries
+           WHERE state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')`,
+        )
+        .get(now.toISOString()) as Row;
+      const activation = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM alert_occurrences
+           WHERE activation_state='pending' AND current_state='active'
+             AND activation_due_at <= ?`,
+        )
+        .get(now.toISOString()) as Row;
+      const wake = this.db
+        .prepare(
+          "SELECT COUNT(*) AS count, MIN(wake_due_at) AS next_at FROM wake_requests",
+        )
+        .get() as Row;
+      const serviceRows = this.db
+        .prepare(
+          `SELECT transport_instance_id,
+             SUM(CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable') THEN 1 ELSE 0 END) AS pending,
+             MAX(delivered_at) AS last_success
+           FROM deliveries GROUP BY transport_instance_id
+           ORDER BY transport_instance_id`,
+        )
+        .all() as Row[];
+      const lastFailure = this.db.prepare(
+        `SELECT a.finished_at, a.error_code
+         FROM delivery_attempts a
+         JOIN deliveries d ON d.id=a.delivery_id
+         WHERE d.transport_instance_id=?
+           AND a.outcome IN ('failed_retryable', 'failed_terminal', 'interrupted')
+         ORDER BY a.finished_at DESC, a.id DESC LIMIT 1`,
+      );
+      const version = this.schemaVersion();
+      return {
+        healthy: version === currentSchemaVersion,
+        schemaVersion: version,
+        expectedSchemaVersion: currentSchemaVersion,
+        oldestPendingDeliveryAt: date(queue.oldest),
+        oldestDueDeliveryAt: date(queue.oldest_due),
+        overdueActivationCount: Number(activation.count ?? 0),
+        pendingWakeCount: Number(wake.count ?? 0),
+        nextWakeAt: date(wake.next_at),
+        services: serviceRows.map((row) => {
+          const failure = lastFailure.get(row.transport_instance_id) as
+            Row | undefined;
+          return {
+            id: String(row.transport_instance_id),
+            pendingCount: Number(row.pending ?? 0),
+            lastSuccessAt: date(row.last_success),
+            lastFailureAt: date(failure?.finished_at),
+            lastFailureCode: failure?.error_code
+              ? String(failure.error_code)
+              : undefined,
+          };
+        }),
+      };
+    } catch (error) {
+      return {
+        healthy: false,
+        schemaVersion: 0,
+        expectedSchemaVersion: currentSchemaVersion,
+        overdueActivationCount: 0,
+        pendingWakeCount: 0,
+        services: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   upsertDefinition(

@@ -12,6 +12,12 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
 }) => {
   await page.goto("/signalk-persistent-notifier/");
   await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
+  await expect(page.locator("#health-state")).toHaveText(/healthy|degraded/);
+  await page.getByText("System diagnostics").click();
+  await expect(page.locator("#diagnostics-list")).toContainText("Database");
+  await expect(page.locator("#diagnostics-list")).toContainText(
+    "Startup reconciliation",
+  );
   const fridge = page
     .locator("tr.clickable-row")
     .filter({ hasText: "Refrigerator temperature" })

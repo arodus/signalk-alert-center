@@ -75,6 +75,15 @@ export class PersistentNotifierRuntime {
     deletedOccurrences: number;
     remainingEligibleOccurrences: number;
   };
+  private reconciliationState: {
+    state: "idle" | "running" | "complete" | "failed";
+    startedAt?: Date;
+    completedAt?: Date;
+    durationMs?: number;
+    snapshotEntries?: number;
+    queuedEntries?: number;
+    error?: string;
+  } = { state: "idle" };
 
   constructor(private readonly app: ServerAPI) {}
 
@@ -108,17 +117,90 @@ export class PersistentNotifierRuntime {
 
   status() {
     const alertStats = this.database?.alertStats();
+    const database = this.database?.operationalStatus();
+    const scheduler = this.scheduler?.status() ?? { running: false };
+    const services = (this.config.notifiers ?? []).map((notifier) => {
+      const service = database?.services.find(
+        (item) => item.id === notifier.name,
+      );
+      return {
+        id: notifier.name,
+        name: notifier.name,
+        type: notifier.type,
+        enabled: notifier.enabled !== false,
+        pendingCount: service?.pendingCount ?? 0,
+        lastSuccessAt: service?.lastSuccessAt,
+        lastFailureAt: service?.lastFailureAt,
+        lastFailureCode: service?.lastFailureCode,
+      };
+    });
+    const faultReasons = [
+      database && !database.healthy
+        ? (database.error ?? "Database schema is not healthy")
+        : undefined,
+      this.connectivity?.state === "FAULT"
+        ? (this.connectivity.lastError ?? "Connectivity is in a fault state")
+        : undefined,
+      this.reconciliationState.state === "failed"
+        ? (this.reconciliationState.error ?? "Startup reconciliation failed")
+        : undefined,
+    ].filter((reason): reason is string => Boolean(reason));
+    const degradedReasons = [
+      this.reconciliationState.state === "running"
+        ? "Startup reconciliation is still running"
+        : undefined,
+      scheduler.lastError
+        ? `Delivery scheduler failed: ${scheduler.lastError}`
+        : undefined,
+      database?.overdueActivationCount
+        ? `${database.overdueActivationCount} activation(s) overdue`
+        : undefined,
+      ...services
+        .filter(
+          (service) =>
+            service.enabled &&
+            service.lastFailureAt &&
+            (!service.lastSuccessAt ||
+              service.lastFailureAt > service.lastSuccessAt),
+        )
+        .map(
+          (service) =>
+            `${service.name} last failed${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
+        ),
+    ].filter((reason): reason is string => Boolean(reason));
+    const health = faultReasons.length
+      ? { state: "fault" as const, reasons: faultReasons }
+      : degradedReasons.length
+        ? { state: "degraded" as const, reasons: degradedReasons }
+        : { state: "healthy" as const, reasons: [] as string[] };
     return {
+      health,
+      reconciliation: this.reconciliationState,
+      scheduler,
       connectivity: this.connectivity
         ? {
             state: this.connectivity.state,
             switchOn: this.connectivity.switchOn,
             ownedByPlugin: this.connectivity.ownedByPlugin,
             lastError: this.connectivity.lastError,
+            lastTransitionAt: this.connectivity.lastTransitionAt,
+            lastTransitionFrom: this.connectivity.lastTransitionFrom,
+            lastProbeAt: this.connectivity.lastProbeAt,
+            lastProbeSucceeded: this.connectivity.lastProbeSucceeded,
+            lastProbeError: this.connectivity.lastProbeError,
+            pendingWakeCount: database?.pendingWakeCount ?? 0,
+            nextWakeAt:
+              database?.nextWakeAt ?? this.connectivity.scheduledWakeAt,
             shutdownDeferredReason:
               this.connectivity.lastShutdownDeferredReason,
           }
-        : { state: "OFF", switchOn: undefined, ownedByPlugin: false },
+        : {
+            state: "OFF",
+            switchOn: undefined,
+            ownedByPlugin: false,
+            pendingWakeCount: database?.pendingWakeCount ?? 0,
+            nextWakeAt: database?.nextWakeAt,
+          },
       alerts: {
         definitions: this.database?.definitionCount() ?? 0,
         total: alertStats?.total ?? 0,
@@ -126,7 +208,9 @@ export class PersistentNotifierRuntime {
         pendingActivation: alertStats?.pendingActivation ?? 0,
         pendingDelivery: this.database?.pendingDeliveryCount() ?? 0,
       },
-      schemaVersion: this.database?.schemaVersion(),
+      database,
+      schemaVersion: database?.schemaVersion,
+      services,
       retention: {
         enabled: this.config.retention?.enabled ?? false,
         maxAgeDays: this.config.retention?.maxAgeDays ?? 365,
@@ -139,7 +223,7 @@ export class PersistentNotifierRuntime {
 
   statusMessage(): string {
     const current = this.status();
-    return `${current.alerts.active} active, ${current.alerts.pendingDelivery} deliveries pending`;
+    return `${current.health.state}: ${current.alerts.active} active, ${current.alerts.pendingDelivery} deliveries pending`;
   }
 
   private debug(message: string): void {
@@ -152,6 +236,7 @@ export class PersistentNotifierRuntime {
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    if (this.database) this.app.setPluginStatus(this.statusMessage());
   }
 
   private emitChange(reason: string): void {
@@ -161,6 +246,7 @@ export class PersistentNotifierRuntime {
       occurredAt: new Date().toISOString(),
     };
     for (const listener of this.changeListeners) listener(change);
+    this.app.setPluginStatus(this.statusMessage());
   }
 
   private subscribeChanges(
@@ -365,6 +451,16 @@ export class PersistentNotifierRuntime {
     this.scheduleNextActivation();
     await this.runScheduler();
     this.runRetention();
+    const completedAt = new Date();
+    this.reconciliationState = {
+      state: "complete",
+      startedAt: this.reconciliationState.startedAt,
+      completedAt,
+      durationMs: Date.now() - startedAt,
+      snapshotEntries: entries.length,
+      queuedEntries: queuedCount,
+    };
+    this.app.setPluginStatus(this.statusMessage());
     this.debug(
       `Startup reconciliation complete: snapshotEntries=${entries.length}, queuedEntries=${queuedCount}, durationMs=${Date.now() - startedAt}`,
     );
@@ -641,6 +737,7 @@ export class PersistentNotifierRuntime {
     this.database = new AlertDatabase(this.databasePath(options));
     this.policy = new AlertPolicyResolver(this.database, options);
     this.reconcilingStartup = true;
+    this.reconciliationState = { state: "running", startedAt: new Date() };
     this.startupEntries = [];
 
     this.transports = new Map<string, NotificationTransport>();
@@ -737,6 +834,18 @@ export class PersistentNotifierRuntime {
       void this.reconcileStartup().catch((error: unknown) => {
         const queued = this.startupEntries.splice(0);
         this.reconcilingStartup = false;
+        const completedAt = new Date();
+        this.reconciliationState = {
+          state: "failed",
+          startedAt: this.reconciliationState.startedAt,
+          completedAt,
+          durationMs: this.reconciliationState.startedAt
+            ? completedAt.getTime() -
+              this.reconciliationState.startedAt.getTime()
+            : undefined,
+          queuedEntries: queued.length,
+          error: error instanceof Error ? error.message : String(error),
+        };
         this.reportAsyncError(
           "Could not reconcile current notifications",
           error,
@@ -775,7 +884,7 @@ export class PersistentNotifierRuntime {
           (options.retention.intervalHours ?? 24) * 3_600_000,
         ),
       );
-    this.app.setPluginStatus("Alert center active");
+    this.app.setPluginStatus(this.statusMessage());
     this.debug("Started and subscribed to Signal K notifications");
   }
 

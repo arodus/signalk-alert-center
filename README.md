@@ -367,6 +367,29 @@ read-only access and mutations require read-write access. Collection endpoints u
 bounded cursor pagination and validated filters. The complete request and response
 contract is returned through the plugin's OpenAPI document.
 
+### Operational diagnostics
+
+`GET /status` returns a bounded operational snapshot without notifier secrets or
+notification payloads. It includes startup reconciliation state and duration,
+the last delivery scheduler run, the oldest pending delivery, overdue activation
+count, database/schema health, pending connectivity wake work, switch ownership,
+the last connectivity transition and probe result, and per-service pending count
+plus last success/failure time and failure code. The dashboard exposes the same
+information under **System diagnostics**, while Signal K's compact plugin status
+shows the overall health and active/pending counts.
+
+Health is **healthy** when the schema is current, startup reconciliation has
+completed, connectivity is not faulted, activations are not overdue, and no
+service's newest outcome is a failure. It is **degraded** while reconciliation is
+running, when activations are overdue, after a scheduler error, or when a service's
+latest outcome is a failure. It is **fault** when the database/schema check fails,
+startup reconciliation fails, or connectivity enters `FAULT`. A later successful
+service delivery clears that service's degraded condition.
+
+Diagnostic queries use aggregate/indexed lookups and one latest-failure lookup per
+service with recorded deliveries; they do not load or reconstruct complete alert
+history.
+
 `GET /occurrences` accepts exact `definitionId`, `path`, and `source` filters,
 plus `state`, `severity`, `dismissed`, `from`, and `to`. Filters can be combined;
 cursor ordering remains stable by occurrence start time and id.
