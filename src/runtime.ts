@@ -9,7 +9,12 @@ import {
 import { AlertLifecycle } from "./alerts/lifecycle";
 import { normalizeNotification } from "./alerts/normalize";
 import { AlertPolicyResolver, EffectivePolicy } from "./alerts/policy";
-import { AlertDefinitionRecord, AlertRecord } from "./alerts/types";
+import {
+  AlertDefinitionRecord,
+  AlertRecord,
+  audioSounds,
+  CustomAudioSound,
+} from "./alerts/types";
 import { listConfiguredZones } from "./alerts/zones";
 import {
   AudioCommand,
@@ -153,6 +158,14 @@ export class PersistentNotifierRuntime {
           assetDirectory: path.join(
             this.app.getDataDirPath(),
             "persistent-notifier-audio",
+          ),
+          customSounds: new Map(
+            (options.audio?.customSounds ?? []).map((sound) => [
+              `custom:${sound.name}` as CustomAudioSound,
+              path.isAbsolute(sound.filePath)
+                ? sound.filePath
+                : path.join(this.app.getDataDirPath(), sound.filePath),
+            ]),
           ),
         });
     const before = configuredAudioCommand(options.audio?.beforePlaybackCommand);
@@ -1043,6 +1056,23 @@ export class PersistentNotifierRuntime {
             enabled: true,
             minimumSeverity: notifier.minSeverity ?? "normal",
           })),
+      listAudioSounds: () => [
+        {
+          id: "severity",
+          name: "Match alert severity",
+          type: "automatic",
+        },
+        ...audioSounds.map((sound) => ({
+          id: sound,
+          name: sound[0].toUpperCase() + sound.slice(1),
+          type: "built-in",
+        })),
+        ...(this.config.audio?.customSounds ?? []).map((sound) => ({
+          id: `custom:${sound.name}`,
+          name: sound.name,
+          type: "custom",
+        })),
+      ],
       subscribeChanges: (listener) => this.subscribeChanges(listener),
     });
   }

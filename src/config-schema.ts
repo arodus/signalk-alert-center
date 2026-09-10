@@ -450,6 +450,38 @@ export const pluginConfigSchema = {
             "Stops a before- or after-play command that does not finish within this time.",
           default: 10,
         },
+        customSounds: {
+          type: "array",
+          title: "Custom sounds",
+          description:
+            "Register WAV files once so they appear by name in every alert's Sound list. Relative paths start in Signal K's data directory; absolute paths are also supported.",
+          default: [],
+          maxItems: 100,
+          items: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                minLength: 1,
+                maxLength: 64,
+                pattern: "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$",
+                title: "Sound name",
+                description:
+                  "Unique name shown in alert settings, for example Ship bell or Anchor alarm.",
+              },
+              filePath: {
+                type: "string",
+                minLength: 5,
+                maxLength: 1024,
+                pattern: "\\.[Ww][Aa][Vv]$",
+                title: "WAV file path",
+                description:
+                  "Path visible to the Signal K process. For example sounds/ship-bell.wav uses the sounds folder inside Signal K's data directory.",
+              },
+            },
+            required: ["name", "filePath"],
+          },
+        },
         quietHours: {
           type: "object",
           title: "Quiet hours",

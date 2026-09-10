@@ -3,6 +3,7 @@ const state = {
   definitions: [],
   occurrences: [],
   notifiers: [],
+  audioSounds: [],
   occurrenceCursor: undefined,
   eventCursor: undefined,
   selectedOccurrence: undefined,
@@ -164,6 +165,23 @@ function alertName(definition) {
 }
 function audioSoundLabel(sound) {
   return sound === "severity" ? "matches severity" : String(sound ?? "sound");
+}
+function renderAudioSoundOptions() {
+  const select = $("#audio-sound");
+  select.innerHTML = state.audioSounds
+    .map(
+      (sound) =>
+        `<option value="${escapeHtml(sound.id)}">${escapeHtml(sound.name)}${sound.type === "custom" ? " (custom)" : ""}</option>`,
+    )
+    .join("");
+}
+function ensureAudioSoundOption(sound) {
+  const select = $("#audio-sound");
+  if ([...select.options].some((option) => option.value === sound)) return;
+  select.insertAdjacentHTML(
+    "beforeend",
+    `<option value="${escapeHtml(sound)}">${escapeHtml(audioSoundLabel(sound))} (unavailable)</option>`,
+  );
 }
 function definitionOrigin(sourceType) {
   return (
@@ -408,6 +426,7 @@ async function load() {
       activeOccurrences,
       occurrences,
       notifiers,
+      audioSounds,
       status,
       deliveries,
     ] = await Promise.all([
@@ -415,6 +434,7 @@ async function load() {
       allPages("/occurrences?state=active"),
       api(`/occurrences?${occurrenceParams()}`),
       api("/notifiers"),
+      api("/audio/sounds"),
       api("/status").catch(() => ({})),
       api("/deliveries").catch(() => []),
     ]);
@@ -424,6 +444,8 @@ async function load() {
       ? pageItems(occurrences)
       : mergeById(activeOccurrences, pageItems(occurrences));
     state.notifiers = pageItems(notifiers);
+    state.audioSounds = pageItems(audioSounds);
+    renderAudioSoundOptions();
     state.occurrenceCursor = occurrences.nextCursor;
     elements.activeCount.textContent = activeOccurrences.filter(
       (item) => !item.dismissedAt,
@@ -600,7 +622,9 @@ function openPolicy(id) {
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
   const audio = policy.audio ?? {};
   $("#audio-enabled").checked = audio.enabled === true;
-  $("#audio-sound").value = audio.sound ?? "severity";
+  const sound = audio.sound ?? "severity";
+  ensureAudioSoundOption(sound);
+  $("#audio-sound").value = sound;
   $("#audio-minimum-severity").value = audio.minimumSeverity ?? "warn";
   $("#audio-mode").value = audio.mode ?? "once";
   $("#audio-repeat-interval").value = audio.repeatIntervalSeconds ?? 60;
