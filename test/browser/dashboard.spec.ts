@@ -28,6 +28,7 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await page.getByRole("button", { name: "Alert settings" }).click();
   await expect(page.locator("#policy-dialog")).toBeVisible();
   await expect(page.getByRole("group", { name: "Local sound" })).toBeVisible();
+  await expect(page.locator("#audio-sound")).toHaveValue("severity");
   await page.locator("#audio-mode").selectOption("repeat");
   await expect(page.locator("#audio-repeat-field")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();

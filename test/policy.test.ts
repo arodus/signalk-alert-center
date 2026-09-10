@@ -19,7 +19,6 @@ describe("AlertPolicyResolver", () => {
       audio: {
         defaults: {
           enabled: true,
-          sound: "chime",
           minimumSeverity: "alert",
           mode: "once",
         },
@@ -36,7 +35,7 @@ describe("AlertPolicyResolver", () => {
     ).toMatchObject({
       minimumSeverity: "warn",
       notifierIds: ["primary"],
-      audio: { enabled: true, sound: "chime", minimumSeverity: "alert" },
+      audio: { enabled: true, sound: "severity", minimumSeverity: "alert" },
       provenance: "default",
     });
     database.setPolicy(pathDefinitionId("notifications.navigation.anchor"), {

@@ -4,6 +4,7 @@ import {
   AlertDefinitionRecord,
   AlertEventRecord,
   AlertAudioPolicy,
+  AudioSound,
   AudioPlaybackRecord,
   AlertPolicyRecord,
   AlertRecord,
@@ -1315,6 +1316,7 @@ export class AlertDatabase {
     id: string,
     nextPlayAt: Date | undefined,
     backend: string,
+    playedSound: AudioSound,
     now = new Date(),
   ): void {
     this.db.exec("BEGIN IMMEDIATE");
@@ -1347,6 +1349,7 @@ export class AlertDatabase {
       if (result.changes)
         this.addEvent(String(playback.alert_id), "audio_played", now, {
           backend,
+          sound: playedSound,
           nextPlayAt: nextPlayAt?.toISOString(),
         });
       this.db.exec("COMMIT");

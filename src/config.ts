@@ -1,6 +1,6 @@
 import {
   AlertAudioPolicy,
-  audioSounds,
+  audioSoundSelections,
   ConnectivityMode,
   Severity,
   severities,
@@ -268,8 +268,8 @@ function validateAudio(audio: PluginConfig["audio"]): void {
       "audio.defaults.repeatIntervalSeconds must not exceed 86400",
     );
   const defaults = audio.defaults;
-  if (defaults?.sound && !audioSounds.includes(defaults.sound))
-    throw new Error("audio.defaults.sound is not a bundled sound");
+  if (defaults?.sound && !audioSoundSelections.includes(defaults.sound))
+    throw new Error("audio.defaults.sound is not a supported sound selection");
   if (
     defaults?.minimumSeverity &&
     !severities.includes(defaults.minimumSeverity)

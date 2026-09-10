@@ -479,19 +479,12 @@ export const pluginConfigSchema = {
           type: "object",
           title: "Default local sound policy",
           description:
-            "Newly discovered alerts inherit these values until their local sound settings are changed in the Alert center.",
+            "Newly discovered alerts inherit these values until their local sound settings are changed in the Alert center. Their sound automatically follows severity: chime for warn, warning for alert, alarm for alarm, and emergency for emergency.",
           properties: {
             enabled: {
               type: "boolean",
               title: "Play local sound by default",
               default: false,
-            },
-            sound: {
-              type: "string",
-              title: "Default sound",
-              enum: ["chime", "warning", "alarm", "emergency"],
-              enumNames: ["Chime", "Warning", "Alarm", "Emergency"],
-              default: "warning",
             },
             minimumSeverity: {
               type: "string",
