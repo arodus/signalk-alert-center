@@ -71,16 +71,11 @@ describe("validateConfig", () => {
     );
   });
 
-  it("keeps local audio opt-in and exposes only bundled sounds", () => {
+  it("keeps local audio opt-in and defaults new alerts to severity-matched sounds", () => {
     const audio = pluginConfigSchema.properties.audio;
     expect(audio.properties.enabled.default).toBe(false);
     expect(audio.properties.defaults.properties.enabled.default).toBe(false);
-    expect(audio.properties.defaults.properties.sound.enum).toEqual([
-      "chime",
-      "warning",
-      "alarm",
-      "emergency",
-    ]);
+    expect(audio.properties.defaults.properties.sound).toBeUndefined();
     expect(
       audio.properties.beforePlaybackCommand.properties.executable.title,
     ).toBe("Executable");
@@ -93,7 +88,7 @@ describe("validateConfig", () => {
           enabled: true,
           backend: "aplay",
           masterVolume: 80,
-          defaults: { sound: "alarm", repeatIntervalSeconds: 60 },
+          defaults: { sound: "severity", repeatIntervalSeconds: 60 },
         },
       }),
     ).not.toThrow();

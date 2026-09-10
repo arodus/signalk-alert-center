@@ -1,4 +1,11 @@
-import { AlertAudioPolicy, AlertRecord, severityRank } from "../alerts/types";
+import {
+  AlertAudioPolicy,
+  AlertRecord,
+  AudioSound,
+  AudioSoundSelection,
+  Severity,
+  severityRank,
+} from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
 import { AudioPlayer } from "./player";
 
@@ -115,10 +122,11 @@ export class AudioScheduler {
         const controller = new AbortController();
         this.active = { alertId: playback.alertId, controller };
         try {
-          const result = await this.player.play(
+          const sound = resolveAudioSound(
             playback.sound,
-            controller.signal,
+            alert.currentSeverity,
           );
+          const result = await this.player.play(sound, controller.signal);
           const refreshed = this.database.getAlert(playback.alertId);
           const repeat =
             playback.mode === "repeat" &&
@@ -131,6 +139,7 @@ export class AudioScheduler {
             playback.id,
             nextPlayAt,
             result.backend,
+            sound,
             new Date(),
           );
           this.lastPlayedAt = new Date();
@@ -182,6 +191,17 @@ export class AudioScheduler {
     await this.activeRun;
     this.database.recoverPlayingAudio();
   }
+}
+
+export function resolveAudioSound(
+  selection: AudioSoundSelection,
+  severity: Severity,
+): AudioSound {
+  if (selection !== "severity") return selection;
+  if (severity === "emergency") return "emergency";
+  if (severity === "alarm") return "alarm";
+  if (severity === "alert") return "warning";
+  return "chime";
 }
 
 function playbackStopTrigger(

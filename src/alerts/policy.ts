@@ -42,7 +42,7 @@ export class AlertPolicyResolver {
       notifierIds: [...(this.config.defaults?.notifiers ?? [])],
       audio: {
         enabled: audio?.enabled ?? false,
-        sound: audio?.sound ?? "warning",
+        sound: audio?.sound ?? "severity",
         minimumSeverity: audio?.minimumSeverity ?? "warn",
         mode: audio?.mode ?? "once",
         repeatIntervalSeconds: audio?.repeatIntervalSeconds ?? 60,
