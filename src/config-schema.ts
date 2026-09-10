@@ -395,6 +395,63 @@ export const pluginConfigSchema = {
             "After this many failures the sound is marked failed in alert history. Remote notification delivery continues independently.",
           default: 3,
         },
+        beforePlaybackCommand: {
+          type: "object",
+          title: "Command before each sound",
+          description:
+            "Optional server command that must finish successfully before each sound starts. Use it to pause music, enable an amplifier, or change a mixer. Enter the executable and each argument separately; shell expressions are not evaluated.",
+          properties: {
+            executable: {
+              type: "string",
+              maxLength: 512,
+              title: "Executable",
+              description:
+                "Program available to the Signal K process, for example /usr/bin/mpc or /usr/local/bin/amplifier-on.",
+            },
+            arguments: {
+              type: "array",
+              maxItems: 32,
+              title: "Arguments",
+              description:
+                "Optional arguments in order. Add one list item per argument, for example pause. Do not include the executable here.",
+              items: { type: "string", maxLength: 2048 },
+            },
+          },
+          required: ["executable"],
+        },
+        afterPlaybackCommand: {
+          type: "object",
+          title: "Command after each sound",
+          description:
+            "Optional cleanup command run after every attempted sound, including failed or cancelled playback. A failure is logged but does not replay a sound that already completed.",
+          properties: {
+            executable: {
+              type: "string",
+              maxLength: 512,
+              title: "Executable",
+              description:
+                "Program available to the Signal K process, for example /usr/bin/mpc or /usr/local/bin/amplifier-off.",
+            },
+            arguments: {
+              type: "array",
+              maxItems: 32,
+              title: "Arguments",
+              description:
+                "Optional arguments in order. Add one list item per argument, for example play. Do not include the executable here.",
+              items: { type: "string", maxLength: 2048 },
+            },
+          },
+          required: ["executable"],
+        },
+        commandTimeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 300,
+          title: "Command timeout (seconds)",
+          description:
+            "Stops a before- or after-play command that does not finish within this time.",
+          default: 10,
+        },
         quietHours: {
           type: "object",
           title: "Quiet hours",

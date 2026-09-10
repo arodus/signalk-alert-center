@@ -71,15 +71,16 @@ static findings, not a live Signal K compatibility or runtime certification.
 | Input semantics | Normalization defaults unknown states (including `notice`) to `alert`; null becomes an active alert. Delta source timestamps are not passed into ingestion. | Verify supported Signal K clear/null and severity semantics, retain original state/time, and test compatible normalization. |
 | Zones and startup | `src/alerts/zones.ts` exists, but `src/plugin.ts` does not call it or pass zones to the catalog. Startup subscribes without reading existing notifications. | Wire zone discovery/current values and startup reconciliation without generating duplicate historical occurrences. |
 | Controls | Acknowledge/silence persist local timestamps before optional upstream calls; no confirmed asynchronous result is required. | Verified supported server API behavior, truthful control results, and action history. |
-| Player similarity | Server-side built-in sound playback now uses a durable queue with per-alert play-once/repeat and stop policies. | Text-to-speech and timed global disable controls remain follow-up work. Avoid running a second player for the same paths. |
+| Player similarity | Server-side built-in sound playback now uses a durable queue with per-alert play-once/repeat and stop policies plus bounded pre/post command hooks. | Text-to-speech and timed global disable controls remain follow-up work. Avoid running a second player for the same paths. |
 
 ### Scope decisions still open
 
 The notification list, one-time retention, full history, and local sound are owned
 here. Text-to-speech remains separate follow-up work. Running this plugin's local
 sound for the same paths as Signal K Notification Player would duplicate audio. Slack,
-arbitrary pre/post shell commands, exact visual copying, and the reference's URL
-compatibility are not implied requirements. Confirm playback architecture before
+shell command lines, exact visual copying, and the reference's URL compatibility
+are not implied requirements. Pre/post hooks are explicit executable-plus-argument
+configurations without shell parsing or alert interpolation. Confirm playback architecture before
 implementing it, without delaying the required persistence and history work.
 
 ### Acceptance scenarios for future implementation

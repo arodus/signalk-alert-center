@@ -5,6 +5,7 @@ import {
   Severity,
   severities,
 } from "./alerts/types";
+import type { AudioCommand } from "./audio/player";
 
 interface NotifierBaseConfig {
   /** Unique user-facing name used by alert policies. */
@@ -58,6 +59,9 @@ export interface PluginConfig {
     playbackTimeoutSeconds?: number;
     failureRetrySeconds?: number;
     maxAttempts?: number;
+    beforePlaybackCommand?: AudioCommand;
+    afterPlaybackCommand?: AudioCommand;
+    commandTimeoutSeconds?: number;
     quietHours?: { enabled?: boolean; start?: string; end?: string };
     defaults?: Partial<AlertAudioPolicy> & {
       stopOn?: Partial<AlertAudioPolicy["stopOn"]>;
@@ -242,12 +246,20 @@ function validateAudio(audio: PluginConfig["audio"]): void {
     ["playbackTimeoutSeconds", audio.playbackTimeoutSeconds],
     ["failureRetrySeconds", audio.failureRetrySeconds],
     ["maxAttempts", audio.maxAttempts],
+    ["commandTimeoutSeconds", audio.commandTimeoutSeconds],
   ] as const) {
     if (value !== undefined && (!Number.isInteger(value) || value < 1))
       throw new Error(`audio.${name} must be a positive integer`);
   }
   if (audio.maxAttempts !== undefined && audio.maxAttempts > 20)
     throw new Error("audio.maxAttempts must not exceed 20");
+  if (
+    audio.commandTimeoutSeconds !== undefined &&
+    audio.commandTimeoutSeconds > 300
+  )
+    throw new Error("audio.commandTimeoutSeconds must not exceed 300");
+  validateAudioCommand(audio.beforePlaybackCommand, "beforePlaybackCommand");
+  validateAudioCommand(audio.afterPlaybackCommand, "afterPlaybackCommand");
   if (
     audio.defaults?.repeatIntervalSeconds !== undefined &&
     audio.defaults.repeatIntervalSeconds > 86_400
@@ -279,6 +291,35 @@ function validateAudio(audio: PluginConfig["audio"]): void {
       throw new Error("Enabled audio quiet hours require HH:MM start and end");
     if (quiet.start === quiet.end)
       throw new Error("Audio quiet-hours start and end must differ");
+  }
+}
+
+function validateAudioCommand(
+  command: AudioCommand | undefined,
+  name: string,
+): void {
+  if (!command) return;
+  requireString(
+    command.executable,
+    `audio.${name}.executable must name an executable`,
+  );
+  if (
+    command.executable.length > 512 ||
+    command.executable.includes("\0") ||
+    /[\r\n]/.test(command.executable)
+  )
+    throw new Error(`audio.${name}.executable is invalid`);
+  if (command.arguments !== undefined && !Array.isArray(command.arguments))
+    throw new Error(`audio.${name}.arguments must be a list`);
+  if ((command.arguments?.length ?? 0) > 32)
+    throw new Error(`audio.${name}.arguments must contain at most 32 items`);
+  for (const argument of command.arguments ?? []) {
+    if (
+      typeof argument !== "string" ||
+      argument.length > 2048 ||
+      argument.includes("\0")
+    )
+      throw new Error(`audio.${name}.arguments contains an invalid value`);
   }
 }
 

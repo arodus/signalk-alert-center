@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AlertAudioPolicy } from "../src/alerts/types";
-import { audioCommand, AudioPlayer } from "../src/audio/player";
+import {
+  audioCommand,
+  AudioPlayer,
+  HookedAudioPlayer,
+} from "../src/audio/player";
 import { AudioScheduler, quietHoursEnd } from "../src/audio/scheduler";
 import { DeliveryScheduler } from "../src/delivery/scheduler";
 import { AlertDatabase } from "../src/storage/db";
@@ -269,6 +276,77 @@ describe("local audio playback", () => {
       command: "aplay",
       args: ["-q", "-D", "hw:1; touch /tmp/never", "/safe/alarm.wav"],
     });
+  });
+
+  it("runs configured commands in order around each sound", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-audio-hooks-"));
+    const marker = join(directory, "order.txt");
+    const appendCommand = (value: string) => ({
+      executable: process.execPath,
+      arguments: [
+        "-e",
+        "require('node:fs').appendFileSync(process.argv[1], process.argv[2])",
+        marker,
+        `${value}\n`,
+      ],
+    });
+    const base: AudioPlayer = {
+      play: vi.fn(async () => {
+        appendFileSync(marker, "sound\n");
+        return { backend: "fake" };
+      }),
+    };
+    try {
+      const player = new HookedAudioPlayer(base, {
+        before: appendCommand("before"),
+        after: appendCommand("after"),
+        timeoutSeconds: 5,
+      });
+      await player.play("warning");
+      expect(readFileSync(marker, "utf8")).toBe("before\nsound\nafter\n");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not replay a successful sound when the after command fails", async () => {
+    const commandError = vi.fn();
+    const base: AudioPlayer = {
+      play: vi.fn(async () => ({ backend: "fake" })),
+    };
+    const player = new HookedAudioPlayer(base, {
+      after: {
+        executable: process.execPath,
+        arguments: ["-e", "process.exit(7)"],
+      },
+      timeoutSeconds: 5,
+      onCommandError: commandError,
+    });
+
+    await expect(player.play("warning")).resolves.toEqual({ backend: "fake" });
+    expect(base.play).toHaveBeenCalledTimes(1);
+    expect(commandError).toHaveBeenCalledWith(
+      "after",
+      expect.stringContaining("code 7"),
+    );
+  });
+
+  it("blocks playback when the before command fails", async () => {
+    const base: AudioPlayer = {
+      play: vi.fn(async () => ({ backend: "fake" })),
+    };
+    const player = new HookedAudioPlayer(base, {
+      before: {
+        executable: process.execPath,
+        arguments: ["-e", "process.exit(4)"],
+      },
+      timeoutSeconds: 5,
+    });
+
+    await expect(player.play("alarm")).rejects.toMatchObject({
+      code: "BEFORE_COMMAND_FAILED",
+    });
+    expect(base.play).not.toHaveBeenCalled();
   });
 
   it("calculates the end of overnight quiet hours in local time", () => {

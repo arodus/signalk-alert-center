@@ -41,16 +41,16 @@ occurrence identity and audit data, not optional display details.
 The implementation uses the current typed Signal K plugin surface and keeps the
 following boundaries explicit:
 
-| Area            | Implemented behavior                                                                                                                                                                |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                          |
-| Ingestion       | An all-source subscription is established before startup reconciliation; `$source`, source time, receipt time, and raw values are retained. Null/normal values clear an occurrence. |
-| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                  |
-| One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                         |
-| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                  |
-| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                              |
-| Local audio     | A durable serial queue invokes a fixed, allow-listed player without a shell. Built-in sounds, outcomes, repeats, and cancellation are recorded per occurrence.                      |
-| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                             |
+| Area            | Implemented behavior                                                                                                                                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                            |
+| Ingestion       | An all-source subscription is established before startup reconciliation; `$source`, source time, receipt time, and raw values are retained. Null/normal values clear an occurrence.                                                                   |
+| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                    |
+| One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                                                                                           |
+| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                    |
+| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                |
+| Local audio     | A durable serial queue invokes an allow-listed player without a shell. Optional administrator-configured pre/post executables also receive literal argument arrays. Built-in sounds, outcomes, repeats, and cancellation are recorded per occurrence. |
+| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                               |
 
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player)
 is a useful product reference: it discovers known/configured notifications, opens
@@ -371,6 +371,20 @@ defaults, and optionally enable **Play a test chime when saving**. The test chec
 turns itself off and writes success or failure to the Signal K log. Then open an
 alert in the Alert center and configure its **Local sound** section.
 
+Optional **Command before each sound** and **Command after each sound** settings
+can pause/resume music, power an amplifier, adjust a mixer, or control an external
+indicator. Configure the executable separately from its ordered argument list. The
+before command must succeed before playback starts. The after command runs after
+every attempted sound, including a failed or cancelled sound; its failure is logged
+but does not replay an already completed sound. Both commands have a bounded timeout.
+They run once per playback attempt, so a repeating alert runs both hooks around
+every repetition.
+
+For example, to pause and resume MPD playback, set the before executable to
+`/usr/bin/mpc` with one argument, `pause`, and the after executable to
+`/usr/bin/mpc` with one argument, `play`. Paths and installed programs refer to the
+Signal K host—or to the container when Signal K runs in Docker.
+
 On macOS, automatic mode uses the built-in `afplay`. On a native Linux install,
 install either ALSA's `aplay` (usually the `alsa-utils` package) or PulseAudio's
 `paplay` (usually `pulseaudio-utils`). Automatic mode tries PulseAudio and then
@@ -389,8 +403,10 @@ host mixer.
 
 Only the built-in `chime`, `warning`, `alarm`, and `emergency` sound IDs are
 accepted. The configured backend is selected from a fixed list and is launched
-directly with argument arrays (`shell: false`); paths and arbitrary commands are
-not accepted. Playback attempts and errors appear in the occurrence history and
+directly with argument arrays. Pre/post executables are intentionally
+administrator-configurable, but no shell is used (`shell: false`), arguments are
+not parsed as a command line, and alert data is never interpolated into them.
+Playback attempts and errors appear in the occurrence history, Signal K log, and
 system diagnostics.
 
 The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifier`:

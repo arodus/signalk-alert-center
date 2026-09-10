@@ -9,6 +9,18 @@ export interface AudioPlayer {
   play(sound: AudioSound, signal?: AbortSignal): Promise<{ backend: string }>;
 }
 
+export interface AudioCommand {
+  executable: string;
+  arguments?: string[];
+}
+
+export interface HookedAudioPlayerOptions {
+  before?: AudioCommand;
+  after?: AudioCommand;
+  timeoutSeconds: number;
+  onCommandError?: (stage: "before" | "after", message: string) => void;
+}
+
 export interface CommandAudioPlayerOptions {
   backend: AudioBackend;
   outputDevice?: string;
@@ -160,10 +172,106 @@ export class CommandAudioPlayer implements AudioPlayer {
   }
 }
 
+export class HookedAudioPlayer implements AudioPlayer {
+  constructor(
+    private readonly player: AudioPlayer,
+    private readonly options: HookedAudioPlayerOptions,
+  ) {}
+
+  async play(
+    sound: AudioSound,
+    signal?: AbortSignal,
+  ): Promise<{ backend: string }> {
+    if (this.options.before) {
+      try {
+        await runAudioCommand(
+          this.options.before,
+          this.options.timeoutSeconds,
+          signal,
+        );
+      } catch (error) {
+        const message = commandErrorMessage("Before-play", error);
+        const wrapped = new Error(message, { cause: error });
+        Object.assign(wrapped, { code: "BEFORE_COMMAND_FAILED" });
+        throw wrapped;
+      }
+    }
+
+    try {
+      return await this.player.play(sound, signal);
+    } finally {
+      if (this.options.after) {
+        try {
+          // Cleanup hooks must still run after a stopped or failed sound.
+          await runAudioCommand(
+            this.options.after,
+            this.options.timeoutSeconds,
+          );
+        } catch (error) {
+          this.options.onCommandError?.(
+            "after",
+            commandErrorMessage("After-play", error),
+          );
+        }
+      }
+    }
+  }
+}
+
+export function runAudioCommand(
+  command: AudioCommand,
+  timeoutSeconds: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortedError());
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.executable, command.arguments ?? [], {
+      shell: false,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const abort = () => {
+      child.kill("SIGTERM");
+      finish(abortedError());
+    };
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      const error = new Error("Configured audio command timed out");
+      Object.assign(error, { code: "COMMAND_TIMEOUT" });
+      finish(error);
+    }, timeoutSeconds * 1000);
+    signal?.addEventListener("abort", abort, { once: true });
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code, childSignal) => {
+      if (code === 0) finish();
+      else {
+        const error = new Error(
+          `Configured audio command exited with ${childSignal ?? `code ${code ?? "unknown"}`}`,
+        );
+        Object.assign(error, { code: "COMMAND_EXIT" });
+        finish(error);
+      }
+    });
+  });
+}
+
 function abortedError(): Error {
   const error = new Error("Local audio playback was stopped");
   Object.assign(error, { code: "ABORTED" });
   return error;
+}
+
+function commandErrorMessage(stage: string, error: unknown): string {
+  return `${stage} command failed: ${error instanceof Error ? error.message : String(error)}`;
 }
 
 function synthesizeWave(

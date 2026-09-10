@@ -11,7 +11,11 @@ import { normalizeNotification } from "./alerts/normalize";
 import { AlertPolicyResolver, EffectivePolicy } from "./alerts/policy";
 import { AlertDefinitionRecord, AlertRecord } from "./alerts/types";
 import { listConfiguredZones } from "./alerts/zones";
-import { AudioPlayer, CommandAudioPlayer } from "./audio/player";
+import {
+  AudioPlayer,
+  CommandAudioPlayer,
+  HookedAudioPlayer,
+} from "./audio/player";
 import { AudioScheduler } from "./audio/scheduler";
 import {
   ActionResult,
@@ -138,16 +142,29 @@ export class PersistentNotifierRuntime {
   }
 
   private createAudioPlayer(options: PluginConfig): AudioPlayer {
-    if (this.audioPlayerFactory) return this.audioPlayerFactory(options);
-    return new CommandAudioPlayer({
-      backend: options.audio?.backend ?? "auto",
-      outputDevice: options.audio?.outputDevice?.trim() || undefined,
-      masterVolume: options.audio?.masterVolume ?? 80,
-      timeoutSeconds: options.audio?.playbackTimeoutSeconds ?? 30,
-      assetDirectory: path.join(
-        this.app.getDataDirPath(),
-        "persistent-notifier-audio",
-      ),
+    const player = this.audioPlayerFactory
+      ? this.audioPlayerFactory(options)
+      : new CommandAudioPlayer({
+          backend: options.audio?.backend ?? "auto",
+          outputDevice: options.audio?.outputDevice?.trim() || undefined,
+          masterVolume: options.audio?.masterVolume ?? 80,
+          timeoutSeconds: options.audio?.playbackTimeoutSeconds ?? 30,
+          assetDirectory: path.join(
+            this.app.getDataDirPath(),
+            "persistent-notifier-audio",
+          ),
+        });
+    if (
+      !options.audio?.beforePlaybackCommand &&
+      !options.audio?.afterPlaybackCommand
+    )
+      return player;
+    return new HookedAudioPlayer(player, {
+      before: options.audio.beforePlaybackCommand,
+      after: options.audio.afterPlaybackCommand,
+      timeoutSeconds: options.audio.commandTimeoutSeconds ?? 10,
+      onCommandError: (_stage, message) =>
+        this.app.error(`[persistent-notifier] ${message}`),
     });
   }
 

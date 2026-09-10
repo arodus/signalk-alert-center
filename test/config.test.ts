@@ -81,6 +81,12 @@ describe("validateConfig", () => {
       "alarm",
       "emergency",
     ]);
+    expect(
+      audio.properties.beforePlaybackCommand.properties.executable.title,
+    ).toBe("Executable");
+    expect(
+      audio.properties.afterPlaybackCommand.properties.arguments.type,
+    ).toBe("array");
     expect(() =>
       validateConfig({
         audio: {
@@ -101,6 +107,30 @@ describe("validateConfig", () => {
         },
       }),
     ).toThrow("quiet hours");
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: {
+            executable: "/usr/bin/mpc",
+            arguments: ["pause"],
+          },
+          afterPlaybackCommand: {
+            executable: "/usr/bin/mpc",
+            arguments: ["play"],
+          },
+          commandTimeoutSeconds: 10,
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: {
+            executable: "bad\0command",
+          },
+        },
+      }),
+    ).toThrow("beforePlaybackCommand");
   });
 
   it("rejects invalid notifier credentials", () => {
