@@ -97,6 +97,21 @@ describe("validateConfig", () => {
         },
       }),
     ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: {},
+          afterPlaybackCommand: { arguments: [] },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: { arguments: ["pause"] },
+        },
+      }),
+    ).toThrow("must name an executable");
     expect(() => validateConfig({ audio: { masterVolume: 101 } })).toThrow(
       "audio.masterVolume",
     );

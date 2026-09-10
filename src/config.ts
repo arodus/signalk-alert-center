@@ -59,8 +59,8 @@ export interface PluginConfig {
     playbackTimeoutSeconds?: number;
     failureRetrySeconds?: number;
     maxAttempts?: number;
-    beforePlaybackCommand?: AudioCommand;
-    afterPlaybackCommand?: AudioCommand;
+    beforePlaybackCommand?: Partial<AudioCommand>;
+    afterPlaybackCommand?: Partial<AudioCommand>;
     commandTimeoutSeconds?: number;
     quietHours?: { enabled?: boolean; start?: string; end?: string };
     defaults?: Partial<AlertAudioPolicy> & {
@@ -295,18 +295,21 @@ function validateAudio(audio: PluginConfig["audio"]): void {
 }
 
 function validateAudioCommand(
-  command: AudioCommand | undefined,
+  command: Partial<AudioCommand> | undefined,
   name: string,
 ): void {
   if (!command) return;
-  requireString(
-    command.executable,
-    `audio.${name}.executable must name an executable`,
-  );
+  const executable = command.executable;
+  if (typeof executable !== "string" || executable.trim() === "") {
+    if ((command.arguments?.length ?? 0) === 0) return;
+    throw new Error(`audio.${name}.executable must name an executable`);
+  }
+  requireString(executable, `audio.${name}.executable must name an executable`);
   if (
-    command.executable.length > 512 ||
-    command.executable.includes("\0") ||
-    /[\r\n]/.test(command.executable)
+    executable !== executable.trim() ||
+    executable.length > 512 ||
+    executable.includes("\0") ||
+    /[\r\n]/.test(executable)
   )
     throw new Error(`audio.${name}.executable is invalid`);
   if (command.arguments !== undefined && !Array.isArray(command.arguments))

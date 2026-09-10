@@ -12,6 +12,7 @@ import { AlertPolicyResolver, EffectivePolicy } from "./alerts/policy";
 import { AlertDefinitionRecord, AlertRecord } from "./alerts/types";
 import { listConfiguredZones } from "./alerts/zones";
 import {
+  AudioCommand,
   AudioPlayer,
   CommandAudioPlayer,
   HookedAudioPlayer,
@@ -154,15 +155,13 @@ export class PersistentNotifierRuntime {
             "persistent-notifier-audio",
           ),
         });
-    if (
-      !options.audio?.beforePlaybackCommand &&
-      !options.audio?.afterPlaybackCommand
-    )
-      return player;
+    const before = configuredAudioCommand(options.audio?.beforePlaybackCommand);
+    const after = configuredAudioCommand(options.audio?.afterPlaybackCommand);
+    if (!before && !after) return player;
     return new HookedAudioPlayer(player, {
-      before: options.audio.beforePlaybackCommand,
-      after: options.audio.afterPlaybackCommand,
-      timeoutSeconds: options.audio.commandTimeoutSeconds ?? 10,
+      before,
+      after,
+      timeoutSeconds: options.audio?.commandTimeoutSeconds ?? 10,
       onCommandError: (_stage, message) =>
         this.app.error(`[persistent-notifier] ${message}`),
     });
@@ -1071,4 +1070,13 @@ export class PersistentNotifierRuntime {
     this.transports.clear();
     this.debug("Stopped");
   }
+}
+
+function configuredAudioCommand(
+  command: Partial<AudioCommand> | undefined,
+): AudioCommand | undefined {
+  return typeof command?.executable === "string" &&
+    command.executable.trim() !== ""
+    ? { executable: command.executable, arguments: command.arguments }
+    : undefined;
 }

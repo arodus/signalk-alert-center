@@ -417,7 +417,6 @@ export const pluginConfigSchema = {
               items: { type: "string", maxLength: 2048 },
             },
           },
-          required: ["executable"],
         },
         afterPlaybackCommand: {
           type: "object",
@@ -441,7 +440,6 @@ export const pluginConfigSchema = {
               items: { type: "string", maxLength: 2048 },
             },
           },
-          required: ["executable"],
         },
         commandTimeoutSeconds: {
           type: "integer",
