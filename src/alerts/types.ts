@@ -7,6 +7,26 @@ export const severities = [
 ] as const;
 export type Severity = (typeof severities)[number];
 
+export const audioSounds = ["chime", "warning", "alarm", "emergency"] as const;
+export type AudioSound = (typeof audioSounds)[number];
+export type AudioPlaybackMode = "once" | "repeat";
+
+export interface AudioStopPolicy {
+  clear: boolean;
+  acknowledge: boolean;
+  silence: boolean;
+  dismiss: boolean;
+}
+
+export interface AlertAudioPolicy {
+  enabled: boolean;
+  sound: AudioSound;
+  minimumSeverity: Severity;
+  mode: AudioPlaybackMode;
+  repeatIntervalSeconds: number;
+  stopOn: AudioStopPolicy;
+}
+
 export type AlertState = "active" | "cleared";
 export type ConnectivityMode =
   | { mode: "queue" }
@@ -78,7 +98,35 @@ export interface AlertPolicyRecord {
   activationDelaySeconds?: number;
   rearmAfterSeconds?: number;
   notifierIds: string[];
+  audio?: AlertAudioPolicy;
   updatedAt: Date;
+}
+
+export type AudioPlaybackState =
+  | "queued"
+  | "waiting_severity"
+  | "playing"
+  | "completed"
+  | "cancelled"
+  | "failed_retryable"
+  | "failed_terminal";
+
+export interface AudioPlaybackRecord {
+  id: string;
+  alertId: string;
+  state: AudioPlaybackState;
+  sound: AudioSound;
+  minimumSeverity: Severity;
+  mode: AudioPlaybackMode;
+  repeatIntervalSeconds: number;
+  stopOn: AudioStopPolicy;
+  attemptCount: number;
+  playCount: number;
+  nextPlayAt?: Date;
+  lastStartedAt?: Date;
+  lastFinishedAt?: Date;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
 }
 
 export type DeliveryState =

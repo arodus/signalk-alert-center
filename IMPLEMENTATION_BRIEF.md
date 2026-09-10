@@ -6,7 +6,8 @@
 > commit `bef795c`. The occurrence model, policy/history API, dashboard, zone
 > discovery, startup reconciliation, and Docker acceptance path have since been
 > implemented. The 2026-09-07 UI/configuration revision also replaced configured
-> rules with dashboard-owned per-alert policies and one unified Alerts table. See
+> rules with dashboard-owned per-alert policies and one unified Alerts table, and
+> issue #11 subsequently added durable server-side local sound playback. See
 > the README for current behavior and the remaining roadmap.
 
 Build a persistent onboard notification center, comparable in purpose to
@@ -70,15 +71,16 @@ static findings, not a live Signal K compatibility or runtime certification.
 | Input semantics | Normalization defaults unknown states (including `notice`) to `alert`; null becomes an active alert. Delta source timestamps are not passed into ingestion. | Verify supported Signal K clear/null and severity semantics, retain original state/time, and test compatible normalization. |
 | Zones and startup | `src/alerts/zones.ts` exists, but `src/plugin.ts` does not call it or pass zones to the catalog. Startup subscribes without reading existing notifications. | Wire zone discovery/current values and startup reconciliation without generating duplicate historical occurrences. |
 | Controls | Acknowledge/silence persist local timestamps before optional upstream calls; no confirmed asynchronous result is required. | Verified supported server API behavior, truthful control results, and action history. |
-| Player similarity | No local sound/TTS engine, playback queue, repeat/play-once policy, or timed playback-disable controls are present. | Decide whether to implement playback here or integrate with a separate player; document the chosen ownership and prevent duplicate audio. |
+| Player similarity | Server-side built-in sound playback now uses a durable queue with per-alert play-once/repeat and stop policies plus bounded pre/post command hooks. | Text-to-speech and timed global disable controls remain follow-up work. Avoid running a second player for the same paths. |
 
 ### Scope decisions still open
 
-The notification list, one-time retention, and full history are required. Local
-sound/TTS parity is a candidate requirement inferred from “similar”; whether this
-plugin owns playback or complements the reference player remains open. Slack,
-arbitrary pre/post shell commands, exact visual copying, and the reference's URL
-compatibility are not implied requirements. Confirm playback architecture before
+The notification list, one-time retention, full history, and local sound are owned
+here. Text-to-speech remains separate follow-up work. Running this plugin's local
+sound for the same paths as Signal K Notification Player would duplicate audio. Slack,
+shell command lines, exact visual copying, and the reference's URL compatibility
+are not implied requirements. Pre/post hooks are explicit executable-plus-argument
+configurations without shell parsing or alert interpolation. Confirm playback architecture before
 implementing it, without delaying the required persistence and history work.
 
 ### Acceptance scenarios for future implementation

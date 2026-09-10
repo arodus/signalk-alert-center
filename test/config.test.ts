@@ -71,6 +71,83 @@ describe("validateConfig", () => {
     );
   });
 
+  it("keeps local audio opt-in and exposes only bundled sounds", () => {
+    const audio = pluginConfigSchema.properties.audio;
+    expect(audio.properties.enabled.default).toBe(false);
+    expect(audio.properties.defaults.properties.enabled.default).toBe(false);
+    expect(audio.properties.defaults.properties.sound.enum).toEqual([
+      "chime",
+      "warning",
+      "alarm",
+      "emergency",
+    ]);
+    expect(
+      audio.properties.beforePlaybackCommand.properties.executable.title,
+    ).toBe("Executable");
+    expect(
+      audio.properties.afterPlaybackCommand.properties.arguments.type,
+    ).toBe("array");
+    expect(() =>
+      validateConfig({
+        audio: {
+          enabled: true,
+          backend: "aplay",
+          masterVolume: 80,
+          defaults: { sound: "alarm", repeatIntervalSeconds: 60 },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: {},
+          afterPlaybackCommand: { arguments: [] },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: { arguments: ["pause"] },
+        },
+      }),
+    ).toThrow("must name an executable");
+    expect(() => validateConfig({ audio: { masterVolume: 101 } })).toThrow(
+      "audio.masterVolume",
+    );
+    expect(() =>
+      validateConfig({
+        audio: {
+          quietHours: { enabled: true, start: "bad", end: "07:00" },
+        },
+      }),
+    ).toThrow("quiet hours");
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: {
+            executable: "/usr/bin/mpc",
+            arguments: ["pause"],
+          },
+          afterPlaybackCommand: {
+            executable: "/usr/bin/mpc",
+            arguments: ["play"],
+          },
+          commandTimeoutSeconds: 10,
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        audio: {
+          beforePlaybackCommand: {
+            executable: "bad\0command",
+          },
+        },
+      }),
+    ).toThrow("beforePlaybackCommand");
+  });
+
   it("rejects invalid notifier credentials", () => {
     expect(() =>
       validateConfig({

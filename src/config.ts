@@ -1,4 +1,11 @@
-import { ConnectivityMode, Severity, severities } from "./alerts/types";
+import {
+  AlertAudioPolicy,
+  audioSounds,
+  ConnectivityMode,
+  Severity,
+  severities,
+} from "./alerts/types";
+import type { AudioCommand } from "./audio/player";
 
 interface NotifierBaseConfig {
   /** Unique user-facing name used by alert policies. */
@@ -42,6 +49,24 @@ export interface PluginConfig {
     jitter?: number;
   };
   notifiers?: NotifierConfig[];
+  audio?: {
+    enabled?: boolean;
+    backend?: "auto" | "aplay" | "paplay" | "afplay";
+    outputDevice?: string;
+    masterVolume?: number;
+    testSoundOnSave?: boolean;
+    queueLimit?: number;
+    playbackTimeoutSeconds?: number;
+    failureRetrySeconds?: number;
+    maxAttempts?: number;
+    beforePlaybackCommand?: Partial<AudioCommand>;
+    afterPlaybackCommand?: Partial<AudioCommand>;
+    commandTimeoutSeconds?: number;
+    quietHours?: { enabled?: boolean; start?: string; end?: string };
+    defaults?: Partial<AlertAudioPolicy> & {
+      stopOn?: Partial<AlertAudioPolicy["stopOn"]>;
+    };
+  };
   defaults?: {
     enabled?: boolean;
     oneTime?: boolean;
@@ -126,6 +151,7 @@ export function validateConfig(config: PluginConfig): void {
   }
   validateRetry(config.retry);
   validateDelivery(config.delivery);
+  validateAudio(config.audio);
   if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
     throw new Error("discovery.zoneRefreshSeconds must be at least 1");
   if (
@@ -188,6 +214,120 @@ function validateDelivery(delivery: PluginConfig["delivery"]): void {
       delivery.concurrency > 32)
   )
     throw new Error("delivery.concurrency must be an integer from 1 to 32");
+}
+
+function validateAudio(audio: PluginConfig["audio"]): void {
+  if (!audio) return;
+  if (
+    audio.outputDevice !== undefined &&
+    (audio.outputDevice.length > 128 || audio.outputDevice.includes("\0"))
+  )
+    throw new Error("audio.outputDevice is invalid");
+  if (
+    audio.backend !== undefined &&
+    !["auto", "aplay", "paplay", "afplay"].includes(audio.backend)
+  )
+    throw new Error("audio.backend is not supported");
+  if (
+    audio.masterVolume !== undefined &&
+    (!Number.isFinite(audio.masterVolume) ||
+      audio.masterVolume < 0 ||
+      audio.masterVolume > 100)
+  )
+    throw new Error("audio.masterVolume must be between 0 and 100");
+  if (
+    audio.queueLimit !== undefined &&
+    (!Number.isInteger(audio.queueLimit) ||
+      audio.queueLimit < 1 ||
+      audio.queueLimit > 100)
+  )
+    throw new Error("audio.queueLimit must be an integer from 1 to 100");
+  for (const [name, value] of [
+    ["playbackTimeoutSeconds", audio.playbackTimeoutSeconds],
+    ["failureRetrySeconds", audio.failureRetrySeconds],
+    ["maxAttempts", audio.maxAttempts],
+    ["commandTimeoutSeconds", audio.commandTimeoutSeconds],
+  ] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1))
+      throw new Error(`audio.${name} must be a positive integer`);
+  }
+  if (audio.maxAttempts !== undefined && audio.maxAttempts > 20)
+    throw new Error("audio.maxAttempts must not exceed 20");
+  if (
+    audio.commandTimeoutSeconds !== undefined &&
+    audio.commandTimeoutSeconds > 300
+  )
+    throw new Error("audio.commandTimeoutSeconds must not exceed 300");
+  validateAudioCommand(audio.beforePlaybackCommand, "beforePlaybackCommand");
+  validateAudioCommand(audio.afterPlaybackCommand, "afterPlaybackCommand");
+  if (
+    audio.defaults?.repeatIntervalSeconds !== undefined &&
+    audio.defaults.repeatIntervalSeconds > 86_400
+  )
+    throw new Error(
+      "audio.defaults.repeatIntervalSeconds must not exceed 86400",
+    );
+  const defaults = audio.defaults;
+  if (defaults?.sound && !audioSounds.includes(defaults.sound))
+    throw new Error("audio.defaults.sound is not a bundled sound");
+  if (
+    defaults?.minimumSeverity &&
+    !severities.includes(defaults.minimumSeverity)
+  )
+    throw new Error("audio.defaults.minimumSeverity is invalid");
+  if (defaults?.mode && !["once", "repeat"].includes(defaults.mode))
+    throw new Error("audio.defaults.mode is invalid");
+  if (
+    defaults?.repeatIntervalSeconds !== undefined &&
+    (!Number.isInteger(defaults.repeatIntervalSeconds) ||
+      defaults.repeatIntervalSeconds < 1)
+  )
+    throw new Error(
+      "audio.defaults.repeatIntervalSeconds must be a positive integer",
+    );
+  const quiet = audio.quietHours;
+  if (quiet?.enabled) {
+    if (!isClockTime(quiet.start) || !isClockTime(quiet.end))
+      throw new Error("Enabled audio quiet hours require HH:MM start and end");
+    if (quiet.start === quiet.end)
+      throw new Error("Audio quiet-hours start and end must differ");
+  }
+}
+
+function validateAudioCommand(
+  command: Partial<AudioCommand> | undefined,
+  name: string,
+): void {
+  if (!command) return;
+  const executable = command.executable;
+  if (typeof executable !== "string" || executable.trim() === "") {
+    if ((command.arguments?.length ?? 0) === 0) return;
+    throw new Error(`audio.${name}.executable must name an executable`);
+  }
+  requireString(executable, `audio.${name}.executable must name an executable`);
+  if (
+    executable !== executable.trim() ||
+    executable.length > 512 ||
+    executable.includes("\0") ||
+    /[\r\n]/.test(executable)
+  )
+    throw new Error(`audio.${name}.executable is invalid`);
+  if (command.arguments !== undefined && !Array.isArray(command.arguments))
+    throw new Error(`audio.${name}.arguments must be a list`);
+  if ((command.arguments?.length ?? 0) > 32)
+    throw new Error(`audio.${name}.arguments must contain at most 32 items`);
+  for (const argument of command.arguments ?? []) {
+    if (
+      typeof argument !== "string" ||
+      argument.length > 2048 ||
+      argument.includes("\0")
+    )
+      throw new Error(`audio.${name}.arguments contains an invalid value`);
+  }
+}
+
+function isClockTime(value: unknown): value is string {
+  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function validatePolicy(

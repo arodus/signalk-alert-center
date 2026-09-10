@@ -314,6 +314,234 @@ export const pluginConfigSchema = {
         },
       },
     },
+    audio: {
+      type: "object",
+      title: "Local audio playback",
+      description:
+        "Plays built-in alert sounds on the Signal K server. Playback is server-side and does not require the Alert center to be open.",
+      properties: {
+        enabled: {
+          type: "boolean",
+          title: "Enable local audio playback",
+          description:
+            "Allows alerts with local sound enabled in their Alert center settings to use the server's audio output.",
+          default: false,
+        },
+        backend: {
+          type: "string",
+          title: "Audio player",
+          description:
+            "Auto uses afplay on macOS, or PulseAudio then ALSA on Linux. Choose a specific player when auto detection is unsuitable.",
+          enum: ["auto", "aplay", "paplay", "afplay"],
+          enumNames: [
+            "Automatic",
+            "ALSA (aplay)",
+            "PulseAudio (paplay)",
+            "macOS (afplay)",
+          ],
+          default: "auto",
+        },
+        outputDevice: {
+          type: "string",
+          maxLength: 128,
+          title: "Output device",
+          description:
+            "Optional ALSA or PulseAudio device name. Leave empty to use the server's default audio output.",
+        },
+        masterVolume: {
+          type: "integer",
+          minimum: 0,
+          maximum: 100,
+          title: "Master volume (percent)",
+          description:
+            "Applied while the plugin generates its built-in sounds. This does not change the operating system mixer.",
+          default: 80,
+        },
+        testSoundOnSave: {
+          type: "boolean",
+          title: "Play a test chime when saving",
+          description:
+            "One-shot test of the selected player and output. The checkbox turns itself off after the test and the result is written to the Signal K log.",
+          default: false,
+        },
+        queueLimit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100,
+          title: "Maximum sounds processed per queue run",
+          description:
+            "Bounds work on small servers. Sounds play one at a time in occurrence order.",
+          default: 25,
+        },
+        playbackTimeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          title: "Playback timeout (seconds)",
+          description: "Stops a stuck audio-player process after this time.",
+          default: 30,
+        },
+        failureRetrySeconds: {
+          type: "integer",
+          minimum: 1,
+          title: "Retry delay after playback failure (seconds)",
+          default: 30,
+        },
+        maxAttempts: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20,
+          title: "Maximum attempts per queued sound",
+          description:
+            "After this many failures the sound is marked failed in alert history. Remote notification delivery continues independently.",
+          default: 3,
+        },
+        beforePlaybackCommand: {
+          type: "object",
+          title: "Command before each sound",
+          description:
+            "Optional server command that must finish successfully before each sound starts. Use it to pause music, enable an amplifier, or change a mixer. Enter the executable and each argument separately; shell expressions are not evaluated.",
+          properties: {
+            executable: {
+              type: "string",
+              maxLength: 512,
+              title: "Executable",
+              description:
+                "Program available to the Signal K process, for example /usr/bin/mpc or /usr/local/bin/amplifier-on.",
+            },
+            arguments: {
+              type: "array",
+              maxItems: 32,
+              title: "Arguments",
+              description:
+                "Optional arguments in order. Add one list item per argument, for example pause. Do not include the executable here.",
+              items: { type: "string", maxLength: 2048 },
+            },
+          },
+        },
+        afterPlaybackCommand: {
+          type: "object",
+          title: "Command after each sound",
+          description:
+            "Optional cleanup command run after every attempted sound, including failed or cancelled playback. A failure is logged but does not replay a sound that already completed.",
+          properties: {
+            executable: {
+              type: "string",
+              maxLength: 512,
+              title: "Executable",
+              description:
+                "Program available to the Signal K process, for example /usr/bin/mpc or /usr/local/bin/amplifier-off.",
+            },
+            arguments: {
+              type: "array",
+              maxItems: 32,
+              title: "Arguments",
+              description:
+                "Optional arguments in order. Add one list item per argument, for example play. Do not include the executable here.",
+              items: { type: "string", maxLength: 2048 },
+            },
+          },
+        },
+        commandTimeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 300,
+          title: "Command timeout (seconds)",
+          description:
+            "Stops a before- or after-play command that does not finish within this time.",
+          default: 10,
+        },
+        quietHours: {
+          type: "object",
+          title: "Quiet hours",
+          description:
+            "Optional local-time window that postpones queued sounds. Alerts remain stored and remote notifications continue.",
+          properties: {
+            enabled: {
+              type: "boolean",
+              title: "Enable quiet hours",
+              default: false,
+            },
+            start: {
+              type: "string",
+              title: "Quiet hours start (HH:MM)",
+              default: "22:00",
+              pattern: "^([01]\\d|2[0-3]):[0-5]\\d$",
+            },
+            end: {
+              type: "string",
+              title: "Quiet hours end (HH:MM)",
+              default: "07:00",
+              pattern: "^([01]\\d|2[0-3]):[0-5]\\d$",
+            },
+          },
+        },
+        defaults: {
+          type: "object",
+          title: "Default local sound policy",
+          description:
+            "Newly discovered alerts inherit these values until their local sound settings are changed in the Alert center.",
+          properties: {
+            enabled: {
+              type: "boolean",
+              title: "Play local sound by default",
+              default: false,
+            },
+            sound: {
+              type: "string",
+              title: "Default sound",
+              enum: ["chime", "warning", "alarm", "emergency"],
+              enumNames: ["Chime", "Warning", "Alarm", "Emergency"],
+              default: "warning",
+            },
+            minimumSeverity: {
+              type: "string",
+              title: "Lowest severity that plays",
+              enum: [...severities],
+              default: "warn",
+            },
+            mode: {
+              type: "string",
+              title: "Playback behavior",
+              enum: ["once", "repeat"],
+              enumNames: ["Play once", "Repeat while active"],
+              default: "once",
+            },
+            repeatIntervalSeconds: {
+              type: "integer",
+              minimum: 1,
+              title: "Repeat interval (seconds)",
+              default: 60,
+            },
+            stopOn: {
+              type: "object",
+              title: "Stop playback when",
+              properties: {
+                clear: {
+                  type: "boolean",
+                  title: "Alert clears",
+                  default: true,
+                },
+                acknowledge: {
+                  type: "boolean",
+                  title: "Alert is acknowledged",
+                  default: true,
+                },
+                silence: {
+                  type: "boolean",
+                  title: "Alert is silenced",
+                  default: true,
+                },
+                dismiss: {
+                  type: "boolean",
+                  title: "Alert is dismissed",
+                  default: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     connectivity: {
       type: "object",
       title: "Connectivity manager (e.g. Starlink)",

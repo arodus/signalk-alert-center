@@ -49,7 +49,7 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(3);
+    expect(migrated.schemaVersion()).toBe(4);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -72,6 +72,12 @@ describe("occurrence storage", () => {
         "deliveries_service_success_idx",
       ]),
     );
+    expect(
+      migrated.db
+        .prepare("PRAGMA table_info(alert_policies)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toContain("audio_policy_json");
   });
 
   it("reports a schema health fault without throwing from status", () => {
@@ -81,7 +87,7 @@ describe("occurrence storage", () => {
     expect(db.operationalStatus()).toMatchObject({
       healthy: false,
       schemaVersion: 0,
-      expectedSchemaVersion: 3,
+      expectedSchemaVersion: 4,
     });
   });
 
@@ -129,6 +135,19 @@ describe("occurrence storage", () => {
     const db = database();
     const occurrence = db.ingest(active(), ["ntfy"])!;
     db.setWakeDue(occurrence.id, new Date("2026-01-01T00:10:00Z"));
+    db.ensureAudioPlayback(occurrence.id, {
+      enabled: true,
+      sound: "warning",
+      minimumSeverity: "warn",
+      mode: "once",
+      repeatIntervalSeconds: 60,
+      stopOn: {
+        clear: true,
+        acknowledge: true,
+        silence: true,
+        dismiss: true,
+      },
+    });
     db.setPolicy(occurrence.definitionId, {
       enabled: true,
       oneTime: false,
@@ -140,11 +159,12 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(3);
+    expect(db.schemaVersion()).toBe(4);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
     expect(db.listWakeRequests()).toEqual([]);
+    expect(db.pendingAudioPlaybackCount()).toBe(0);
     expect(db.ingest(active(), [])).toMatchObject({ occurrenceNumber: 1 });
   });
 
@@ -506,6 +526,33 @@ describe("occurrence storage", () => {
       [],
       clear,
     );
+    const pendingAudio = db.ingest(
+      active({ sourceKey: "pending-audio" }),
+      [],
+      old,
+    )!;
+    db.ensureAudioPlayback(pendingAudio.id, {
+      enabled: true,
+      sound: "warning",
+      minimumSeverity: "warn",
+      mode: "once",
+      repeatIntervalSeconds: 60,
+      stopOn: {
+        clear: false,
+        acknowledge: true,
+        silence: true,
+        dismiss: true,
+      },
+    });
+    db.ingest(
+      active({
+        sourceKey: "pending-audio",
+        state: "cleared",
+        severity: "normal",
+      }),
+      [],
+      clear,
+    );
 
     expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(1);
     expect(db.pruneOccurrences(cutoff, 10)).toEqual([removable.id]);
@@ -514,8 +561,8 @@ describe("occurrence storage", () => {
         .listOccurrences()
         .map((item) => item.id)
         .sort(),
-    ).toEqual([activeOccurrence.id, pending.id].sort());
-    expect(db.listDefinitions()).toHaveLength(3);
+    ).toEqual([activeOccurrence.id, pending.id, pendingAudio.id].sort());
+    expect(db.listDefinitions()).toHaveLength(4);
     expect(db.listDeliveries()).toHaveLength(1);
     expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(0);
   });

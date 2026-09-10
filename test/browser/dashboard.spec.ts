@@ -27,6 +27,9 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await expect(page.locator("#detail-drawer")).toHaveClass(/is-open/);
   await page.getByRole("button", { name: "Alert settings" }).click();
   await expect(page.locator("#policy-dialog")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Local sound" })).toBeVisible();
+  await page.locator("#audio-mode").selectOption("repeat");
+  await expect(page.locator("#audio-repeat-field")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await page.locator("#drawer-close").click();
 
@@ -74,6 +77,9 @@ test("saves a notification service after changing its type", async ({
   );
 
   await page.goto("/admin/#/apps/configuration/signalk-persistent-notifier");
+  await expect(
+    page.getByText("Enable local audio playback", { exact: true }),
+  ).toBeVisible();
   const services = page.locator("#root_configuration_notifiers");
   await services.getByRole("button").last().click();
   await page.locator("#root_configuration_notifiers_0_name").fill("Bridge");

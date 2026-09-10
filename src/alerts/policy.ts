@@ -1,6 +1,7 @@
 import { PluginConfig } from "../config";
 import { AlertDatabase } from "../storage/db";
 import {
+  AlertAudioPolicy,
   AlertDefinitionRecord,
   AlertPolicyRecord,
   ConnectivityMode,
@@ -16,6 +17,7 @@ export interface EffectivePolicy {
   rearmAfterSeconds?: number;
   connectivity: ConnectivityMode;
   notifierIds: string[];
+  audio: AlertAudioPolicy;
   provenance: "override" | "default";
 }
 
@@ -29,6 +31,7 @@ export class AlertPolicyResolver {
   ) {}
 
   private defaults(): EffectivePolicy {
+    const audio = this.config.audio?.defaults;
     return {
       enabled: this.config.defaults?.enabled ?? true,
       oneTime: this.config.defaults?.oneTime ?? false,
@@ -37,6 +40,19 @@ export class AlertPolicyResolver {
       rearmAfterSeconds: this.config.defaults?.rearmAfterSeconds,
       connectivity: this.config.defaults?.connectivity ?? { mode: "queue" },
       notifierIds: [...(this.config.defaults?.notifiers ?? [])],
+      audio: {
+        enabled: audio?.enabled ?? false,
+        sound: audio?.sound ?? "warning",
+        minimumSeverity: audio?.minimumSeverity ?? "warn",
+        mode: audio?.mode ?? "once",
+        repeatIntervalSeconds: audio?.repeatIntervalSeconds ?? 60,
+        stopOn: {
+          clear: audio?.stopOn?.clear ?? true,
+          acknowledge: audio?.stopOn?.acknowledge ?? true,
+          silence: audio?.stopOn?.silence ?? true,
+          dismiss: audio?.stopOn?.dismiss ?? true,
+        },
+      },
       provenance: "default",
     };
   }
@@ -56,6 +72,7 @@ export class AlertPolicyResolver {
       connectivity: stored.connectivity ?? base.connectivity,
       // A stored empty list intentionally disables remote delivery.
       notifierIds: [...stored.notifierIds],
+      audio: stored.audio ?? base.audio,
       provenance: "override",
     };
   }
