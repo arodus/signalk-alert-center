@@ -1,4 +1,10 @@
-import { ConnectivityMode, Severity, severities } from "./alerts/types";
+import {
+  AlertAudioPolicy,
+  audioSounds,
+  ConnectivityMode,
+  Severity,
+  severities,
+} from "./alerts/types";
 
 interface NotifierBaseConfig {
   /** Unique user-facing name used by alert policies. */
@@ -42,6 +48,21 @@ export interface PluginConfig {
     jitter?: number;
   };
   notifiers?: NotifierConfig[];
+  audio?: {
+    enabled?: boolean;
+    backend?: "auto" | "aplay" | "paplay" | "afplay";
+    outputDevice?: string;
+    masterVolume?: number;
+    testSoundOnSave?: boolean;
+    queueLimit?: number;
+    playbackTimeoutSeconds?: number;
+    failureRetrySeconds?: number;
+    maxAttempts?: number;
+    quietHours?: { enabled?: boolean; start?: string; end?: string };
+    defaults?: Partial<AlertAudioPolicy> & {
+      stopOn?: Partial<AlertAudioPolicy["stopOn"]>;
+    };
+  };
   defaults?: {
     enabled?: boolean;
     oneTime?: boolean;
@@ -126,6 +147,7 @@ export function validateConfig(config: PluginConfig): void {
   }
   validateRetry(config.retry);
   validateDelivery(config.delivery);
+  validateAudio(config.audio);
   if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
     throw new Error("discovery.zoneRefreshSeconds must be at least 1");
   if (
@@ -188,6 +210,80 @@ function validateDelivery(delivery: PluginConfig["delivery"]): void {
       delivery.concurrency > 32)
   )
     throw new Error("delivery.concurrency must be an integer from 1 to 32");
+}
+
+function validateAudio(audio: PluginConfig["audio"]): void {
+  if (!audio) return;
+  if (
+    audio.outputDevice !== undefined &&
+    (audio.outputDevice.length > 128 || audio.outputDevice.includes("\0"))
+  )
+    throw new Error("audio.outputDevice is invalid");
+  if (
+    audio.backend !== undefined &&
+    !["auto", "aplay", "paplay", "afplay"].includes(audio.backend)
+  )
+    throw new Error("audio.backend is not supported");
+  if (
+    audio.masterVolume !== undefined &&
+    (!Number.isFinite(audio.masterVolume) ||
+      audio.masterVolume < 0 ||
+      audio.masterVolume > 100)
+  )
+    throw new Error("audio.masterVolume must be between 0 and 100");
+  if (
+    audio.queueLimit !== undefined &&
+    (!Number.isInteger(audio.queueLimit) ||
+      audio.queueLimit < 1 ||
+      audio.queueLimit > 100)
+  )
+    throw new Error("audio.queueLimit must be an integer from 1 to 100");
+  for (const [name, value] of [
+    ["playbackTimeoutSeconds", audio.playbackTimeoutSeconds],
+    ["failureRetrySeconds", audio.failureRetrySeconds],
+    ["maxAttempts", audio.maxAttempts],
+  ] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value < 1))
+      throw new Error(`audio.${name} must be a positive integer`);
+  }
+  if (audio.maxAttempts !== undefined && audio.maxAttempts > 20)
+    throw new Error("audio.maxAttempts must not exceed 20");
+  if (
+    audio.defaults?.repeatIntervalSeconds !== undefined &&
+    audio.defaults.repeatIntervalSeconds > 86_400
+  )
+    throw new Error(
+      "audio.defaults.repeatIntervalSeconds must not exceed 86400",
+    );
+  const defaults = audio.defaults;
+  if (defaults?.sound && !audioSounds.includes(defaults.sound))
+    throw new Error("audio.defaults.sound is not a bundled sound");
+  if (
+    defaults?.minimumSeverity &&
+    !severities.includes(defaults.minimumSeverity)
+  )
+    throw new Error("audio.defaults.minimumSeverity is invalid");
+  if (defaults?.mode && !["once", "repeat"].includes(defaults.mode))
+    throw new Error("audio.defaults.mode is invalid");
+  if (
+    defaults?.repeatIntervalSeconds !== undefined &&
+    (!Number.isInteger(defaults.repeatIntervalSeconds) ||
+      defaults.repeatIntervalSeconds < 1)
+  )
+    throw new Error(
+      "audio.defaults.repeatIntervalSeconds must be a positive integer",
+    );
+  const quiet = audio.quietHours;
+  if (quiet?.enabled) {
+    if (!isClockTime(quiet.start) || !isClockTime(quiet.end))
+      throw new Error("Enabled audio quiet hours require HH:MM start and end");
+    if (quiet.start === quiet.end)
+      throw new Error("Audio quiet-hours start and end must differ");
+  }
+}
+
+function isClockTime(value: unknown): value is string {
+  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function validatePolicy(

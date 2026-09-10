@@ -71,6 +71,38 @@ describe("validateConfig", () => {
     );
   });
 
+  it("keeps local audio opt-in and exposes only bundled sounds", () => {
+    const audio = pluginConfigSchema.properties.audio;
+    expect(audio.properties.enabled.default).toBe(false);
+    expect(audio.properties.defaults.properties.enabled.default).toBe(false);
+    expect(audio.properties.defaults.properties.sound.enum).toEqual([
+      "chime",
+      "warning",
+      "alarm",
+      "emergency",
+    ]);
+    expect(() =>
+      validateConfig({
+        audio: {
+          enabled: true,
+          backend: "aplay",
+          masterVolume: 80,
+          defaults: { sound: "alarm", repeatIntervalSeconds: 60 },
+        },
+      }),
+    ).not.toThrow();
+    expect(() => validateConfig({ audio: { masterVolume: 101 } })).toThrow(
+      "audio.masterVolume",
+    );
+    expect(() =>
+      validateConfig({
+        audio: {
+          quietHours: { enabled: true, start: "bad", end: "07:00" },
+        },
+      }),
+    ).toThrow("quiet hours");
+  });
+
   it("rejects invalid notifier credentials", () => {
     expect(() =>
       validateConfig({

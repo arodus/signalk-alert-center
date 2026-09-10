@@ -1,3 +1,4 @@
+import { AlertAudioPolicy, audioSounds, severities } from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
 
 export interface Page<T> {
@@ -35,6 +36,7 @@ export interface AlertPolicyPatch {
   notifierIds?: string[];
   activationDelaySeconds?: number;
   minimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  audio?: AlertAudioPolicy;
   connectivity?:
     { mode: "queue" | "wake" } | { mode: "wake_after"; delaySeconds: number };
 }
@@ -275,6 +277,7 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
     "activationDelaySeconds",
     "minimumSeverity",
     "connectivity",
+    "audio",
   ]);
   const extra = Object.keys(value).filter((key) => !allowed.has(key));
   if (extra.length)
@@ -357,6 +360,7 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       };
     else throw new ApiError(400, "INVALID_BODY", "connectivity is invalid");
   }
+  if (value.audio !== undefined) patch.audio = parseAudioPolicy(value.audio);
   if (!Object.keys(patch).length)
     throw new ApiError(
       400,
@@ -364,6 +368,69 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       "At least one policy field is required",
     );
   return patch;
+}
+
+function parseAudioPolicy(value: unknown): AlertAudioPolicy {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new ApiError(400, "INVALID_BODY", "audio must be an object");
+  const audio = value as Record<string, unknown>;
+  const allowed = new Set([
+    "enabled",
+    "sound",
+    "minimumSeverity",
+    "mode",
+    "repeatIntervalSeconds",
+    "stopOn",
+  ]);
+  if (Object.keys(audio).some((key) => !allowed.has(key)))
+    throw new ApiError(400, "INVALID_BODY", "audio has unknown fields");
+  if (typeof audio.enabled !== "boolean")
+    throw new ApiError(400, "INVALID_BODY", "audio.enabled must be boolean");
+  if (!audioSounds.includes(audio.sound as AlertAudioPolicy["sound"]))
+    throw new ApiError(400, "INVALID_BODY", "audio.sound is invalid");
+  if (
+    !severities.includes(
+      audio.minimumSeverity as AlertAudioPolicy["minimumSeverity"],
+    )
+  )
+    throw new ApiError(400, "INVALID_BODY", "audio.minimumSeverity is invalid");
+  if (audio.mode !== "once" && audio.mode !== "repeat")
+    throw new ApiError(400, "INVALID_BODY", "audio.mode is invalid");
+  if (
+    !Number.isInteger(audio.repeatIntervalSeconds) ||
+    Number(audio.repeatIntervalSeconds) < 1 ||
+    Number(audio.repeatIntervalSeconds) > 86_400
+  )
+    throw new ApiError(
+      400,
+      "INVALID_BODY",
+      "audio.repeatIntervalSeconds must be an integer from 1 to 86400",
+    );
+  if (!audio.stopOn || typeof audio.stopOn !== "object")
+    throw new ApiError(400, "INVALID_BODY", "audio.stopOn is invalid");
+  const stopOn = audio.stopOn as Record<string, unknown>;
+  const triggers = ["clear", "acknowledge", "silence", "dismiss"] as const;
+  if (
+    Object.keys(stopOn).some(
+      (key) => !triggers.includes(key as (typeof triggers)[number]),
+    ) ||
+    triggers.some((trigger) => typeof stopOn[trigger] !== "boolean")
+  )
+    throw new ApiError(400, "INVALID_BODY", "audio.stopOn is invalid");
+  return {
+    enabled: audio.enabled,
+    sound: audio.sound as AlertAudioPolicy["sound"],
+    minimumSeverity:
+      audio.minimumSeverity as AlertAudioPolicy["minimumSeverity"],
+    mode: audio.mode,
+    repeatIntervalSeconds: Number(audio.repeatIntervalSeconds),
+    stopOn: {
+      clear: Boolean(stopOn.clear),
+      acknowledge: Boolean(stopOn.acknowledge),
+      silence: Boolean(stopOn.silence),
+      dismiss: Boolean(stopOn.dismiss),
+    },
+  };
 }
 
 export function registerAlertCenterRoutes(

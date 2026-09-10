@@ -200,12 +200,58 @@ describe("alert-center routes", () => {
           activationDelaySeconds: 30,
           minimumSeverity: "alarm",
           connectivity: { mode: "wake_after", delaySeconds: 60 },
+          audio: {
+            enabled: true,
+            sound: "alarm",
+            minimumSeverity: "warn",
+            mode: "repeat",
+            repeatIntervalSeconds: 45,
+            stopOn: {
+              clear: true,
+              acknowledge: true,
+              silence: true,
+              dismiss: true,
+            },
+          },
         },
       },
     );
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
-      policy: { notifierIds: ["ntfy-main"], activationDelaySeconds: 30 },
+      policy: {
+        notifierIds: ["ntfy-main"],
+        activationDelaySeconds: 30,
+        audio: { sound: "alarm", mode: "repeat" },
+      },
+    });
+  });
+
+  it("rejects arbitrary local sound names", async () => {
+    const response = await fixture().invoke(
+      "PATCH",
+      "/definitions/:id/policy",
+      {
+        params: { id: "bilge" },
+        body: {
+          audio: {
+            enabled: true,
+            sound: "../../custom.wav",
+            minimumSeverity: "warn",
+            mode: "once",
+            repeatIntervalSeconds: 60,
+            stopOn: {
+              clear: true,
+              acknowledge: true,
+              silence: true,
+              dismiss: true,
+            },
+          },
+        },
+      },
+    );
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      error: { code: "INVALID_BODY" },
     });
   });
 

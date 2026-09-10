@@ -10,7 +10,7 @@ export = function persistentNotifier(app: ServerAPI): Plugin {
   return {
     id: "signalk-persistent-notifier",
     name: "Persistent notifier",
-    description: "Offline-first durable Signal K alert delivery",
+    description: "Offline-first durable Signal K alert audio and delivery",
     schema: pluginConfigSchema,
     uiSchema: pluginUiSchema,
     start(options: object, restart: (newConfiguration: object) => void) {
@@ -27,6 +27,17 @@ export = function persistentNotifier(app: ServerAPI): Plugin {
         runtime.resetDatabase(config);
         app.debug("[persistent-notifier] Alert database reset complete");
         setImmediate(() => restart(nextConfiguration));
+        return;
+      }
+      if (config.audio?.testSoundOnSave) {
+        const nextConfiguration: PluginConfig = {
+          ...config,
+          audio: { ...config.audio, testSoundOnSave: false },
+        };
+        app.debug("[persistent-notifier] Testing local audio output");
+        void runtime
+          .testAudio(config)
+          .finally(() => setImmediate(() => restart(nextConfiguration)));
         return;
       }
       runtime.start(config);

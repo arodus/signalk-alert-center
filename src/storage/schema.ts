@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 3;
+export const currentSchemaVersion = 4;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -27,6 +27,44 @@ CREATE INDEX deliveries_service_success_idx
   ON deliveries(transport_instance_id, delivered_at DESC);
 CREATE INDEX delivery_attempts_finished_idx
   ON delivery_attempts(finished_at DESC, id DESC);
+`,
+  },
+  {
+    version: 4,
+    sql: `
+ALTER TABLE alert_policies ADD COLUMN audio_policy_json TEXT;
+CREATE TABLE audio_playbacks (
+  id TEXT PRIMARY KEY,
+  alert_id TEXT NOT NULL UNIQUE REFERENCES alert_occurrences(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  sound TEXT NOT NULL,
+  minimum_severity TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  repeat_interval_seconds INTEGER NOT NULL,
+  stop_on_json TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  play_count INTEGER NOT NULL DEFAULT 0,
+  next_play_at TEXT,
+  last_started_at TEXT,
+  last_finished_at TEXT,
+  last_error_code TEXT,
+  last_error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX audio_playbacks_due_idx
+  ON audio_playbacks(state, next_play_at, created_at);
+CREATE TABLE audio_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  playback_id TEXT NOT NULL REFERENCES audio_playbacks(id) ON DELETE CASCADE,
+  attempt_number INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  outcome TEXT NOT NULL,
+  error_code TEXT,
+  error_message TEXT,
+  UNIQUE(playback_id, attempt_number)
+);
 `,
   },
 ];
