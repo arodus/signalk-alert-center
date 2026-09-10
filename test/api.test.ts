@@ -14,7 +14,9 @@ class FakeResponse {
   body: unknown;
   headers = new Map<string, string>();
   writes: string[] = [];
+  backpressured = false;
   private closeListeners: Array<() => void> = [];
+  private drainListeners: Array<() => void> = [];
   status(code: number) {
     this.statusCode = code;
     return this;
@@ -28,11 +30,24 @@ class FakeResponse {
   flushHeaders() {}
   write(value: string) {
     this.writes.push(value);
-    return true;
+    return !this.backpressured;
   }
   end() {}
   on(event: "close", listener: () => void) {
     if (event === "close") this.closeListeners.push(listener);
+  }
+  once(event: "drain", listener: () => void) {
+    if (event === "drain") this.drainListeners.push(listener);
+  }
+  off(event: "drain", listener: () => void) {
+    if (event === "drain")
+      this.drainListeners = this.drainListeners.filter(
+        (candidate) => candidate !== listener,
+      );
+  }
+  drain() {
+    const listeners = this.drainListeners.splice(0);
+    for (const listener of listeners) listener();
   }
   close() {
     for (const listener of this.closeListeners) listener();
@@ -121,9 +136,9 @@ function fixture() {
     access,
     invoke,
     queries,
-    emitChange: () =>
+    emitChange: (revision = 1) =>
       changeListener?.({
-        revision: 1,
+        revision,
         reason: "alerts",
         occurredAt: "2026-09-09T00:01:00.000Z",
       }),
@@ -151,6 +166,24 @@ describe("alert-center routes", () => {
 
     response.close();
     expect(current.unsubscribeCount()).toBe(1);
+  });
+
+  it("coalesces stream changes while an SSE client is backpressured", async () => {
+    const current = fixture();
+    const response = await current.invoke("GET", "/events");
+    const initialWrites = response.writes.length;
+    response.backpressured = true;
+
+    current.emitChange(1);
+    current.emitChange(2);
+    current.emitChange(3);
+    expect(response.writes).toHaveLength(initialWrites + 1);
+
+    response.backpressured = false;
+    response.drain();
+    expect(response.writes).toHaveLength(initialWrites + 2);
+    expect(response.writes.at(-1)).toContain('"revision":3');
+    response.close();
   });
 
   it("parses bounded occurrence filters", async () => {

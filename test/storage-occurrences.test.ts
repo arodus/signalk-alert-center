@@ -566,4 +566,23 @@ describe("occurrence storage", () => {
     expect(db.listDeliveries()).toHaveLength(1);
     expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(0);
   });
+
+  it("bounds dashboard delivery reads and prioritizes unfinished work", () => {
+    const db = database();
+    const completed = db.ingest(active({ sourceKey: "completed-delivery" }), [
+      "ntfy",
+    ])!;
+    const completedDelivery = db.listDeliveries()[0];
+    expect(db.claimDelivery(completedDelivery.id)).toBe(true);
+    db.recordDeliverySuccess(completedDelivery.id);
+    const pending = db.ingest(active({ sourceKey: "pending-delivery" }), [
+      "ntfy",
+    ])!;
+
+    expect(db.listRecentDeliveries(1)).toMatchObject([
+      { alertId: pending.id, state: "pending" },
+    ]);
+    expect(db.listDeliveries()).toHaveLength(2);
+    expect(completed.id).not.toBe(pending.id);
+  });
 });

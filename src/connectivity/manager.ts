@@ -19,6 +19,7 @@ export interface ConnectivitySafetyState {
 }
 type ConnectivitySafetyCheck = () =>
   ConnectivitySafetyState | Promise<ConnectivitySafetyState>;
+type InternetReadyCheck = (signal?: AbortSignal) => Promise<boolean>;
 
 const safeToRelease: ConnectivitySafetyCheck = () => ({
   pendingDelivery: false,
@@ -41,11 +42,14 @@ export class ConnectivityManager {
   private cooldownTimer?: ReturnType<typeof setTimeout>;
   private wakeTimer?: ReturnType<typeof setTimeout>;
   private wakeDueAt?: Date;
+  private activeWake?: Promise<void>;
+  private stopped = false;
+  private stopController = new AbortController();
 
   constructor(
     private readonly adapter: SwitchAdapter,
     private readonly cooldownMs = 300_000,
-    private readonly internetReady: () => Promise<boolean> = async () => true,
+    private readonly internetReady: InternetReadyCheck = async () => true,
     private readonly bootTimeoutMs = 240_000,
     private readonly checkIntervalMs = 5_000,
     private readonly safetyCheck: ConnectivitySafetyCheck = safeToRelease,
@@ -63,6 +67,18 @@ export class ConnectivityManager {
   }
 
   async requestWake(): Promise<void> {
+    if (this.stopped) return;
+    if (this.activeWake) return this.activeWake;
+    const running = this.performWake();
+    this.activeWake = running;
+    try {
+      await running;
+    } finally {
+      if (this.activeWake === running) this.activeWake = undefined;
+    }
+  }
+
+  private async performWake(): Promise<void> {
     this.lastError = undefined;
     if (
       this.switchOn === true &&
@@ -122,10 +138,10 @@ export class ConnectivityManager {
   private async waitForInternet(): Promise<void> {
     this.transition("WAITING_FOR_INTERNET");
     const deadline = Date.now() + this.bootTimeoutMs;
-    while (Date.now() <= deadline) {
+    while (!this.stopped && Date.now() <= deadline) {
       let ready = false;
       try {
-        ready = await this.internetReady();
+        ready = await this.internetReady(this.stopController.signal);
         this.lastProbeError = undefined;
       } catch (error) {
         this.lastProbeError =
@@ -137,9 +153,11 @@ export class ConnectivityManager {
         this.transition("ONLINE");
         return;
       }
+      if (this.stopped) return;
       if (Date.now() + this.checkIntervalMs > deadline) break;
-      await new Promise((resolve) => setTimeout(resolve, this.checkIntervalMs));
+      await abortableDelay(this.checkIntervalMs, this.stopController.signal);
     }
+    if (this.stopped) return;
     this.transition("FAULT");
     this.lastError = this.lastProbeError
       ? `Internet readiness probe failed: ${this.lastProbeError}`
@@ -192,7 +210,25 @@ export class ConnectivityManager {
   }
 
   stop(): void {
+    this.stopped = true;
+    this.stopController.abort();
     if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
     this.cancelScheduledWake();
   }
+}
+
+function abortableDelay(
+  milliseconds: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(done, milliseconds);
+    function done() {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
 }

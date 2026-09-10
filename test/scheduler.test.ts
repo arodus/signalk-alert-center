@@ -354,16 +354,8 @@ describe("DeliveryScheduler", () => {
     database.close();
   });
 
-  it("waits for every in-flight send before stop returns", async () => {
+  it("aborts every in-flight send before stop returns", async () => {
     const database = new AlertDatabase();
-    let resolveFirst!: () => void;
-    const firstFinished = new Promise<void>((resolve) => {
-      resolveFirst = resolve;
-    });
-    let resolveSecond!: () => void;
-    const secondFinished = new Promise<void>((resolve) => {
-      resolveSecond = resolve;
-    });
     const lifecycle = new AlertLifecycle(database, ["first", "second"]);
     lifecycle.ingest({
       sourceKey: "notifications.test",
@@ -378,45 +370,74 @@ describe("DeliveryScheduler", () => {
           "first",
           {
             type: "test",
-            async send() {
-              await firstFinished;
-              return { kind: "success" as const };
-            },
+            send: () => new Promise(() => undefined),
           },
         ],
         [
           "second",
           {
             type: "test",
-            async send() {
-              await secondFinished;
-              return { kind: "success" as const };
-            },
+            send: () => new Promise(() => undefined),
           },
         ],
       ]),
     );
 
     const sending = scheduler.runOnce();
-    let stopped = false;
-    const stopping = scheduler.stop().then(() => {
-      stopped = true;
+    await vi.waitFor(() => {
+      expect(scheduler.status().activeRequests).toBe(2);
     });
-    await Promise.resolve();
-    expect(stopped).toBe(false);
-
-    resolveFirst();
-    await Promise.resolve();
-    expect(stopped).toBe(false);
-
-    resolveSecond();
-    await Promise.all([sending, stopping]);
-    expect(stopped).toBe(true);
+    await Promise.all([sending, scheduler.stop()]);
+    expect(scheduler.status().activeRequests).toBe(0);
     expect(
       database
         .listDeliveries()
-        .every((delivery) => delivery.state === "delivered"),
+        .every(
+          (delivery) =>
+            delivery.state === "failed_retryable" &&
+            delivery.lastErrorCode === "DELIVERY_ABORTED",
+        ),
     ).toBe(true);
     database.close();
+  });
+
+  it("times out a notifier that never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const database = new AlertDatabase();
+      new AlertLifecycle(database, ["stalled"]).ingest({
+        sourceKey: "notifications.timeout",
+        path: "notifications.timeout",
+        severity: "alarm",
+        state: "active",
+      });
+      const scheduler = new DeliveryScheduler(
+        database,
+        new Map([
+          [
+            "stalled",
+            {
+              type: "test",
+              send: () => new Promise(() => undefined),
+            },
+          ],
+        ]),
+        undefined,
+        { requestTimeoutSeconds: 1 },
+      );
+
+      const running = scheduler.runOnce(new Date("2026-01-01T00:00:00Z"));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await running;
+
+      expect(database.listDeliveries()[0]).toMatchObject({
+        state: "failed_retryable",
+        lastErrorCode: "DELIVERY_TIMEOUT",
+      });
+      database.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -76,6 +76,32 @@ export const pluginConfigSchema = {
         },
       },
     },
+    ingestion: {
+      type: "object",
+      title: "Signal K notification ingestion",
+      description:
+        "Bounds work retained when notifications arrive faster than they can be persisted. Equivalent pending updates are safely combined; alert state, severity, and message transitions keep their order.",
+      properties: {
+        queueLimit: {
+          type: "integer",
+          minimum: 10,
+          maximum: 100000,
+          title: "Maximum queued notification updates",
+          description:
+            "Hard memory-safety limit for pending Signal K notification updates. Reaching it produces an error and diagnostic counter instead of consuming memory without a bound.",
+          default: 2000,
+        },
+        batchSize: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1000,
+          title: "Notification updates processed per turn",
+          description:
+            "Limits synchronous database work before the plugin yields control back to Signal K.",
+          default: 100,
+        },
+      },
+    },
     delivery: {
       type: "object",
       title: "Notification delivery",
@@ -99,6 +125,15 @@ export const pluginConfigSchema = {
           description:
             "Maximum number of notification services contacted at once. Four is a safe default for small Signal K servers.",
           default: 4,
+        },
+        requestTimeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 300,
+          title: "Notification service timeout (seconds)",
+          description:
+            "Cancels a notification service request that has not completed within this time so stalled networks cannot retain work indefinitely.",
+          default: 15,
         },
       },
     },

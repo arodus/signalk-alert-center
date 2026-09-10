@@ -36,9 +36,12 @@ export function listConfiguredZones(app: {
   const root =
     app.getPath?.(app.selfContext ?? "vessels.self") ?? app.getSelfPath?.("");
   if (!root || typeof root !== "object") return results;
+  const visited = new WeakSet<object>();
 
   const walk = (node: unknown, path: string): void => {
     if (!node || typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
     const record = node as Record<string, unknown>;
     const meta = record.meta as Record<string, unknown> | undefined;
     if (path && meta && Array.isArray(meta.zones) && meta.zones.length > 0) {

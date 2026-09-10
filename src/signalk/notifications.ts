@@ -75,28 +75,38 @@ export function extractNotificationEntries(
 export function snapshotNotificationEntries(
   notificationsRoot: unknown,
 ): SignalKNotificationInput[] {
-  const entries: SignalKNotificationInput[] = [];
+  return [...iterateSnapshotNotificationEntries(notificationsRoot)];
+}
 
-  const walk = (candidate: unknown, suffix: string): void => {
+/** Iterate the current model without retaining a second copy of every value. */
+export function* iterateSnapshotNotificationEntries(
+  notificationsRoot: unknown,
+): Generator<SignalKNotificationInput> {
+  const visited = new WeakSet<object>();
+  function* walk(
+    candidate: unknown,
+    suffix: string,
+  ): Generator<SignalKNotificationInput> {
     const node = asRecord(candidate);
     if (!node) return;
+    if (visited.has(node)) return;
+    visited.add(node);
 
     if (Object.prototype.hasOwnProperty.call(node, "value") && suffix) {
-      entries.push({
+      yield {
         path: `notifications.${suffix}`,
         value: node.value,
         source: typeof node.$source === "string" ? node.$source : undefined,
         sourceTimestamp: parseTimestamp(node.timestamp),
-      });
+      };
       return;
     }
 
     for (const [key, value] of Object.entries(node)) {
       if (key === "meta" || key === "values" || key.startsWith("$")) continue;
-      walk(value, suffix ? `${suffix}.${key}` : key);
+      yield* walk(value, suffix ? `${suffix}.${key}` : key);
     }
-  };
+  }
 
-  walk(notificationsRoot, "");
-  return entries;
+  yield* walk(notificationsRoot, "");
 }

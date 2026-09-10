@@ -42,9 +42,10 @@ import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { DeliveryScheduler } from "./delivery/scheduler";
 import {
   extractNotificationEntries,
+  iterateSnapshotNotificationEntries,
   SignalKNotificationInput,
-  snapshotNotificationEntries,
 } from "./signalk/notifications";
+import { BoundedIngestionQueue } from "./signalk/ingestion-queue";
 import { AlertDatabase } from "./storage/db";
 import { DiscordTransport } from "./transports/discord";
 import { NtfyTransport } from "./transports/ntfy";
@@ -53,6 +54,9 @@ import { NotificationTransport } from "./transports/transport";
 
 const MAX_TIMER_DELAY = 2_147_000_000;
 const UPSTREAM_ACTION_TIMEOUT_MS = 5_000;
+const DEFAULT_INGESTION_QUEUE_LIMIT = 2_000;
+const DEFAULT_INGESTION_BATCH_SIZE = 100;
+const QUEUE_WARNING_INTERVAL_MS = 60_000;
 
 interface DefinitionView extends AlertDefinitionRecord {
   description?: string;
@@ -77,7 +81,22 @@ export class PersistentNotifierRuntime {
   private zoneRefreshTimer?: ReturnType<typeof setInterval>;
   private retentionTimer?: ReturnType<typeof setInterval>;
   private reconcilingStartup = false;
-  private startupEntries: SignalKNotificationInput[] = [];
+  private ingestionQueue = new BoundedIngestionQueue(
+    DEFAULT_INGESTION_QUEUE_LIMIT,
+  );
+  private ingestionImmediate?: ReturnType<typeof setImmediate>;
+  private startupImmediate?: ReturnType<typeof setImmediate>;
+  private deliveryImmediate?: ReturnType<typeof setImmediate>;
+  private audioImmediate?: ReturnType<typeof setImmediate>;
+  private deliveryRun?: Promise<void>;
+  private audioRun?: Promise<void>;
+  private deliveryRerunRequested = false;
+  private audioRerunRequested = false;
+  private runtimeGeneration = 0;
+  private stopping = false;
+  private startCount = 0;
+  private stopCount = 0;
+  private lastQueueWarningAt = 0;
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
   private changeRevision = 0;
@@ -183,7 +202,12 @@ export class PersistentNotifierRuntime {
   status() {
     const alertStats = this.database?.alertStats();
     const database = this.database?.operationalStatus();
-    const scheduler = this.scheduler?.status() ?? { running: false };
+    const ingestion = this.ingestionQueue.stats();
+    const scheduler = this.scheduler?.status() ?? {
+      running: false,
+      activeRequests: 0,
+      lastError: undefined,
+    };
     const audio = this.audioScheduler?.status() ?? { running: false };
     const services = (this.config.notifiers ?? []).map((notifier) => {
       const service = database?.services.find(
@@ -219,6 +243,9 @@ export class PersistentNotifierRuntime {
         ? `Delivery scheduler failed: ${scheduler.lastError}`
         : undefined,
       audio.lastError ? `Local audio failed: ${audio.lastError}` : undefined,
+      ingestion.rejected > 0
+        ? `${ingestion.rejected} notification update(s) rejected at the ingestion queue limit`
+        : undefined,
       database?.overdueActivationCount
         ? `${database.overdueActivationCount} activation(s) overdue`
         : undefined,
@@ -242,8 +269,21 @@ export class PersistentNotifierRuntime {
         : { state: "healthy" as const, reasons: [] as string[] };
     return {
       health,
+      runtime: {
+        generation: this.runtimeGeneration,
+        startCount: this.startCount,
+        stopCount: this.stopCount,
+        changeListeners: this.changeListeners.size,
+      },
       reconciliation: this.reconciliationState,
       scheduler,
+      ingestion: {
+        ...ingestion,
+        batchSize:
+          this.config.ingestion?.batchSize ?? DEFAULT_INGESTION_BATCH_SIZE,
+        reconcilingStartup: this.reconcilingStartup,
+        workerScheduled: Boolean(this.ingestionImmediate),
+      },
       audio: {
         enabled: this.config.audio?.enabled ?? false,
         pending: this.database?.pendingAudioPlaybackCount() ?? 0,
@@ -317,7 +357,16 @@ export class PersistentNotifierRuntime {
       reason,
       occurredAt: new Date().toISOString(),
     };
-    for (const listener of this.changeListeners) listener(change);
+    for (const listener of this.changeListeners) {
+      try {
+        listener(change);
+      } catch (error) {
+        this.changeListeners.delete(listener);
+        this.app.error(
+          `[persistent-notifier] Removed failed dashboard event listener: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     this.app.setPluginStatus(this.statusMessage());
   }
 
@@ -344,18 +393,82 @@ export class PersistentNotifierRuntime {
     if (this.connectivity && this.database?.pendingDeliveryCount() === 0)
       this.connectivity.beginCooldown();
     this.scheduleNextDelivery();
-    this.emitChange("alerts");
+    if (summary?.processed) this.emitChange("deliveries");
   }
 
   private async runAudioScheduler(): Promise<void> {
+    if (!this.audioScheduler || !this.database) return;
+    const before = this.database.pendingAudioPlaybackCount();
+    const previous = this.audioScheduler.status();
     await this.audioScheduler?.runOnce();
     this.scheduleNextAudio();
-    this.emitChange("audio");
+    const current = this.audioScheduler.status();
+    if (
+      before !== this.database.pendingAudioPlaybackCount() ||
+      previous.lastPlayedAt !== current.lastPlayedAt ||
+      previous.lastError !== current.lastError
+    )
+      this.emitChange("audio");
+  }
+
+  private requestDeliveryRun(): void {
+    if (this.stopping) return;
+    if (this.deliveryRun) {
+      this.deliveryRerunRequested = true;
+      return;
+    }
+    if (this.deliveryImmediate || !this.scheduler || !this.database) return;
+    const generation = this.runtimeGeneration;
+    this.deliveryImmediate = setImmediate(() => {
+      this.deliveryImmediate = undefined;
+      if (generation !== this.runtimeGeneration || !this.database) return;
+      const running = this.runScheduler();
+      this.deliveryRun = running;
+      void running
+        .catch((error: unknown) =>
+          this.reportAsyncError("Delivery scheduler failed", error),
+        )
+        .finally(() => {
+          if (this.deliveryRun === running) this.deliveryRun = undefined;
+          if (this.deliveryRerunRequested) {
+            this.deliveryRerunRequested = false;
+            this.requestDeliveryRun();
+          }
+        });
+    });
+  }
+
+  private requestAudioRun(): void {
+    if (this.stopping) return;
+    if (this.audioRun) {
+      this.audioRerunRequested = true;
+      return;
+    }
+    if (this.audioImmediate || !this.audioScheduler || !this.database) return;
+    const generation = this.runtimeGeneration;
+    this.audioImmediate = setImmediate(() => {
+      this.audioImmediate = undefined;
+      if (generation !== this.runtimeGeneration || !this.database) return;
+      const running = this.runAudioScheduler();
+      this.audioRun = running;
+      void running
+        .catch((error: unknown) =>
+          this.reportAsyncError("Local audio scheduler failed", error),
+        )
+        .finally(() => {
+          if (this.audioRun === running) this.audioRun = undefined;
+          if (this.audioRerunRequested) {
+            this.audioRerunRequested = false;
+            this.requestAudioRun();
+          }
+        });
+    });
   }
 
   private scheduleNextAudio(): void {
     if (this.audioTimer) clearTimeout(this.audioTimer);
     this.audioTimer = undefined;
+    if (this.stopping) return;
     const dueAt = this.database?.nextAudioPlaybackDueAt();
     if (!dueAt || !this.audioScheduler) return;
     const delay = Math.min(
@@ -364,15 +477,14 @@ export class PersistentNotifierRuntime {
     );
     this.audioTimer = setTimeout(() => {
       this.audioTimer = undefined;
-      void this.runAudioScheduler().catch((error: unknown) =>
-        this.reportAsyncError("Local audio scheduler failed", error),
-      );
+      this.requestAudioRun();
     }, delay);
   }
 
   private scheduleNextDelivery(): void {
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     this.deliveryTimer = undefined;
+    if (this.stopping) return;
     const dueAt = this.database?.nextDeliveryDueAt();
     if (!dueAt) return;
     const delay = Math.min(
@@ -381,13 +493,12 @@ export class PersistentNotifierRuntime {
     );
     this.deliveryTimer = setTimeout(() => {
       this.deliveryTimer = undefined;
-      void this.runScheduler().catch((error: unknown) =>
-        this.reportAsyncError("Delivery scheduler failed", error),
-      );
+      this.requestDeliveryRun();
     }, delay);
   }
 
   private scheduleNextWake(): void {
+    if (this.stopping) return;
     const nextWake = this.database?.listWakeRequests()[0];
     this.connectivity?.cancelScheduledWake();
     if (nextWake) this.connectivity?.scheduleWakeAt(nextWake.dueAt);
@@ -396,6 +507,7 @@ export class PersistentNotifierRuntime {
   private scheduleNextActivation(): void {
     if (this.activationTimer) clearTimeout(this.activationTimer);
     this.activationTimer = undefined;
+    if (this.stopping) return;
     const dueAt = this.database?.nextActivationDueAt();
     if (!dueAt) return;
     const delay = Math.min(
@@ -406,10 +518,69 @@ export class PersistentNotifierRuntime {
       this.activationTimer = undefined;
       this.database?.processDueActivations(new Date());
       this.scheduleNextActivation();
-      void this.runScheduler().catch((error: unknown) =>
-        this.reportAsyncError("Activation delivery failed", error),
-      );
+      this.requestDeliveryRun();
     }, delay);
+  }
+
+  private enqueueNotifications(entries: SignalKNotificationInput[]): void {
+    let rejected = 0;
+    for (const entry of entries)
+      if (this.ingestionQueue.enqueue(entry) === "rejected") rejected += 1;
+    if (
+      rejected > 0 &&
+      Date.now() - this.lastQueueWarningAt >= QUEUE_WARNING_INTERVAL_MS
+    ) {
+      this.lastQueueWarningAt = Date.now();
+      const stats = this.ingestionQueue.stats();
+      this.app.error(
+        `[persistent-notifier] Notification ingestion queue reached its ${stats.limit}-entry limit; rejected=${stats.rejected}, depth=${stats.depth}. Alert transitions may be missing.`,
+      );
+    }
+    if (!this.reconcilingStartup) this.scheduleIngestionDrain();
+  }
+
+  private scheduleIngestionDrain(): void {
+    if (
+      this.ingestionImmediate ||
+      !this.database ||
+      this.ingestionQueue.depth === 0
+    )
+      return;
+    const generation = this.runtimeGeneration;
+    this.ingestionImmediate = setImmediate(() => {
+      this.ingestionImmediate = undefined;
+      if (generation !== this.runtimeGeneration || !this.database) return;
+      this.drainIngestionBatch();
+    });
+  }
+
+  private drainIngestionBatch(): void {
+    const entries = this.ingestionQueue.take(
+      this.config.ingestion?.batchSize ?? DEFAULT_INGESTION_BATCH_SIZE,
+    );
+    let persisted = 0;
+    for (const entry of entries) {
+      try {
+        if (this.ingestEntry(entry, new Date(), false)) persisted += 1;
+      } catch (error) {
+        this.reportAsyncError("Could not ingest Signal K notification", error);
+      }
+    }
+    try {
+      if (persisted > 0) this.afterIngestionBatch();
+    } catch (error) {
+      this.reportAsyncError("Could not schedule ingested notifications", error);
+    } finally {
+      this.scheduleIngestionDrain();
+    }
+  }
+
+  private afterIngestionBatch(): void {
+    this.scheduleNextWake();
+    this.scheduleNextActivation();
+    this.requestDeliveryRun();
+    this.requestAudioRun();
+    this.emitChange("alerts");
   }
 
   private seedDefinitions(): void {
@@ -437,11 +608,11 @@ export class PersistentNotifierRuntime {
     if (deleted.length) this.emitChange("retention");
   }
 
-  private async applyConnectivityPolicy(
+  private applyConnectivityPolicy(
     occurrence: AlertRecord,
     now: Date,
     schedule = true,
-  ): Promise<void> {
+  ): void {
     if (occurrence.currentState === "cleared") {
       this.db().clearWakeDue(occurrence.id);
       if (schedule) this.scheduleNextWake();
@@ -461,15 +632,13 @@ export class PersistentNotifierRuntime {
     if (!wakeAt) return;
     this.db().setWakeDue(occurrence.id, wakeAt, now);
     if (schedule) this.scheduleNextWake();
-    if (schedule && wakeAt <= now && this.connectivity)
-      await this.connectivity.requestWake();
   }
 
-  private async ingestEntry(
+  private ingestEntry(
     entry: SignalKNotificationInput,
     receivedAt = new Date(),
     schedule = true,
-  ): Promise<AlertRecord | undefined> {
+  ): AlertRecord | undefined {
     const normalized = normalizeNotification(
       entry.path,
       entry.value,
@@ -519,43 +688,37 @@ export class PersistentNotifierRuntime {
         policy.activationDelaySeconds,
         receivedAt,
       );
-    await this.applyConnectivityPolicy(occurrence, receivedAt, schedule);
-    if (schedule) {
-      this.scheduleNextActivation();
-      await this.runScheduler();
-      await this.runAudioScheduler();
-    }
+    this.applyConnectivityPolicy(occurrence, receivedAt, schedule);
+    if (schedule) this.afterIngestionBatch();
     return occurrence;
   }
 
-  private async reconcileStartup(): Promise<void> {
-    if (!this.database) return;
+  private async reconcileStartup(generation: number): Promise<void> {
+    if (!this.database || generation !== this.runtimeGeneration) return;
     const startedAt = Date.now();
     this.seedDefinitions();
-    const entries = snapshotNotificationEntries(
+    const entries = iterateSnapshotNotificationEntries(
       this.app.getPath(`${this.app.selfContext}.notifications`),
     );
-    for (let index = 0; index < entries.length; index += 1) {
-      if (!this.database) return;
-      await this.ingestEntry(entries[index], new Date(), false);
-      if ((index + 1) % 50 === 0)
+    let snapshotEntries = 0;
+    for (const entry of entries) {
+      if (!this.database || generation !== this.runtimeGeneration) return;
+      this.ingestEntry(entry, new Date(), false);
+      snapshotEntries += 1;
+      if (snapshotEntries % 50 === 0)
         await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    let queuedCount = 0;
-    while (this.startupEntries.length > 0) {
-      const queued = this.startupEntries.splice(0, 50);
-      queuedCount += queued.length;
-      for (const entry of queued) {
-        if (!this.database) return;
-        await this.ingestEntry(entry, new Date(), false);
-      }
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    if (!this.database || generation !== this.runtimeGeneration) return;
+    const queuedCount = this.ingestionQueue.stats().received;
     this.reconcilingStartup = false;
-    this.scheduleNextWake();
-    this.scheduleNextActivation();
-    await this.runScheduler();
-    await this.runAudioScheduler();
+    if (snapshotEntries > 0) this.afterIngestionBatch();
+    else {
+      this.scheduleNextWake();
+      this.scheduleNextActivation();
+      this.requestDeliveryRun();
+      this.requestAudioRun();
+    }
+    this.scheduleIngestionDrain();
     this.runRetention();
     const completedAt = new Date();
     this.reconciliationState = {
@@ -563,12 +726,12 @@ export class PersistentNotifierRuntime {
       startedAt: this.reconciliationState.startedAt,
       completedAt,
       durationMs: Date.now() - startedAt,
-      snapshotEntries: entries.length,
+      snapshotEntries,
       queuedEntries: queuedCount,
     };
     this.app.setPluginStatus(this.statusMessage());
     this.debug(
-      `Startup reconciliation complete: snapshotEntries=${entries.length}, queuedEntries=${queuedCount}, durationMs=${Date.now() - startedAt}`,
+      `Startup reconciliation complete: snapshotEntries=${snapshotEntries}, queuedEntries=${queuedCount}, durationMs=${Date.now() - startedAt}`,
     );
   }
 
@@ -844,6 +1007,13 @@ export class PersistentNotifierRuntime {
 
   start(options: PluginConfig): void {
     validateConfig(options);
+    if (this.database)
+      throw new Error(
+        "Persistent notifier is already started; stop it before starting again",
+      );
+    this.stopping = false;
+    const generation = ++this.runtimeGeneration;
+    this.startCount += 1;
     this.debug(
       `Starting: configuredServices=${options.notifiers?.length ?? 0}, deliveryBatchSize=${options.delivery?.batchSize ?? 50}, deliveryConcurrency=${options.delivery?.concurrency ?? 4}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
     );
@@ -852,7 +1022,10 @@ export class PersistentNotifierRuntime {
     this.policy = new AlertPolicyResolver(this.database, options);
     this.reconcilingStartup = true;
     this.reconciliationState = { state: "running", startedAt: new Date() };
-    this.startupEntries = [];
+    this.ingestionQueue = new BoundedIngestionQueue(
+      options.ingestion?.queueLimit ?? DEFAULT_INGESTION_QUEUE_LIMIT,
+    );
+    this.lastQueueWarningAt = 0;
 
     this.transports = new Map<string, NotificationTransport>();
     for (const notifier of options.notifiers ?? []) {
@@ -889,6 +1062,7 @@ export class PersistentNotifierRuntime {
       {
         batchSize: options.delivery?.batchSize ?? 50,
         concurrency: options.delivery?.concurrency ?? 4,
+        requestTimeoutSeconds: options.delivery?.requestTimeoutSeconds ?? 15,
       },
     );
     if (options.audio?.enabled)
@@ -940,16 +1114,9 @@ export class PersistentNotifierRuntime {
     this.scheduleNextAudio();
 
     const handler = (delta: unknown): void => {
+      if (generation !== this.runtimeGeneration || this.stopping) return;
       const entries = extractNotificationEntries(delta);
-      if (this.reconcilingStartup) {
-        this.startupEntries.push(...entries);
-        return;
-      }
-      void (async () => {
-        for (const entry of entries) await this.ingestEntry(entry);
-      })().catch((error: unknown) =>
-        this.reportAsyncError("Could not ingest Signal K notification", error),
-      );
+      this.enqueueNotifications(entries);
     };
     const unsubscribes: Array<() => void> = [];
     this.app.subscriptionmanager.subscribe(
@@ -968,9 +1135,10 @@ export class PersistentNotifierRuntime {
     // Return control to Signal K before scanning the model. Deltas received
     // after subscribing are queued and applied after the snapshot so an older
     // startup value cannot overwrite a newer update.
-    setImmediate(() => {
-      void this.reconcileStartup().catch((error: unknown) => {
-        const queued = this.startupEntries.splice(0);
+    this.startupImmediate = setImmediate(() => {
+      this.startupImmediate = undefined;
+      void this.reconcileStartup(generation).catch((error: unknown) => {
+        if (generation !== this.runtimeGeneration) return;
         this.reconcilingStartup = false;
         const completedAt = new Date();
         this.reconciliationState = {
@@ -981,24 +1149,16 @@ export class PersistentNotifierRuntime {
             ? completedAt.getTime() -
               this.reconciliationState.startedAt.getTime()
             : undefined,
-          queuedEntries: queued.length,
+          queuedEntries: this.ingestionQueue.stats().received,
           error: error instanceof Error ? error.message : String(error),
         };
         this.reportAsyncError(
           "Could not reconcile current notifications",
           error,
         );
-        // The subscription is already live. Preserve deltas that arrived while
-        // the failed snapshot reconciliation was running instead of leaving
-        // them stranded in the startup queue.
-        void (async () => {
-          for (const entry of queued) await this.ingestEntry(entry);
-        })().catch((queuedError: unknown) =>
-          this.reportAsyncError(
-            "Could not ingest queued Signal K notifications",
-            queuedError,
-          ),
-        );
+        // The subscription remains live. The bounded ingestion worker drains
+        // entries retained while snapshot reconciliation was running.
+        this.scheduleIngestionDrain();
       });
     });
     this.zoneRefreshTimer = setInterval(
@@ -1079,9 +1239,23 @@ export class PersistentNotifierRuntime {
 
   async stop(): Promise<void> {
     this.debug("Stopping");
+    this.stopping = true;
+    this.runtimeGeneration += 1;
+    this.stopCount += 1;
     this.reconcilingStartup = false;
-    this.startupEntries = [];
+    this.ingestionQueue.clear();
     this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    if (this.startupImmediate) clearImmediate(this.startupImmediate);
+    if (this.ingestionImmediate) clearImmediate(this.ingestionImmediate);
+    if (this.deliveryImmediate) clearImmediate(this.deliveryImmediate);
+    if (this.audioImmediate) clearImmediate(this.audioImmediate);
+    this.startupImmediate = undefined;
+    this.ingestionImmediate = undefined;
+    this.deliveryImmediate = undefined;
+    this.audioImmediate = undefined;
+    this.deliveryRerunRequested = false;
+    this.audioRerunRequested = false;
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     if (this.audioTimer) clearTimeout(this.audioTimer);
@@ -1089,15 +1263,24 @@ export class PersistentNotifierRuntime {
     if (this.retentionTimer) clearInterval(this.retentionTimer);
     await this.scheduler?.stop();
     await this.audioScheduler?.stop();
+    await this.deliveryRun;
+    await this.audioRun;
     this.connectivity?.stop();
     this.database?.close();
     this.database = undefined;
     this.changeListeners.clear();
     this.scheduler = undefined;
     this.audioScheduler = undefined;
+    this.deliveryRun = undefined;
+    this.audioRun = undefined;
     this.connectivity = undefined;
     this.policy = undefined;
     this.transports.clear();
+    this.activationTimer = undefined;
+    this.deliveryTimer = undefined;
+    this.audioTimer = undefined;
+    this.zoneRefreshTimer = undefined;
+    this.retentionTimer = undefined;
     this.debug("Stopped");
   }
 }

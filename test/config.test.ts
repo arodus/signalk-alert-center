@@ -60,8 +60,15 @@ describe("validateConfig", () => {
     const delivery = pluginConfigSchema.properties.delivery;
     expect(delivery.properties.batchSize.default).toBe(50);
     expect(delivery.properties.concurrency.default).toBe(4);
+    expect(delivery.properties.requestTimeoutSeconds.default).toBe(15);
     expect(() =>
-      validateConfig({ delivery: { batchSize: 200, concurrency: 32 } }),
+      validateConfig({
+        delivery: {
+          batchSize: 200,
+          concurrency: 32,
+          requestTimeoutSeconds: 15,
+        },
+      }),
     ).not.toThrow();
     expect(() => validateConfig({ delivery: { batchSize: 201 } })).toThrow(
       "delivery.batchSize",
@@ -69,6 +76,24 @@ describe("validateConfig", () => {
     expect(() => validateConfig({ delivery: { concurrency: 0 } })).toThrow(
       "delivery.concurrency",
     );
+    expect(() =>
+      validateConfig({ delivery: { requestTimeoutSeconds: 301 } }),
+    ).toThrow("delivery.requestTimeoutSeconds");
+  });
+
+  it("exposes and validates a bounded notification ingestion queue", () => {
+    const ingestion = pluginConfigSchema.properties.ingestion;
+    expect(ingestion.properties.queueLimit.default).toBe(2000);
+    expect(ingestion.properties.batchSize.default).toBe(100);
+    expect(() =>
+      validateConfig({ ingestion: { queueLimit: 100, batchSize: 25 } }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({ ingestion: { queueLimit: 9, batchSize: 2 } }),
+    ).toThrow("ingestion.queueLimit");
+    expect(() =>
+      validateConfig({ ingestion: { queueLimit: 10, batchSize: 11 } }),
+    ).toThrow("must not exceed");
   });
 
   it("keeps local audio opt-in and defaults new alerts to severity-matched sounds", () => {

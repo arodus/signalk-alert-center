@@ -123,6 +123,30 @@ describe("connectivity ownership and durable wake requests", () => {
     expect(manager.ownedByPlugin).toBe(true);
   });
 
+  it("shares one wake operation and cancels its wait when stopped", async () => {
+    const adapter = new FakeSwitch();
+    const probe = vi.fn(
+      (signal?: AbortSignal) =>
+        new Promise<boolean>((resolve) => {
+          signal?.addEventListener("abort", () => resolve(false), {
+            once: true,
+          });
+        }),
+    );
+    const manager = new ConnectivityManager(adapter, 0, probe, 240_000, 5_000);
+    managers.push(manager);
+
+    const first = manager.requestWake();
+    const second = manager.requestWake();
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
+    manager.stop();
+    await Promise.all([first, second]);
+
+    expect(adapter.commands).toEqual([true]);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(manager.lastError).toBeUndefined();
+  });
+
   it("persists wake-after requests independently of in-memory timers", () => {
     const database = new AlertDatabase();
     databases.push(database);

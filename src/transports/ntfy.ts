@@ -2,6 +2,7 @@ import { AlertRecord, DeliveryRecord } from "../alerts/types";
 import {
   classifyHttp,
   NotificationTransport,
+  readResponseBody,
   TransportContext,
   TransportResult,
 } from "./transport";
@@ -29,9 +30,14 @@ export class NtfyTransport implements NotificationTransport {
         headers.Authorization = `Bearer ${this.config.token}`;
       const response = await fetch(
         `${this.config.server.replace(/\/$/, "")}/${encodeURIComponent(this.config.topic)}`,
-        { method: "POST", headers, body: context.rendered.body },
+        {
+          method: "POST",
+          headers,
+          body: context.rendered.body,
+          signal: context.signal,
+        },
       );
-      return classifyHttp(response.status, await response.text());
+      return classifyHttp(response.status, await readResponseBody(response));
     } catch (error) {
       return {
         kind: "retryable",

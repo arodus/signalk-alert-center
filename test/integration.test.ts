@@ -42,6 +42,7 @@ const context = {
     occurredAt: alert.firstSeenAt,
   },
   now: alert.firstSeenAt,
+  signal: new AbortController().signal,
 };
 
 describe.skipIf(!enabled)("Docker HTTP transport integration", () => {
