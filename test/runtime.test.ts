@@ -168,27 +168,36 @@ describe("PersistentNotifierRuntime", () => {
     expect(app.debug).toHaveBeenCalledWith(
       expect.stringContaining("Startup reconciliation complete"),
     );
-    expect(runtime.status()).toMatchObject({
-      health: {
-        state: "degraded",
-        reasons: ["warning last failed (NETWORK)"],
-      },
-      reconciliation: {
-        state: "complete",
-        snapshotEntries: 0,
-        queuedEntries: 1,
-      },
-      scheduler: { running: false },
-      database: { healthy: true, schemaVersion: 4, expectedSchemaVersion: 4 },
-      services: [
-        {
-          id: "warning",
-          type: "ntfy",
-          pendingCount: 1,
-          lastFailureCode: "NETWORK",
+    await vi.waitFor(() => {
+      expect(runtime.status()).toMatchObject({
+        health: {
+          state: "degraded",
+          reasons: ["warning last failed (NETWORK)"],
         },
-        { id: "critical", type: "ntfy", pendingCount: 0 },
-      ],
+        reconciliation: {
+          state: "complete",
+          snapshotEntries: 0,
+          queuedEntries: 1,
+        },
+        ingestion: {
+          depth: 0,
+          highWaterMark: 1,
+          received: 1,
+          processed: 1,
+          rejected: 0,
+        },
+        scheduler: { running: false, activeRequests: 0 },
+        database: { healthy: true, schemaVersion: 4, expectedSchemaVersion: 4 },
+        services: [
+          {
+            id: "warning",
+            type: "ntfy",
+            pendingCount: 1,
+            lastFailureCode: "NETWORK",
+          },
+          { id: "critical", type: "ntfy", pendingCount: 0 },
+        ],
+      });
     });
     expect(app.setPluginStatus).toHaveBeenCalledWith(
       expect.stringContaining("degraded:"),
@@ -315,5 +324,179 @@ describe("PersistentNotifierRuntime", () => {
       new Date("2026-01-01T00:02:00Z"),
     );
     database.close();
+  });
+
+  it("keeps ingestion bounded and progressing while a notifier is stalled", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-pressure-"));
+    directories.push(directory);
+    let subscriber: ((delta: unknown) => void) | undefined;
+    const unsubscribe = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise(() => undefined)),
+    );
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(() => ({})),
+      selfContext: "vessels.self",
+      setPluginStatus: vi.fn(),
+      subscriptionmanager: {
+        subscribe: (
+          _command: unknown,
+          unsubscribes: Array<() => void>,
+          _onError: (error: unknown) => void,
+          callback: (delta: unknown) => void,
+        ) => {
+          subscriber = callback;
+          unsubscribes.push(unsubscribe);
+        },
+      },
+    } as unknown as ServerAPI;
+    const runtime = new PersistentNotifierRuntime(app);
+    try {
+      runtime.start({
+        ingestion: { queueLimit: 10, batchSize: 2 },
+        delivery: { requestTimeoutSeconds: 300 },
+        notifiers: [
+          {
+            name: "stalled",
+            type: "ntfy",
+            server: "https://notify.invalid",
+            topic: "test",
+          },
+        ],
+        defaults: { notifiers: ["stalled"] },
+      });
+      expect(() => runtime.start({})).toThrow("already started");
+      await vi.waitFor(() => {
+        expect(runtime.status().reconciliation.state).toBe("complete");
+      });
+
+      subscriber?.({
+        updates: [
+          {
+            $source: "fixture",
+            values: [
+              {
+                path: "notifications.pressure.initial",
+                value: { state: "alarm", message: "Initial" },
+              },
+            ],
+          },
+        ],
+      });
+      await vi.waitFor(() => {
+        expect(runtime.status().scheduler.activeRequests).toBe(1);
+      });
+
+      for (let index = 0; index < 10_000; index += 1)
+        subscriber?.({
+          updates: [
+            {
+              $source: "fixture",
+              values: [
+                {
+                  path: `notifications.pressure.${index}`,
+                  value: { state: "alarm", message: String(index) },
+                },
+              ],
+            },
+          ],
+        });
+
+      expect(runtime.status().ingestion).toMatchObject({
+        depth: 10,
+        limit: 10,
+        highWaterMark: 10,
+        rejected: 9_990,
+      });
+      expect(app.error).toHaveBeenCalledWith(
+        expect.stringContaining("ingestion queue reached"),
+      );
+      await vi.waitFor(() => {
+        expect(runtime.status().ingestion.depth).toBe(0);
+        expect(runtime.status().scheduler.activeRequests).toBe(1);
+      });
+    } finally {
+      await runtime.stop();
+      vi.unstubAllGlobals();
+    }
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes startup while live notifications exceed the queue limit", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-startup-pressure-"));
+    directories.push(directory);
+    let subscriber: ((delta: unknown) => void) | undefined;
+    let flooded = false;
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      selfContext: "vessels.self",
+      setPluginStatus: vi.fn(),
+      getPath: vi.fn((path: string) => {
+        if (path !== "vessels.self.notifications") return {};
+        if (!flooded) {
+          flooded = true;
+          for (let index = 0; index < 10_000; index += 1)
+            subscriber?.({
+              updates: [
+                {
+                  $source: "startup-fixture",
+                  values: [
+                    {
+                      path: `notifications.startup.${index}`,
+                      value: { state: "alarm", message: String(index) },
+                    },
+                  ],
+                },
+              ],
+            });
+        }
+        return {
+          snapshot: {
+            value: { state: "warn", message: "Snapshot" },
+            $source: "snapshot-fixture",
+          },
+        };
+      }),
+      subscriptionmanager: {
+        subscribe: (
+          _command: unknown,
+          unsubscribes: Array<() => void>,
+          _onError: (error: unknown) => void,
+          callback: (delta: unknown) => void,
+        ) => {
+          subscriber = callback;
+          unsubscribes.push(vi.fn());
+        },
+      },
+    } as unknown as ServerAPI;
+    const runtime = new PersistentNotifierRuntime(app);
+    runtime.start({ ingestion: { queueLimit: 10, batchSize: 2 } });
+    try {
+      await vi.waitFor(() => {
+        expect(runtime.status()).toMatchObject({
+          reconciliation: {
+            state: "complete",
+            snapshotEntries: 1,
+            queuedEntries: 10_000,
+          },
+          ingestion: {
+            depth: 0,
+            limit: 10,
+            highWaterMark: 10,
+            received: 10_000,
+            processed: 10,
+            rejected: 9_990,
+          },
+        });
+      });
+    } finally {
+      await runtime.stop();
+    }
   });
 });

@@ -11,6 +11,7 @@ export interface RenderedAlert {
 export interface TransportContext {
   rendered: RenderedAlert;
   now: Date;
+  signal: AbortSignal;
 }
 export type TransportResult =
   | { kind: "success"; remoteId?: string }
@@ -55,4 +56,37 @@ export function classifyHttp(status: number, body = ""): TransportResult {
     code: `HTTP_${status}`,
     message: body.slice(0, 500),
   };
+}
+
+/** Read only a small diagnostic prefix instead of buffering an arbitrary body. */
+export async function readResponseBody(
+  response: Response,
+  maxBytes = 8_192,
+): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = maxBytes - size;
+      const selected =
+        value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      chunks.push(selected);
+      size += selected.byteLength;
+      if (selected.byteLength < value.byteLength) break;
+    }
+  } finally {
+    if (size >= maxBytes) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  const combined = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(combined);
 }

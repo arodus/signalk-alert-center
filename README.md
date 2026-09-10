@@ -41,16 +41,16 @@ occurrence identity and audit data, not optional display details.
 The implementation uses the current typed Signal K plugin surface and keeps the
 following boundaries explicit:
 
-| Area            | Implemented behavior                                                                                                                                                                                                                                  |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                            |
-| Ingestion       | An all-source subscription is established before startup reconciliation; `$source`, source time, receipt time, and raw values are retained. Null/normal values clear an occurrence.                                                                   |
-| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                    |
-| One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                                                                                           |
-| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                    |
-| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                |
-| Local audio     | A durable serial queue invokes an allow-listed player without a shell. Optional administrator-configured pre/post executables also receive literal argument arrays. Built-in sounds, outcomes, repeats, and cancellation are recorded per occurrence. |
-| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                               |
+| Area            | Implemented behavior                                                                                                                                                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                                        |
+| Ingestion       | An all-source subscription feeds one bounded worker. Equivalent pending updates coalesce, transitions stay ordered, and queue pressure is observable. `$source`, source time, receipt time, and raw values are persisted. Null/normal values clear an occurrence. |
+| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                                |
+| One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                                                                                                       |
+| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                |
+| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                            |
+| Local audio     | A durable serial queue invokes an allow-listed player without a shell. Optional administrator-configured pre/post executables also receive literal argument arrays. Built-in sounds, outcomes, repeats, and cancellation are recorded per occurrence.             |
+| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                           |
 
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player)
 is a useful product reference: it discovers known/configured notifications, opens
@@ -116,8 +116,8 @@ replaced rather than migrated. Released schema changes must use migrations.
 - Correct null/normal clear handling, preserve unknown raw values, and capture
   delta timestamp plus `$source`.
 - Subscribe before taking a startup snapshot, then reconcile both streams through
-  one idempotent ingest path so an event arriving during startup is neither lost
-  nor duplicated.
+  one idempotent ingest path. Keep the live side bounded and ensure its latest
+  updates are applied after the older snapshot without retaining one task per delta.
 - Wire zone discovery into the catalog and refresh it when metadata changes or on
   an explicit low-frequency rescan. Treat zones as definitions only.
 
@@ -251,18 +251,27 @@ hardware.
 The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newer. Install with `npm install`, compile with `npm run build`, and install the package through Signal K's normal plugin mechanism.
 
 Startup subscribes to notification deltas before reconciling the existing Signal K
-model. The model scan runs after plugin startup returns, processes notifications in
-bounded batches, and schedules pending delivery once after reconciliation. Runtime
-status, history pages, definition summaries, and the delivery scheduler use bounded
-SQL queries so their cost does not grow with unrelated historical records. Unchanged
-zone definitions do not rewrite the database during periodic discovery.
+model. Live updates received during that scan enter a fixed-size queue. Equivalent
+pending values for the same path and source are combined, while state, severity, and
+message transitions keep their order. One worker persists bounded batches and yields
+between them, so continuous traffic cannot create one retained promise per delta or
+prevent startup reconciliation from completing. Queue depth, its high-water mark,
+and received, processed, coalesced, and rejected counts are available from `/status`.
+Reaching the hard limit is logged as an error because it can mean alert transitions
+were rejected; the plugin never silently grows the queue beyond the configured size.
+
+Runtime status, history pages, definition summaries, recent dashboard deliveries,
+and the delivery scheduler use bounded SQL queries so their cost does not grow with
+unrelated historical records. Unchanged zone definitions do not rewrite the database
+during periodic discovery.
 
 The delivery scheduler loads at most 50 due deliveries per run and sends up to four
-at the same time by default. Both limits are global settings under **Notification
-delivery**. Every row is claimed and committed before its network request starts,
-and each result is recorded independently, so a slow or failed service does not
-hold up successful services. Plugin shutdown stops claiming new work and waits for
-all sends already in flight to finish.
+at the same time by default. Each service request has a 15-second deadline. These
+limits are global settings under **Notification delivery**. Every row is claimed and
+committed before its network request starts, and each result is recorded independently,
+so a slow or failed service does not hold up successful services. A timeout is recorded
+as a retryable `DELIVERY_TIMEOUT`. Plugin shutdown stops claiming work, aborts active
+requests, records them as retryable interruptions, and then closes the database.
 
 Operational errors and delivery batches are written to Signal K's server log
 without notification bodies, notifier credentials, tokens, or webhook URLs. Enable
@@ -304,7 +313,12 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
   },
   "delivery": {
     "batchSize": 50,
-    "concurrency": 4
+    "concurrency": 4,
+    "requestTimeoutSeconds": 15
+  },
+  "ingestion": {
+    "queueLimit": 2000,
+    "batchSize": 100
   },
   "connectivity": {
     "enabled": true,
@@ -330,7 +344,7 @@ When `storage.path` is relative, it is resolved from that data directory. An abs
 path remains supported when you intentionally manage the database elsewhere.
 
 The Signal K plugin form contains only global configuration: storage/discovery,
-delivery limits, retry behavior, notifier connections and secrets, local audio
+bounded ingestion and delivery limits, retry behavior, notifier connections and secrets, local audio
 hardware/defaults, and optional connectivity management. Optional **History retention** removes only
 cleared occurrences older than the configured age, in bounded batches. It is
 disabled by default and always protects active alerts, pending/retryable/in-flight
@@ -453,8 +467,10 @@ contract is returned through the plugin's OpenAPI document.
 ### Operational diagnostics
 
 `GET /status` returns a bounded operational snapshot without notifier secrets or
-notification payloads. It includes startup reconciliation state and duration,
-the last delivery and audio scheduler runs, pending sounds, the oldest pending
+notification payloads. It includes runtime generation and listener counts; ingestion
+queue depth, limit, high-water mark, and totals; startup reconciliation state and duration;
+the last delivery and audio scheduler runs; active request count and oldest request;
+pending sounds; the oldest pending
 delivery, overdue activation count, database/schema health, pending connectivity wake work, switch ownership,
 the last connectivity transition and probe result, and per-service pending count
 plus last success/failure time and failure code. The dashboard exposes the same
@@ -472,6 +488,17 @@ service delivery clears that service's degraded condition.
 Diagnostic queries use aggregate/indexed lookups and one latest-failure lookup per
 service with recorded deliveries; they do not load or reconstruct complete alert
 history.
+
+### Resource-exhaustion troubleshooting
+
+Rapidly increasing Signal K memory, heap-limit restarts, a queue at its configured
+limit, or an old active delivery request indicate that input or a notification service
+is not keeping up. Disable this plugin on the affected server and restart Signal K to
+release retained process memory. Preserve the database and logs; deleting the database
+is not required. Before re-enabling it, verify the configured ntfy, PagerDuty, and
+Discord endpoints are reachable and review `/status` for ingestion and scheduler
+diagnostics. Do not increase the queue or request timeout as a first response because
+that permits more work to remain resident.
 
 `GET /occurrences` accepts exact `definitionId`, `path`, and `source` filters,
 plus `state`, `severity`, `dismissed`, `from`, and `to`. Filters can be combined;

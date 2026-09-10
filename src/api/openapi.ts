@@ -57,7 +57,20 @@ export function getAlertCenterOpenApi() {
       },
       "/deliveries": {
         get: {
-          summary: "List delivery intents and their latest outcome",
+          summary: "List recent delivery intents and their latest outcome",
+          parameters: [
+            {
+              name: "limit",
+              in: "query",
+              description: "Maximum recent deliveries returned",
+              schema: {
+                type: "integer",
+                minimum: 1,
+                maximum: 100,
+                default: 30,
+              },
+            },
+          ],
           responses: {
             "200": response("Delivery records", {
               type: "array",
@@ -294,8 +307,10 @@ export function getAlertCenterOpenApi() {
           type: "object",
           required: [
             "health",
+            "runtime",
             "reconciliation",
             "scheduler",
+            "ingestion",
             "audio",
             "connectivity",
             "alerts",
@@ -313,8 +328,10 @@ export function getAlertCenterOpenApi() {
                 reasons: { type: "array", items: { type: "string" } },
               },
             },
+            runtime: { type: "object", additionalProperties: true },
             reconciliation: { type: "object", additionalProperties: true },
             scheduler: { type: "object", additionalProperties: true },
+            ingestion: { type: "object", additionalProperties: true },
             audio: { type: "object", additionalProperties: true },
             connectivity: { type: "object", additionalProperties: true },
             alerts: { type: "object", additionalProperties: true },

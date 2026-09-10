@@ -65,4 +65,14 @@ describe("Signal K notification input", () => {
     expect(entries[0].source).toBe("sensor.gps-2");
     expect(entries[1].value).toBeNull();
   });
+
+  it("does not revisit cyclic or shared model branches", () => {
+    const alarm = { value: { state: "alarm", message: "Flooding" } };
+    const root: Record<string, unknown> = { bilge: alarm, duplicate: alarm };
+    root.circular = root;
+
+    expect(snapshotNotificationEntries(root)).toEqual([
+      expect.objectContaining({ path: "notifications.bilge" }),
+    ]);
+  });
 });

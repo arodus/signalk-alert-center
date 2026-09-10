@@ -16,6 +16,8 @@ export interface DeliveryRunSummary {
 
 export interface DeliverySchedulerStatus {
   running: boolean;
+  activeRequests: number;
+  oldestRequestStartedAt?: Date;
   lastRunStartedAt?: Date;
   lastRunCompletedAt?: Date;
   lastSummary?: DeliveryRunSummary;
@@ -25,10 +27,12 @@ export interface DeliverySchedulerStatus {
 export interface DeliverySchedulerOptions {
   batchSize?: number;
   concurrency?: number;
+  requestTimeoutSeconds?: number;
 }
 
 const DEFAULT_BATCH_SIZE = 50;
 const DEFAULT_CONCURRENCY = 4;
+const DEFAULT_REQUEST_TIMEOUT_SECONDS = 15;
 
 export class DeliveryScheduler {
   private running = false;
@@ -38,6 +42,7 @@ export class DeliveryScheduler {
   private lastRunCompletedAt?: Date;
   private lastSummary?: DeliveryRunSummary;
   private lastError?: string;
+  private activeRequests = new Map<AbortController, Date>();
   constructor(
     private readonly database: AlertDatabase,
     private readonly transports: Map<string, NotificationTransport>,
@@ -57,6 +62,10 @@ export class DeliveryScheduler {
   status(): DeliverySchedulerStatus {
     return {
       running: this.running,
+      activeRequests: this.activeRequests.size,
+      oldestRequestStartedAt: [...this.activeRequests.values()].sort(
+        (left, right) => left.getTime() - right.getTime(),
+      )[0],
       lastRunStartedAt: this.lastRunStartedAt,
       lastRunCompletedAt: this.lastRunCompletedAt,
       lastSummary: this.lastSummary,
@@ -65,6 +74,7 @@ export class DeliveryScheduler {
   }
   async stop(): Promise<void> {
     this.stopped = true;
+    for (const controller of this.activeRequests.keys()) controller.abort();
     await this.activeRun;
   }
   async runOnce(now = new Date()): Promise<DeliveryRunSummary | undefined> {
@@ -147,18 +157,44 @@ export class DeliveryScheduler {
       return;
     }
     const alert = this.database.getAlert(delivery.alertId);
+    const controller = new AbortController();
+    const startedAt = new Date();
+    this.activeRequests.set(controller, startedAt);
+    const timeoutSeconds =
+      this.options.requestTimeoutSeconds ?? DEFAULT_REQUEST_TIMEOUT_SECONDS;
+    const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+    timeout.unref?.();
+    const aborted = new Promise<TransportResult>((resolve) =>
+      controller.signal.addEventListener(
+        "abort",
+        () =>
+          resolve({
+            kind: "retryable",
+            code: this.stopped ? "DELIVERY_ABORTED" : "DELIVERY_TIMEOUT",
+            message: this.stopped
+              ? "Notification delivery was interrupted because the plugin stopped"
+              : `Notification service did not respond within ${timeoutSeconds} seconds`,
+          }),
+        { once: true },
+      ),
+    );
     let result: TransportResult;
     try {
-      result = await transport.send(alert, delivery, {
-        rendered: renderAlert(alert),
-        now,
-      });
-    } catch (error) {
-      result = {
+      const sending = Promise.resolve(
+        transport.send(alert, delivery, {
+          rendered: renderAlert(alert),
+          now,
+          signal: controller.signal,
+        }),
+      ).catch((error): TransportResult => ({
         kind: "retryable",
         code: "TRANSPORT_ERROR",
         message: error instanceof Error ? error.message : String(error),
-      };
+      }));
+      result = await Promise.race([sending, aborted]);
+    } finally {
+      clearTimeout(timeout);
+      this.activeRequests.delete(controller);
     }
     if (result.kind === "success") {
       this.database.recordDeliverySuccess(delivery.id, result.remoteId, now);

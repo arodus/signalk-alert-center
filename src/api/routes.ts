@@ -86,6 +86,8 @@ interface ResponseLike {
   write?(value: string): boolean;
   end?(): void;
   on?(event: "close", listener: () => void): void;
+  once?(event: "drain", listener: () => void): void;
+  off?(event: "drain", listener: () => void): void;
 }
 type Handler = (request: RequestLike, response: ResponseLike) => void;
 export interface RouterLike {
@@ -471,18 +473,49 @@ export function registerAlertCenterRoutes(
       res.write("retry: 5000\n\n");
 
       let closed = false;
+      let writable = true;
+      let waitingForDrain = false;
+      let pending: AlertCenterChange | undefined;
+      const waitForDrain = () => {
+        if (waitingForDrain) return;
+        waitingForDrain = true;
+        res.once?.("drain", flushPending);
+      };
+      const send = (change: AlertCenterChange) => {
+        if (closed) return;
+        if (!writable) {
+          pending = change;
+          return;
+        }
+        writable =
+          res.write?.(`event: change\ndata: ${JSON.stringify(change)}\n\n`) !==
+          false;
+        if (!writable) waitForDrain();
+      };
+      const flushPending = () => {
+        if (closed) return;
+        waitingForDrain = false;
+        writable = true;
+        const change = pending;
+        pending = undefined;
+        if (change) send(change);
+      };
       const unsubscribe = subscribeChanges((change) => {
-        if (!closed)
-          res.write?.(`event: change\ndata: ${JSON.stringify(change)}\n\n`);
+        send(change);
       });
       const heartbeat = setInterval(() => {
-        if (!closed) res.write?.(": keepalive\n\n");
+        if (!closed && writable)
+          writable = res.write?.(": keepalive\n\n") !== false;
+        if (!writable) waitForDrain();
       }, 25_000);
       heartbeat.unref?.();
       const close = () => {
         if (closed) return;
         closed = true;
         clearInterval(heartbeat);
+        pending = undefined;
+        waitingForDrain = false;
+        res.off?.("drain", flushPending);
         unsubscribe();
         res.end?.();
       };
@@ -700,9 +733,10 @@ export function registerRoutes(
         res.json({ status: action === "remove" ? "removed" : `${action}d` });
       },
     );
-  addRoute(router, "get", "/deliveries", "readonly", (_req, res) =>
-    res.json(database()?.listDeliveries() ?? []),
-  );
+  addRoute(router, "get", "/deliveries", "readonly", (req, res) => {
+    const { limit } = pagination(req.query ?? {});
+    res.json(database()?.listRecentDeliveries(limit) ?? []);
+  });
   addRoute(
     router,
     "post",

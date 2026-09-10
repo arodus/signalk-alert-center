@@ -105,6 +105,8 @@ function renderDiagnostics(status) {
   elements.healthState.textContent = health;
   elements.healthState.className = `health-pill ${health}`;
   const reconciliation = status.reconciliation ?? {};
+  const ingestion = status.ingestion ?? {};
+  const runtime = status.runtime ?? {};
   const scheduler = status.scheduler ?? {};
   const database = status.database ?? {};
   const connectivity = status.connectivity ?? {};
@@ -118,7 +120,15 @@ function renderDiagnostics(status) {
     ],
     [
       "Delivery scheduler",
-      `${scheduler.running ? "Running" : "Idle"} · last completed ${formatDate(scheduler.lastRunCompletedAt)}${scheduler.lastError ? ` · ${scheduler.lastError}` : ""}`,
+      `${scheduler.running ? "Running" : "Idle"} · ${scheduler.activeRequests ?? 0} active requests${scheduler.oldestRequestStartedAt ? ` · oldest started ${formatDate(scheduler.oldestRequestStartedAt)}` : ""} · last completed ${formatDate(scheduler.lastRunCompletedAt)}${scheduler.lastError ? ` · ${scheduler.lastError}` : ""}`,
+    ],
+    [
+      "Notification ingestion",
+      `${ingestion.depth ?? 0}/${ingestion.limit ?? 0} queued · high-water ${ingestion.highWaterMark ?? 0} · ${ingestion.received ?? 0} received / ${ingestion.processed ?? 0} processed / ${ingestion.coalesced ?? 0} coalesced / ${ingestion.rejected ?? 0} rejected`,
+    ],
+    [
+      "Runtime lifecycle",
+      `Generation ${runtime.generation ?? 0} · ${runtime.changeListeners ?? 0} dashboard streams · ${runtime.startCount ?? 0} starts / ${runtime.stopCount ?? 0} stops`,
     ],
     [
       "Local audio",
@@ -436,7 +446,7 @@ async function load() {
       api("/notifiers"),
       api("/audio/sounds"),
       api("/status").catch(() => ({})),
-      api("/deliveries").catch(() => []),
+      api("/deliveries?limit=100").catch(() => []),
     ]);
     state.definitions = definitions;
     renderPathOptions();

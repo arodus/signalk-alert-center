@@ -5,9 +5,12 @@ export interface InternetProbeConfig {
 
 export function createInternetProbe(
   config: InternetProbeConfig,
-): () => Promise<boolean> {
-  return async () => {
+): (signal?: AbortSignal) => Promise<boolean> {
+  return async (signal?: AbortSignal) => {
     const controller = new AbortController();
+    const stop = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", stop, { once: true });
     const timeout = setTimeout(
       () => controller.abort(),
       config.timeoutMs ?? 10_000,
@@ -22,6 +25,7 @@ export function createInternetProbe(
       return false;
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", stop);
     }
   };
 }

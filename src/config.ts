@@ -32,9 +32,14 @@ export interface PluginConfig {
   storage?: { path?: string };
   maintenance?: { resetDatabase?: boolean };
   discovery?: { zoneRefreshSeconds?: number };
+  ingestion?: {
+    queueLimit?: number;
+    batchSize?: number;
+  };
   delivery?: {
     batchSize?: number;
     concurrency?: number;
+    requestTimeoutSeconds?: number;
   };
   retention?: {
     enabled?: boolean;
@@ -151,6 +156,7 @@ export function validateConfig(config: PluginConfig): void {
     }
   }
   validateRetry(config.retry);
+  validateIngestion(config.ingestion);
   validateDelivery(config.delivery);
   validateAudio(config.audio);
   if ((config.discovery?.zoneRefreshSeconds ?? 300) < 1)
@@ -199,6 +205,32 @@ export function validateConfig(config: PluginConfig): void {
     throw new Error("idleCooldownSeconds must be non-negative");
 }
 
+function validateIngestion(ingestion: PluginConfig["ingestion"]): void {
+  if (!ingestion) return;
+  if (
+    ingestion.queueLimit !== undefined &&
+    (!Number.isInteger(ingestion.queueLimit) ||
+      ingestion.queueLimit < 10 ||
+      ingestion.queueLimit > 100_000)
+  )
+    throw new Error(
+      "ingestion.queueLimit must be an integer from 10 to 100000",
+    );
+  if (
+    ingestion.batchSize !== undefined &&
+    (!Number.isInteger(ingestion.batchSize) ||
+      ingestion.batchSize < 1 ||
+      ingestion.batchSize > 1000)
+  )
+    throw new Error("ingestion.batchSize must be an integer from 1 to 1000");
+  if (
+    ingestion.queueLimit !== undefined &&
+    ingestion.batchSize !== undefined &&
+    ingestion.batchSize > ingestion.queueLimit
+  )
+    throw new Error("ingestion.batchSize must not exceed ingestion.queueLimit");
+}
+
 function validateDelivery(delivery: PluginConfig["delivery"]): void {
   if (!delivery) return;
   if (
@@ -215,6 +247,15 @@ function validateDelivery(delivery: PluginConfig["delivery"]): void {
       delivery.concurrency > 32)
   )
     throw new Error("delivery.concurrency must be an integer from 1 to 32");
+  if (
+    delivery.requestTimeoutSeconds !== undefined &&
+    (!Number.isInteger(delivery.requestTimeoutSeconds) ||
+      delivery.requestTimeoutSeconds < 1 ||
+      delivery.requestTimeoutSeconds > 300)
+  )
+    throw new Error(
+      "delivery.requestTimeoutSeconds must be an integer from 1 to 300",
+    );
 }
 
 function validateAudio(audio: PluginConfig["audio"]): void {

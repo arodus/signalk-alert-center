@@ -1639,6 +1639,20 @@ export class AlertDatabase {
     return rows.map(deliveryRecord);
   }
 
+  listRecentDeliveries(limit = 100): DeliveryRecord[] {
+    const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM deliveries
+           ORDER BY CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+                         THEN 0 ELSE 1 END,
+                    rowid DESC LIMIT ?`,
+        )
+        .all(boundedLimit) as Row[]
+    ).map(deliveryRecord);
+  }
+
   listDeliveriesForAlert(alertId: string): DeliveryRecord[] {
     return (
       this.db

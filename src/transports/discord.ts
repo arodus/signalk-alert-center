@@ -2,6 +2,7 @@ import { AlertRecord, DeliveryRecord } from "../alerts/types";
 import {
   classifyHttp,
   NotificationTransport,
+  readResponseBody,
   TransportContext,
   TransportResult,
 } from "./transport";
@@ -27,8 +28,9 @@ export class DiscordTransport implements NotificationTransport {
             },
           ],
         }),
+        signal: context.signal,
       });
-      return classifyHttp(response.status, await response.text());
+      return classifyHttp(response.status, await readResponseBody(response));
     } catch (error) {
       return {
         kind: "retryable",
