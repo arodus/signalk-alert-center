@@ -10,7 +10,15 @@ export type Severity = (typeof severities)[number];
 export const audioSounds = ["chime", "warning", "alarm", "emergency"] as const;
 export type AudioSound = (typeof audioSounds)[number];
 export const audioSoundSelections = ["severity", ...audioSounds] as const;
-export type AudioSoundSelection = (typeof audioSoundSelections)[number];
+export type CustomAudioSound = `custom:${string}`;
+export type PlayableAudioSound = AudioSound | CustomAudioSound;
+export type AudioSoundSelection =
+  (typeof audioSoundSelections)[number] | CustomAudioSound;
+
+export const isBuiltInAudioSoundSelection = (
+  value: unknown,
+): value is (typeof audioSoundSelections)[number] =>
+  audioSoundSelections.includes(value as (typeof audioSoundSelections)[number]);
 export type AudioPlaybackMode = "once" | "repeat";
 
 export interface AudioStopPolicy {

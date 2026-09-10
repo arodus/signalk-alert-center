@@ -164,6 +164,24 @@ export function getAlertCenterOpenApi() {
           },
         },
       },
+      "/audio/sounds": {
+        get: {
+          summary: "List automatic, built-in, and configured custom sounds",
+          responses: {
+            "200": response("Audio sound list", {
+              type: "object",
+              required: ["items"],
+              properties: {
+                items: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/AudioSound" },
+                },
+              },
+            }),
+            ...errors,
+          },
+        },
+      },
       "/events": {
         get: {
           summary: "Stream alert-center change notifications",
@@ -405,8 +423,13 @@ export function getAlertCenterOpenApi() {
           properties: {
             enabled: { type: "boolean" },
             sound: {
-              type: "string",
-              enum: ["severity", "chime", "warning", "alarm", "emergency"],
+              oneOf: [
+                {
+                  type: "string",
+                  enum: ["severity", "chime", "warning", "alarm", "emergency"],
+                },
+                { type: "string", pattern: "^custom:.+$" },
+              ],
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             mode: { type: "string", enum: ["once", "repeat"] },
@@ -510,6 +533,19 @@ export function getAlertCenterOpenApi() {
             },
           },
         },
+        AudioSound: {
+          type: "object",
+          required: ["id", "name", "type"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            type: {
+              type: "string",
+              enum: ["automatic", "built-in", "custom"],
+            },
+          },
+          additionalProperties: false,
+        },
         AudioPlayback: {
           type: "object",
           required: [
@@ -540,8 +576,13 @@ export function getAlertCenterOpenApi() {
               ],
             },
             sound: {
-              type: "string",
-              enum: ["severity", "chime", "warning", "alarm", "emergency"],
+              oneOf: [
+                {
+                  type: "string",
+                  enum: ["severity", "chime", "warning", "alarm", "emergency"],
+                },
+                { type: "string", pattern: "^custom:.+$" },
+              ],
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             mode: { type: "string", enum: ["once", "repeat"] },

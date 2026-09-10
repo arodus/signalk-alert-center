@@ -82,16 +82,41 @@ describe("validateConfig", () => {
     expect(
       audio.properties.afterPlaybackCommand.properties.arguments.type,
     ).toBe("array");
+    expect(audio.properties.customSounds.items.properties.filePath.title).toBe(
+      "WAV file path",
+    );
     expect(() =>
       validateConfig({
         audio: {
           enabled: true,
           backend: "aplay",
           masterVolume: 80,
+          customSounds: [
+            { name: "Ship bell", filePath: "sounds/ship-bell.wav" },
+          ],
           defaults: { sound: "severity", repeatIntervalSeconds: 60 },
         },
       }),
     ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        audio: {
+          customSounds: [
+            { name: "Ship bell", filePath: "sounds/ship-bell.mp3" },
+          ],
+        },
+      }),
+    ).toThrow("must reference a .wav file");
+    expect(() =>
+      validateConfig({
+        audio: {
+          customSounds: [
+            { name: "Bell", filePath: "one.wav" },
+            { name: "bell", filePath: "two.wav" },
+          ],
+        },
+      }),
+    ).toThrow("must be unique");
     expect(() =>
       validateConfig({
         audio: {

@@ -378,6 +378,15 @@ severity for every playback, so a repeating alert changes sound when it escalate
 or de-escalates. An individual alert can still select a fixed sound when it needs
 a recognizable tone independent of severity.
 
+To add your own tone, add an entry under **Custom sounds** in the global plugin
+configuration. Give it a unique display name and a `.wav` file path. A relative
+path such as `sounds/ship-bell.wav` is resolved inside Signal K's data directory;
+an absolute path is used as written. The named custom sound then appears in every
+alert's Sound dropdown. The file is checked when playback starts, so a missing or
+unreadable file produces a bounded, logged playback failure without affecting
+remote notifications. Custom WAV files retain their own encoded level; the plugin's
+master volume applies only to generated built-in tones.
+
 Optional **Command before each sound** and **Command after each sound** settings
 can pause/resume music, power an amplifier, adjust a mixer, or control an external
 indicator. Configure the executable separately from its ordered argument list. The
@@ -405,12 +414,15 @@ docker compose -f docker-compose.live.yml -f docker-compose.audio.yml up --build
 The audio override maps `/dev/snd` into the container. Do not use it on hosts that
 do not expose that device. Choose **ALSA (aplay)** in plugin configuration; leave
 the output device blank for the default device, or enter an ALSA device such as
-`hw:1,0`. Master volume is applied to the generated WAV and does not modify the
-host mixer.
+`hw:1,0`. For custom sounds, mount a host directory into the Signal K data
+directory, for example `./sounds:/home/node/.signalk/sounds:ro`, and configure a
+relative path such as `sounds/ship-bell.wav`. Master volume is applied to generated
+built-in WAV files and does not modify the host mixer.
 
-Only the built-in `chime`, `warning`, `alarm`, and `emergency` sound IDs are
-accepted. The configured backend is selected from a fixed list and is launched
-directly with argument arrays. Pre/post executables are intentionally
+The built-in `chime`, `warning`, `alarm`, and `emergency` sound IDs and globally
+registered custom WAV names are accepted. Raw per-alert file paths are rejected.
+The configured backend is selected from a fixed list and is launched directly
+with argument arrays. Pre/post executables are intentionally
 administrator-configurable, but no shell is used (`shell: false`), arguments are
 not parsed as a command line, and alert data is never interpolated into them.
 Playback attempts and errors appear in the occurrence history, Signal K log, and
@@ -426,6 +438,7 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `PATCH /definitions/:id/policy`
 - `DELETE /definitions/:id` for inactive discovered paths
 - `GET /notifiers`
+- `GET /audio/sounds`
 - `GET /occurrences` and `GET /occurrences/:id`
 - `GET /occurrences/:id/events`
 - `POST /occurrences/:id/dismiss`

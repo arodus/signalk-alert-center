@@ -1,6 +1,6 @@
 import {
   AlertAudioPolicy,
-  audioSoundSelections,
+  isBuiltInAudioSoundSelection,
   severities,
 } from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
@@ -111,6 +111,7 @@ export interface AlertCenterChange {
 export interface AlertCenterDependencies {
   repository: () => AlertCenterRepository | undefined;
   listNotifiers?: () => MaybePromise<unknown[]>;
+  listAudioSounds?: () => MaybePromise<unknown[]>;
   subscribeChanges?: (
     listener: (change: AlertCenterChange) => void,
   ) => () => void;
@@ -269,7 +270,10 @@ function parseOccurrences(request: RequestLike): OccurrenceQuery {
     to,
   };
 }
-function parsePolicy(body: unknown): AlertPolicyPatch {
+function parsePolicy(
+  body: unknown,
+  availableAudioSounds = new Set<string>(),
+): AlertPolicyPatch {
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new ApiError(400, "INVALID_BODY", "Request body must be an object");
   const value = body as Record<string, unknown>;
@@ -364,7 +368,8 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       };
     else throw new ApiError(400, "INVALID_BODY", "connectivity is invalid");
   }
-  if (value.audio !== undefined) patch.audio = parseAudioPolicy(value.audio);
+  if (value.audio !== undefined)
+    patch.audio = parseAudioPolicy(value.audio, availableAudioSounds);
   if (!Object.keys(patch).length)
     throw new ApiError(
       400,
@@ -374,7 +379,10 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
   return patch;
 }
 
-function parseAudioPolicy(value: unknown): AlertAudioPolicy {
+function parseAudioPolicy(
+  value: unknown,
+  availableAudioSounds: Set<string>,
+): AlertAudioPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new ApiError(400, "INVALID_BODY", "audio must be an object");
   const audio = value as Record<string, unknown>;
@@ -390,7 +398,10 @@ function parseAudioPolicy(value: unknown): AlertAudioPolicy {
     throw new ApiError(400, "INVALID_BODY", "audio has unknown fields");
   if (typeof audio.enabled !== "boolean")
     throw new ApiError(400, "INVALID_BODY", "audio.enabled must be boolean");
-  if (!audioSoundSelections.includes(audio.sound as AlertAudioPolicy["sound"]))
+  if (
+    !isBuiltInAudioSoundSelection(audio.sound) &&
+    !availableAudioSounds.has(String(audio.sound))
+  )
     throw new ApiError(400, "INVALID_BODY", "audio.sound is invalid");
   if (
     !severities.includes(
@@ -529,7 +540,16 @@ export function registerAlertCenterRoutes(
     "/definitions/:id/policy",
     "readwrite",
     wrap(async (req, res) => {
-      const patch = parsePolicy(req.body);
+      const availableAudioSounds = new Set(
+        dependencies.listAudioSounds
+          ? (await dependencies.listAudioSounds()).map((item) =>
+              typeof item === "string"
+                ? item
+                : String((item as { id?: unknown }).id),
+            )
+          : [],
+      );
+      const patch = parsePolicy(req.body, availableAudioSounds);
       if (patch.notifierIds && dependencies.listNotifiers) {
         const known = new Set(
           (await dependencies.listNotifiers()).map((item) =>
@@ -562,6 +582,19 @@ export function registerAlertCenterRoutes(
       res.json({
         items: dependencies.listNotifiers
           ? await dependencies.listNotifiers()
+          : [],
+      }),
+    ),
+  );
+  addRoute(
+    router,
+    "get",
+    "/audio/sounds",
+    "readonly",
+    wrap(async (_req, res) =>
+      res.json({
+        items: dependencies.listAudioSounds
+          ? await dependencies.listAudioSounds()
           : [],
       }),
     ),

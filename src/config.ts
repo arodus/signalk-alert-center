@@ -62,6 +62,7 @@ export interface PluginConfig {
     beforePlaybackCommand?: Partial<AudioCommand>;
     afterPlaybackCommand?: Partial<AudioCommand>;
     commandTimeoutSeconds?: number;
+    customSounds?: Array<{ name: string; filePath: string }>;
     quietHours?: { enabled?: boolean; start?: string; end?: string };
     defaults?: Partial<AlertAudioPolicy> & {
       stopOn?: Partial<AlertAudioPolicy["stopOn"]>;
@@ -260,6 +261,7 @@ function validateAudio(audio: PluginConfig["audio"]): void {
     throw new Error("audio.commandTimeoutSeconds must not exceed 300");
   validateAudioCommand(audio.beforePlaybackCommand, "beforePlaybackCommand");
   validateAudioCommand(audio.afterPlaybackCommand, "afterPlaybackCommand");
+  validateCustomSounds(audio.customSounds);
   if (
     audio.defaults?.repeatIntervalSeconds !== undefined &&
     audio.defaults.repeatIntervalSeconds > 86_400
@@ -268,8 +270,18 @@ function validateAudio(audio: PluginConfig["audio"]): void {
       "audio.defaults.repeatIntervalSeconds must not exceed 86400",
     );
   const defaults = audio.defaults;
-  if (defaults?.sound && !audioSoundSelections.includes(defaults.sound))
-    throw new Error("audio.defaults.sound is not a supported sound selection");
+  if (defaults?.sound) {
+    const customNames = new Set(
+      (audio.customSounds ?? []).map((sound) => `custom:${sound.name}`),
+    );
+    if (
+      !audioSoundSelections.includes(
+        defaults.sound as (typeof audioSoundSelections)[number],
+      ) &&
+      !customNames.has(defaults.sound)
+    )
+      throw new Error("audio.defaults.sound is not a configured sound");
+  }
   if (
     defaults?.minimumSeverity &&
     !severities.includes(defaults.minimumSeverity)
@@ -291,6 +303,39 @@ function validateAudio(audio: PluginConfig["audio"]): void {
       throw new Error("Enabled audio quiet hours require HH:MM start and end");
     if (quiet.start === quiet.end)
       throw new Error("Audio quiet-hours start and end must differ");
+  }
+}
+
+function validateCustomSounds(
+  sounds: NonNullable<PluginConfig["audio"]>["customSounds"],
+): void {
+  if (sounds !== undefined && !Array.isArray(sounds))
+    throw new Error("audio.customSounds must be a list");
+  if ((sounds?.length ?? 0) > 100)
+    throw new Error("audio.customSounds must contain at most 100 items");
+  const names = new Set<string>();
+  for (const sound of sounds ?? []) {
+    requireString(sound.name, "Each custom sound needs a name");
+    if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/.test(sound.name))
+      throw new Error(
+        "Custom sound names may contain letters, numbers, spaces, dots, dashes, and underscores",
+      );
+    const normalized = sound.name.toLocaleLowerCase();
+    if (names.has(normalized))
+      throw new Error(`Custom sound name must be unique: ${sound.name}`);
+    names.add(normalized);
+    requireString(
+      sound.filePath,
+      `Custom sound ${sound.name} needs a WAV file path`,
+    );
+    if (
+      sound.filePath !== sound.filePath.trim() ||
+      sound.filePath.length > 1024 ||
+      sound.filePath.includes("\0") ||
+      /[\r\n]/.test(sound.filePath) ||
+      !sound.filePath.toLocaleLowerCase().endsWith(".wav")
+    )
+      throw new Error(`Custom sound ${sound.name} must reference a .wav file`);
   }
 }
 

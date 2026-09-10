@@ -91,6 +91,10 @@ function fixture() {
   registerAlertCenterRoutes(router, {
     repository: () => repository,
     listNotifiers: () => [{ id: "ntfy-main", type: "ntfy" }],
+    listAudioSounds: () => [
+      { id: "severity", name: "Match alert severity", type: "automatic" },
+      { id: "custom:Ship bell", name: "Ship bell", type: "custom" },
+    ],
     subscribeChanges: (listener) => {
       changeListener = listener;
       listener({
@@ -132,7 +136,7 @@ describe("alert-center routes", () => {
     const { access } = fixture();
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
-    expect(access.filter((value) => value === "readonly")).toHaveLength(7);
+    expect(access.filter((value) => value === "readonly")).toHaveLength(8);
     expect(access.filter((value) => value === "readwrite")).toHaveLength(5);
   });
 
@@ -252,6 +256,39 @@ describe("alert-center routes", () => {
     expect(response.statusCode).toBe(400);
     expect(response.body).toMatchObject({
       error: { code: "INVALID_BODY" },
+    });
+  });
+
+  it("lists and accepts configured custom sounds", async () => {
+    const sounds = await fixture().invoke("GET", "/audio/sounds");
+    expect(sounds.body).toMatchObject({
+      items: [{ id: "severity" }, { id: "custom:Ship bell", type: "custom" }],
+    });
+    const response = await fixture().invoke(
+      "PATCH",
+      "/definitions/:id/policy",
+      {
+        params: { id: "bilge" },
+        body: {
+          audio: {
+            enabled: true,
+            sound: "custom:Ship bell",
+            minimumSeverity: "warn",
+            mode: "once",
+            repeatIntervalSeconds: 60,
+            stopOn: {
+              clear: true,
+              acknowledge: true,
+              silence: true,
+              dismiss: true,
+            },
+          },
+        },
+      },
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      policy: { audio: { sound: "custom:Ship bell" } },
     });
   });
 

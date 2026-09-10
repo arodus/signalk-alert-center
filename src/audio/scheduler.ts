@@ -1,8 +1,8 @@
 import {
   AlertAudioPolicy,
   AlertRecord,
-  AudioSound,
   AudioSoundSelection,
+  PlayableAudioSound,
   Severity,
   severityRank,
 } from "../alerts/types";
@@ -196,7 +196,7 @@ export class AudioScheduler {
 export function resolveAudioSound(
   selection: AudioSoundSelection,
   severity: Severity,
-): AudioSound {
+): PlayableAudioSound {
   if (selection !== "severity") return selection;
   if (severity === "emergency") return "emergency";
   if (severity === "alarm") return "alarm";

@@ -6,6 +6,7 @@ import { AlertAudioPolicy } from "../src/alerts/types";
 import {
   audioCommand,
   AudioPlayer,
+  CommandAudioPlayer,
   HookedAudioPlayer,
 } from "../src/audio/player";
 import {
@@ -288,6 +289,24 @@ describe("local audio playback", () => {
     expect(resolveAudioSound("severity", "alarm")).toBe("alarm");
     expect(resolveAudioSound("severity", "emergency")).toBe("emergency");
     expect(resolveAudioSound("alarm", "warn")).toBe("alarm");
+    expect(resolveAudioSound("custom:Ship bell", "emergency")).toBe(
+      "custom:Ship bell",
+    );
+  });
+
+  it("fails clearly when a configured custom WAV is unavailable", async () => {
+    const player = new CommandAudioPlayer({
+      backend: "aplay",
+      masterVolume: 80,
+      timeoutSeconds: 5,
+      assetDirectory: "/tmp/notifier-built-in-sounds",
+      customSounds: new Map([
+        ["custom:Missing", "/tmp/this-custom-sound-does-not-exist.wav"],
+      ]),
+    });
+    await expect(player.play("custom:Missing")).rejects.toMatchObject({
+      code: "CUSTOM_SOUND_UNAVAILABLE",
+    });
   });
 
   it("runs configured commands in order around each sound", async () => {

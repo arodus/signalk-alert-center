@@ -166,6 +166,13 @@ assert.equal(Array.isArray(status.services), true);
 const alerts = await json(
   `${signalkUrl}/plugins/signalk-persistent-notifier/alerts`,
 );
+const audioSounds = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/audio/sounds`,
+);
+assert.equal(
+  audioSounds.items.some((sound) => sound.id === "severity"),
+  true,
+);
 assert.equal(
   alerts.some(
     (alert) =>

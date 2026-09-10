@@ -1,12 +1,19 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AudioSound } from "../alerts/types";
+import {
+  AudioSound,
+  CustomAudioSound,
+  PlayableAudioSound,
+} from "../alerts/types";
 
 export type AudioBackend = "auto" | "aplay" | "paplay" | "afplay";
 
 export interface AudioPlayer {
-  play(sound: AudioSound, signal?: AbortSignal): Promise<{ backend: string }>;
+  play(
+    sound: PlayableAudioSound,
+    signal?: AbortSignal,
+  ): Promise<{ backend: string }>;
 }
 
 export interface AudioCommand {
@@ -27,6 +34,7 @@ export interface CommandAudioPlayerOptions {
   masterVolume: number;
   timeoutSeconds: number;
   assetDirectory: string;
+  customSounds?: ReadonlyMap<CustomAudioSound, string>;
 }
 
 const soundPatterns: Record<AudioSound, Array<[number, number]>> = {
@@ -77,7 +85,7 @@ export class CommandAudioPlayer implements AudioPlayer {
   constructor(private readonly options: CommandAudioPlayerOptions) {}
 
   async play(
-    sound: AudioSound,
+    sound: PlayableAudioSound,
     signal?: AbortSignal,
   ): Promise<{ backend: string }> {
     const filename = this.ensureSound(sound);
@@ -101,7 +109,29 @@ export class CommandAudioPlayer implements AudioPlayer {
     throw missing ?? new Error("No supported local audio player was found");
   }
 
-  private ensureSound(sound: AudioSound): string {
+  private ensureSound(sound: PlayableAudioSound): string {
+    if (sound.startsWith("custom:")) {
+      const filename = this.options.customSounds?.get(
+        sound as CustomAudioSound,
+      );
+      if (!filename) {
+        const error = new Error(`Custom sound is not configured: ${sound}`);
+        Object.assign(error, { code: "CUSTOM_SOUND_NOT_CONFIGURED" });
+        throw error;
+      }
+      let validFile = false;
+      try {
+        validFile = statSync(filename).isFile();
+      } catch {}
+      if (!validFile) {
+        const error = new Error(
+          `Custom sound file is not readable: ${filename}`,
+        );
+        Object.assign(error, { code: "CUSTOM_SOUND_UNAVAILABLE" });
+        throw error;
+      }
+      return filename;
+    }
     const volume = Math.round(
       Math.max(0, Math.min(100, this.options.masterVolume)),
     );
@@ -111,9 +141,13 @@ export class CommandAudioPlayer implements AudioPlayer {
     );
     mkdirSync(this.options.assetDirectory, { recursive: true });
     try {
-      writeFileSync(filename, synthesizeWave(soundPatterns[sound], volume), {
-        flag: "wx",
-      });
+      writeFileSync(
+        filename,
+        synthesizeWave(soundPatterns[sound as AudioSound], volume),
+        {
+          flag: "wx",
+        },
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
@@ -179,7 +213,7 @@ export class HookedAudioPlayer implements AudioPlayer {
   ) {}
 
   async play(
-    sound: AudioSound,
+    sound: PlayableAudioSound,
     signal?: AbortSignal,
   ): Promise<{ backend: string }> {
     if (this.options.before) {
