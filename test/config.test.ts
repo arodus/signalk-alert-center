@@ -5,18 +5,20 @@ import { pluginConfigSchema } from "../src/config-schema";
 describe("validateConfig", () => {
   it("exposes only global settings in the Signal K plugin form", () => {
     expect(pluginConfigSchema.properties).not.toHaveProperty("rules");
-    const variants = pluginConfigSchema.properties.notifiers.items.oneOf;
+    const notifierItems = pluginConfigSchema.properties.notifiers.items;
+    const variants = notifierItems.dependencies.type.oneOf;
     expect(pluginConfigSchema.properties.notifiers.type).toBe("array");
     expect(variants).toHaveLength(3);
-    expect(
-      variants.every((variant) =>
-        Object.hasOwn(variant.properties, "minSeverity"),
-      ),
-    ).toBe(true);
-    expect(variants.map((variant) => variant.title)).toEqual([
+    expect(notifierItems.properties.type.enum).toEqual([
       "ntfy",
-      "PagerDuty",
-      "Discord",
+      "pagerduty",
+      "discord",
+    ]);
+    expect(notifierItems.properties.type.default).toBe("ntfy");
+    expect(variants.map((variant) => variant.properties.type.enum[0])).toEqual([
+      "ntfy",
+      "pagerduty",
+      "discord",
     ]);
   });
 
