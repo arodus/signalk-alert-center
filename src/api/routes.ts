@@ -1,4 +1,8 @@
-import { AlertAudioPolicy, audioSounds, severities } from "../alerts/types";
+import {
+  AlertAudioPolicy,
+  audioSoundSelections,
+  severities,
+} from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
 
 export interface Page<T> {
@@ -386,7 +390,7 @@ function parseAudioPolicy(value: unknown): AlertAudioPolicy {
     throw new ApiError(400, "INVALID_BODY", "audio has unknown fields");
   if (typeof audio.enabled !== "boolean")
     throw new ApiError(400, "INVALID_BODY", "audio.enabled must be boolean");
-  if (!audioSounds.includes(audio.sound as AlertAudioPolicy["sound"]))
+  if (!audioSoundSelections.includes(audio.sound as AlertAudioPolicy["sound"]))
     throw new ApiError(400, "INVALID_BODY", "audio.sound is invalid");
   if (
     !severities.includes(

@@ -260,8 +260,14 @@
             sound</label
           >
           <label class="form-field"
-            ><span>Sound</span
+            ><span
+              >Sound
+              <small class="field-help"
+                >Matching uses Chime for warn, Warning for alert, Alarm for
+                alarm, and Emergency for emergency.</small
+              ></span
             ><select id="audio-sound">
+              <option value="severity">Match alert severity</option>
               <option value="chime">Chime</option>
               <option value="warning">Warning</option>
               <option value="alarm">Alarm</option>

@@ -371,6 +371,13 @@ defaults, and optionally enable **Play a test chime when saving**. The test chec
 turns itself off and writes success or failure to the Signal K log. Then open an
 alert in the Alert center and configure its **Local sound** section.
 
+New alerts use **Match alert severity** rather than inheriting one fixed sound:
+`warn` plays **Chime**, `alert` plays **Warning**, `alarm` plays **Alarm**, and
+`emergency` plays **Emergency**. The sound is resolved from the alert's current
+severity for every playback, so a repeating alert changes sound when it escalates
+or de-escalates. An individual alert can still select a fixed sound when it needs
+a recognizable tone independent of severity.
+
 Optional **Command before each sound** and **Command after each sound** settings
 can pause/resume music, power an amplifier, adjust a mixer, or control an external
 indicator. Configure the executable separately from its ordered argument list. The

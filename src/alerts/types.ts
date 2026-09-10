@@ -9,6 +9,8 @@ export type Severity = (typeof severities)[number];
 
 export const audioSounds = ["chime", "warning", "alarm", "emergency"] as const;
 export type AudioSound = (typeof audioSounds)[number];
+export const audioSoundSelections = ["severity", ...audioSounds] as const;
+export type AudioSoundSelection = (typeof audioSoundSelections)[number];
 export type AudioPlaybackMode = "once" | "repeat";
 
 export interface AudioStopPolicy {
@@ -20,7 +22,7 @@ export interface AudioStopPolicy {
 
 export interface AlertAudioPolicy {
   enabled: boolean;
-  sound: AudioSound;
+  sound: AudioSoundSelection;
   minimumSeverity: Severity;
   mode: AudioPlaybackMode;
   repeatIntervalSeconds: number;
@@ -115,7 +117,7 @@ export interface AudioPlaybackRecord {
   id: string;
   alertId: string;
   state: AudioPlaybackState;
-  sound: AudioSound;
+  sound: AudioSoundSelection;
   minimumSeverity: Severity;
   mode: AudioPlaybackMode;
   repeatIntervalSeconds: number;

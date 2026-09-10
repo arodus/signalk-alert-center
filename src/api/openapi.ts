@@ -406,7 +406,7 @@ export function getAlertCenterOpenApi() {
             enabled: { type: "boolean" },
             sound: {
               type: "string",
-              enum: ["chime", "warning", "alarm", "emergency"],
+              enum: ["severity", "chime", "warning", "alarm", "emergency"],
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             mode: { type: "string", enum: ["once", "repeat"] },
@@ -541,7 +541,7 @@ export function getAlertCenterOpenApi() {
             },
             sound: {
               type: "string",
-              enum: ["chime", "warning", "alarm", "emergency"],
+              enum: ["severity", "chime", "warning", "alarm", "emergency"],
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             mode: { type: "string", enum: ["once", "repeat"] },

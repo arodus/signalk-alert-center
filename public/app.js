@@ -162,6 +162,9 @@ function alertName(definition) {
     .map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2"))
     .join(" › ");
 }
+function audioSoundLabel(sound) {
+  return sound === "severity" ? "matches severity" : String(sound ?? "sound");
+}
 function definitionOrigin(sourceType) {
   return (
     {
@@ -303,7 +306,7 @@ function renderDefinitions() {
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Status">${status}</td>
             <td data-label="Last activity">${formatDate(latestTimestamp(latest?.dismissedAt, latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
-            <td data-label="Notify via"><span class="cell-title">${[policy.audio?.enabled ? `🔊 ${policy.audio.sound}` : "", policy.enabled === false ? "" : policy.notifierIds?.join(", ")].filter(Boolean).map(escapeHtml).join(" · ") || '<span class="muted">No delivery selected</span>'}</span><span class="cell-detail">${policy.audio?.enabled ? `${escapeHtml(policy.audio.minimumSeverity)}+ local${policy.audio.mode === "repeat" ? ` · every ${policy.audio.repeatIntervalSeconds}s` : " · once"}` : ""}${policy.audio?.enabled && policy.enabled !== false && notifierCount ? " · " : ""}${policy.enabled === false ? "Remote off" : notifierCount ? `${escapeHtml(policy.minimumSeverity ?? "normal")}+ remote` : ""}</span></td>
+            <td data-label="Notify via"><span class="cell-title">${[policy.audio?.enabled ? `🔊 ${audioSoundLabel(policy.audio.sound)}` : "", policy.enabled === false ? "" : policy.notifierIds?.join(", ")].filter(Boolean).map(escapeHtml).join(" · ") || '<span class="muted">No delivery selected</span>'}</span><span class="cell-detail">${policy.audio?.enabled ? `${escapeHtml(policy.audio.minimumSeverity)}+ local${policy.audio.mode === "repeat" ? ` · every ${policy.audio.repeatIntervalSeconds}s` : " · once"}` : ""}${policy.audio?.enabled && policy.enabled !== false && notifierCount ? " · " : ""}${policy.enabled === false ? "Remote off" : notifierCount ? `${escapeHtml(policy.minimumSeverity ?? "normal")}+ remote` : ""}</span></td>
             <td class="action-cell">${active ? `<div class="table-actions"><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="acknowledge" type="button" ${latest.acknowledgedAt ? "disabled" : ""}>${latest.acknowledgedAt ? "Acknowledged" : "Acknowledge"}</button><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="silence" type="button" ${latest.silencedAt ? "disabled" : ""}>${latest.silencedAt ? "Silenced" : "Silence"}</button></div>` : ""}</td>
           </tr>`;
           })
@@ -532,7 +535,7 @@ async function openOccurrence(id) {
     state.eventCursor = undefined;
     const audio = occurrence.audioPlayback;
     const audioOutcome = audio
-      ? `<h3>Local sound</h3><div class="delivery-meta"><strong>${escapeHtml(audio.sound)}</strong> · ${escapeHtml(String(audio.state).replaceAll("_", " "))}<div>${audio.playCount} completed play${audio.playCount === 1 ? "" : "s"}${audio.lastErrorMessage ? ` · ${escapeHtml(audio.lastErrorMessage)}` : ""}</div></div>`
+      ? `<h3>Local sound</h3><div class="delivery-meta"><strong>${escapeHtml(audioSoundLabel(audio.sound))}</strong> · ${escapeHtml(String(audio.state).replaceAll("_", " "))}<div>${audio.playCount} completed play${audio.playCount === 1 ? "" : "s"}${audio.lastErrorMessage ? ` · ${escapeHtml(audio.lastErrorMessage)}` : ""}</div></div>`
       : "";
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
     elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}${occurrence.dismissedAt ? " · dismissed" : ""}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}${!occurrence.dismissedAt ? `<button class="button button-quiet drawer-dismiss" type="button">Dismiss</button>` : ""}</div>${audioOutcome}${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
@@ -597,7 +600,7 @@ function openPolicy(id) {
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
   const audio = policy.audio ?? {};
   $("#audio-enabled").checked = audio.enabled === true;
-  $("#audio-sound").value = audio.sound ?? "warning";
+  $("#audio-sound").value = audio.sound ?? "severity";
   $("#audio-minimum-severity").value = audio.minimumSeverity ?? "warn";
   $("#audio-mode").value = audio.mode ?? "once";
   $("#audio-repeat-interval").value = audio.repeatIntervalSeconds ?? 60;

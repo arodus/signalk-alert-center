@@ -8,7 +8,11 @@ import {
   AudioPlayer,
   HookedAudioPlayer,
 } from "../src/audio/player";
-import { AudioScheduler, quietHoursEnd } from "../src/audio/scheduler";
+import {
+  AudioScheduler,
+  quietHoursEnd,
+  resolveAudioSound,
+} from "../src/audio/scheduler";
 import { DeliveryScheduler } from "../src/delivery/scheduler";
 import { AlertDatabase } from "../src/storage/db";
 
@@ -276,6 +280,14 @@ describe("local audio playback", () => {
       command: "aplay",
       args: ["-q", "-D", "hw:1; touch /tmp/never", "/safe/alarm.wav"],
     });
+  });
+
+  it("selects a distinct built-in sound from the current alert severity", () => {
+    expect(resolveAudioSound("severity", "warn")).toBe("chime");
+    expect(resolveAudioSound("severity", "alert")).toBe("warning");
+    expect(resolveAudioSound("severity", "alarm")).toBe("alarm");
+    expect(resolveAudioSound("severity", "emergency")).toBe("emergency");
+    expect(resolveAudioSound("alarm", "warn")).toBe("alarm");
   });
 
   it("runs configured commands in order around each sound", async () => {

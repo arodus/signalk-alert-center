@@ -202,7 +202,7 @@ describe("alert-center routes", () => {
           connectivity: { mode: "wake_after", delaySeconds: 60 },
           audio: {
             enabled: true,
-            sound: "alarm",
+            sound: "severity",
             minimumSeverity: "warn",
             mode: "repeat",
             repeatIntervalSeconds: 45,
@@ -221,7 +221,7 @@ describe("alert-center routes", () => {
       policy: {
         notifierIds: ["ntfy-main"],
         activationDelaySeconds: 30,
-        audio: { sound: "alarm", mode: "repeat" },
+        audio: { sound: "severity", mode: "repeat" },
       },
     });
   });
