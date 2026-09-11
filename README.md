@@ -160,6 +160,7 @@ Provide at least:
 GET   /definitions
 GET   /definitions/:id
 PATCH /definitions/:id/policy
+DELETE /definitions/:id/policy
 DELETE /definitions/:id
 GET   /occurrences
 GET   /occurrences/:id
@@ -171,7 +172,8 @@ POST  /occurrences/:id/silence
 
 Keep the existing status/delivery/retry endpoints during migration. Use cursors,
 bounded limits, filter validation, stable ordering, and structured error bodies.
-Expose effective policy and provenance (`override` or `default`). Register
+Expose effective policy, the current global defaults, overridden field names,
+and provenance (`default`, `partial`, or `override`). Register
 read routes as read-only and mutations as read-write/admin using the supported
 Signal K router API, and publish the complete contract through `getOpenApi()`.
 
@@ -181,7 +183,11 @@ Signal K router API, and publish the complete contract through `getOpenApi()`.
 - Add an accessible detail drawer opened by click and keyboard, with paginated
   recent history and notifier outcomes.
 - Add a policy editor populated from configured notification services, with validation
-  and an explicit save result.
+  and an explicit save result. Each setting remains linked to its global default
+  until the operator marks that field as custom. An explicitly custom empty
+  notification-service list means “send to no remote services”; it is different
+  from inheriting the global list. **Use global defaults** removes only the alert's
+  overrides and retains its definition, occurrences, and history.
 - Add global history filters, pagination, dismissed-state visibility, empty/loading/
   auth/error states, and responsive layouts suitable for an onboard tablet.
 - Use `credentials: "include"`; redirect or link to Signal K login on 401/403.
@@ -467,6 +473,7 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `POST /retry`
 - `GET /definitions` and `GET /definitions/:id`
 - `PATCH /definitions/:id/policy`
+- `DELETE /definitions/:id/policy` to remove per-alert overrides
 - `DELETE /definitions/:id` for inactive discovered paths
 - `GET /notifiers`
 - `GET /audio/sounds`
@@ -480,6 +487,12 @@ Signal K protects these routes with its normal authentication. Read endpoints us
 read-only access and mutations require read-write access. Collection endpoints use
 bounded cursor pagination and validated filters. The complete request and response
 contract is returned through the plugin's OpenAPI document.
+
+Global defaults are resolved when a new alert occurrence is created. Untouched
+and partially customized alerts therefore pick up later global changes for every
+field they still inherit. Each occurrence stores the resulting effective policy
+as a snapshot, so changing a global default or alert override does not alter
+deliveries or local audio already in progress.
 
 ### Operational diagnostics
 

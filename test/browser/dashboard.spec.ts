@@ -48,6 +48,19 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await expect(page.getByRole("group", { name: "Local sound" })).toBeVisible();
   await expect(page.locator("#audio-sound")).toHaveValue("severity");
   await expect(page.locator("#audio-sound option")).toHaveCount(5);
+  await expect(page.locator("#policy-inheritance-status")).toHaveText(
+    "Using global defaults",
+  );
+  await expect(page.locator("#policy-reset")).toBeDisabled();
+  const audioModeSetting = page.locator('[data-policy-field="audio.mode"]');
+  await expect(audioModeSetting.locator("#audio-mode")).toBeDisabled();
+  await audioModeSetting
+    .getByRole("button", { name: "Customize playback behavior" })
+    .click();
+  await expect(audioModeSetting.locator("#audio-mode")).toBeEnabled();
+  await expect(page.locator("#policy-inheritance-status")).toHaveText(
+    "1 custom setting",
+  );
   await page.locator("#audio-mode").selectOption("repeat");
   await expect(page.locator("#audio-repeat-field")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
