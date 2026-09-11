@@ -3,13 +3,15 @@ import { AlertDatabase } from "../storage/db";
 import {
   AlertAudioPolicy,
   AlertDefinitionRecord,
+  alertPolicyFields,
+  AlertPolicyField,
   AlertPolicyRecord,
   ConnectivityMode,
   Severity,
 } from "./types";
 import { ConfiguredZonePath } from "./zones";
 
-export interface EffectivePolicy {
+export interface PolicyValues {
   enabled: boolean;
   oneTime: boolean;
   minimumSeverity: Severity;
@@ -18,7 +20,12 @@ export interface EffectivePolicy {
   connectivity: ConnectivityMode;
   notifierIds: string[];
   audio: AlertAudioPolicy;
-  provenance: "override" | "default";
+}
+
+export interface EffectivePolicy extends PolicyValues {
+  provenance: "override" | "partial" | "default";
+  overriddenFields: AlertPolicyField[];
+  defaults: PolicyValues;
 }
 
 export const pathDefinitionId = (notificationPath: string): string =>
@@ -30,7 +37,7 @@ export class AlertPolicyResolver {
     private readonly config: PluginConfig,
   ) {}
 
-  private defaults(): EffectivePolicy {
+  private defaults(): PolicyValues {
     const audio = this.config.audio?.defaults;
     return {
       enabled: this.config.defaults?.enabled ?? true,
@@ -53,27 +60,77 @@ export class AlertPolicyResolver {
           dismiss: audio?.stopOn?.dismiss ?? true,
         },
       },
-      provenance: "default",
     };
   }
 
   private applyStored(
-    base: EffectivePolicy,
+    base: PolicyValues,
     stored: AlertPolicyRecord | undefined,
   ): EffectivePolicy {
-    if (!stored) return base;
+    const fields = new Set(stored?.overrideFields ?? []);
+    const audio = {
+      ...base.audio,
+      stopOn: { ...base.audio.stopOn },
+    };
+    const effective: PolicyValues = {
+      ...base,
+      connectivity: { ...base.connectivity },
+      notifierIds: [...base.notifierIds],
+      audio,
+    };
+    if (stored) {
+      if (fields.has("enabled") && stored.enabled !== undefined)
+        effective.enabled = stored.enabled;
+      if (fields.has("oneTime") && stored.oneTime !== undefined)
+        effective.oneTime = stored.oneTime;
+      if (fields.has("minimumSeverity") && stored.minimumSeverity)
+        effective.minimumSeverity = stored.minimumSeverity;
+      if (
+        fields.has("activationDelaySeconds") &&
+        stored.activationDelaySeconds !== undefined
+      )
+        effective.activationDelaySeconds = stored.activationDelaySeconds;
+      if (fields.has("rearmAfterSeconds"))
+        effective.rearmAfterSeconds = stored.rearmAfterSeconds;
+      if (fields.has("connectivity") && stored.connectivity)
+        effective.connectivity = stored.connectivity;
+      // The mask distinguishes an explicit empty list from inheritance.
+      if (fields.has("notifierIds"))
+        effective.notifierIds = [...stored.notifierIds];
+      if (stored.audio) {
+        if (fields.has("audio.enabled")) audio.enabled = stored.audio.enabled;
+        if (fields.has("audio.sound")) audio.sound = stored.audio.sound;
+        if (fields.has("audio.minimumSeverity"))
+          audio.minimumSeverity = stored.audio.minimumSeverity;
+        if (fields.has("audio.mode")) audio.mode = stored.audio.mode;
+        if (fields.has("audio.repeatIntervalSeconds"))
+          audio.repeatIntervalSeconds = stored.audio.repeatIntervalSeconds;
+        if (fields.has("audio.stopOn.clear"))
+          audio.stopOn.clear = stored.audio.stopOn.clear;
+        if (fields.has("audio.stopOn.acknowledge"))
+          audio.stopOn.acknowledge = stored.audio.stopOn.acknowledge;
+        if (fields.has("audio.stopOn.silence"))
+          audio.stopOn.silence = stored.audio.stopOn.silence;
+        if (fields.has("audio.stopOn.dismiss"))
+          audio.stopOn.dismiss = stored.audio.stopOn.dismiss;
+      }
+    }
+    const overriddenFields = [...fields];
     return {
-      enabled: stored.enabled ?? base.enabled,
-      oneTime: stored.oneTime ?? base.oneTime,
-      minimumSeverity: stored.minimumSeverity ?? base.minimumSeverity,
-      activationDelaySeconds:
-        stored.activationDelaySeconds ?? base.activationDelaySeconds,
-      rearmAfterSeconds: stored.rearmAfterSeconds ?? base.rearmAfterSeconds,
-      connectivity: stored.connectivity ?? base.connectivity,
-      // A stored empty list intentionally disables remote delivery.
-      notifierIds: [...stored.notifierIds],
-      audio: stored.audio ?? base.audio,
-      provenance: "override",
+      ...effective,
+      provenance:
+        overriddenFields.length === 0
+          ? "default"
+          : overriddenFields.length === alertPolicyFields.length
+            ? "override"
+            : "partial",
+      overriddenFields,
+      defaults: {
+        ...base,
+        connectivity: { ...base.connectivity },
+        notifierIds: [...base.notifierIds],
+        audio: { ...base.audio, stopOn: { ...base.audio.stopOn } },
+      },
     };
   }
 

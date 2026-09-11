@@ -54,15 +54,171 @@ describe("AlertPolicyResolver", () => {
           dismiss: true,
         },
       },
+      overrideFields: [
+        "enabled",
+        "notifierIds",
+        "audio.enabled",
+        "audio.sound",
+        "audio.minimumSeverity",
+        "audio.mode",
+        "audio.repeatIntervalSeconds",
+        "audio.stopOn.clear",
+        "audio.stopOn.acknowledge",
+        "audio.stopOn.silence",
+        "audio.stopOn.dismiss",
+      ],
     });
     expect(
       resolver.forPath("notifications.navigation.anchor", "alarm"),
     ).toMatchObject({
       enabled: false,
       audio: { sound: "alarm", mode: "repeat" },
-      provenance: "override",
+      provenance: "partial",
     });
     expect(database.listDefinitions()).toHaveLength(1);
+    database.close();
+  });
+
+  it("keeps inherited fields live while preserving partial and empty-list overrides", () => {
+    const database = new AlertDatabase();
+    const config: PluginConfig = {
+      defaults: {
+        minSeverity: "warn",
+        activationDelaySeconds: 5,
+        notifiers: ["primary"],
+      },
+      audio: {
+        defaults: { enabled: true, sound: "severity", mode: "once" },
+      },
+    };
+    const path = "notifications.environment.inside.refrigerator.temperature";
+    const definitionId = pathDefinitionId(path);
+    const resolver = new AlertPolicyResolver(database, config);
+    resolver.ensureDefinitionForPath(path);
+
+    database.setPolicy(definitionId, {
+      minimumSeverity: "alert",
+      notifierIds: [],
+      audio: {
+        enabled: true,
+        sound: "alarm",
+        minimumSeverity: "warn",
+        mode: "once",
+        repeatIntervalSeconds: 60,
+        stopOn: {
+          clear: true,
+          acknowledge: true,
+          silence: true,
+          dismiss: true,
+        },
+      },
+      overrideFields: ["minimumSeverity", "notifierIds", "audio.sound"],
+    });
+    expect(resolver.forPath(path)).toMatchObject({
+      minimumSeverity: "alert",
+      activationDelaySeconds: 5,
+      notifierIds: [],
+      audio: { sound: "alarm", mode: "once" },
+      provenance: "partial",
+      overriddenFields: ["minimumSeverity", "notifierIds", "audio.sound"],
+    });
+
+    config.defaults = {
+      minSeverity: "emergency",
+      activationDelaySeconds: 45,
+      notifiers: ["secondary"],
+    };
+    config.audio = {
+      defaults: { enabled: true, sound: "warning", mode: "repeat" },
+    };
+    expect(resolver.forPath(path)).toMatchObject({
+      minimumSeverity: "alert",
+      activationDelaySeconds: 45,
+      notifierIds: [],
+      audio: { sound: "alarm", mode: "repeat" },
+      defaults: {
+        minimumSeverity: "emergency",
+        activationDelaySeconds: 45,
+        notifierIds: ["secondary"],
+      },
+    });
+
+    expect(database.clearPolicy(definitionId)).toBe(true);
+    expect(resolver.forPath(path)).toMatchObject({
+      minimumSeverity: "emergency",
+      activationDelaySeconds: 45,
+      notifierIds: ["secondary"],
+      provenance: "default",
+      overriddenFields: [],
+    });
+    expect(database.getDefinition(definitionId)).toBeDefined();
+
+    const inherited = resolver.forPath(path);
+    const first = database.ingest(
+      {
+        sourceKey: path,
+        path,
+        state: "active",
+        severity: "emergency",
+        message: "Warm",
+      },
+      inherited.notifierIds,
+      new Date("2026-09-11T10:00:00.000Z"),
+      {
+        definitionId,
+        minimumSeverity: inherited.minimumSeverity,
+        activationDelaySeconds: inherited.activationDelaySeconds,
+      },
+    )!;
+    database.ingest(
+      {
+        sourceKey: path,
+        path,
+        state: "cleared",
+        severity: "normal",
+      },
+      inherited.notifierIds,
+      new Date("2026-09-11T10:01:00.000Z"),
+      { definitionId },
+    );
+    config.defaults = {
+      minSeverity: "normal",
+      activationDelaySeconds: 2,
+      notifiers: ["third"],
+    };
+    const changed = resolver.forPath(path);
+    const second = database.ingest(
+      {
+        sourceKey: path,
+        path,
+        state: "active",
+        severity: "warn",
+        message: "Warm again",
+      },
+      changed.notifierIds,
+      new Date("2026-09-11T10:02:00.000Z"),
+      {
+        definitionId,
+        minimumSeverity: changed.minimumSeverity,
+        activationDelaySeconds: changed.activationDelaySeconds,
+      },
+    )!;
+    expect(database.getAlert(first.id)).toMatchObject({
+      minimumSeverity: "emergency",
+      activationDelaySeconds: 45,
+    });
+    expect(second).toMatchObject({
+      minimumSeverity: "normal",
+      activationDelaySeconds: 2,
+    });
+    database.setPolicy(definitionId, {
+      enabled: false,
+      notifierIds: [],
+      overrideFields: ["enabled", "notifierIds"],
+    });
+    expect(database.clearPolicy(definitionId)).toBe(true);
+    expect(database.listOccurrences()).toHaveLength(2);
+    expect(database.getDefinition(definitionId)).toBeDefined();
     database.close();
   });
 });

@@ -109,8 +109,30 @@ export interface AlertPolicyRecord {
   rearmAfterSeconds?: number;
   notifierIds: string[];
   audio?: AlertAudioPolicy;
+  overrideFields: AlertPolicyField[];
   updatedAt: Date;
 }
+
+export const alertPolicyFields = [
+  "enabled",
+  "oneTime",
+  "minimumSeverity",
+  "activationDelaySeconds",
+  "rearmAfterSeconds",
+  "connectivity",
+  "notifierIds",
+  "audio.enabled",
+  "audio.sound",
+  "audio.minimumSeverity",
+  "audio.mode",
+  "audio.repeatIntervalSeconds",
+  "audio.stopOn.clear",
+  "audio.stopOn.acknowledge",
+  "audio.stopOn.silence",
+  "audio.stopOn.dismiss",
+] as const;
+
+export type AlertPolicyField = (typeof alertPolicyFields)[number];
 
 export type AudioPlaybackState =
   | "queued"

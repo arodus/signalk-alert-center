@@ -11,7 +11,9 @@ import { normalizeNotification } from "./alerts/normalize";
 import { AlertPolicyResolver, EffectivePolicy } from "./alerts/policy";
 import {
   AlertDefinitionRecord,
+  AlertPolicyField,
   AlertRecord,
+  alertPolicyFields,
   audioSounds,
   CustomAudioSound,
   DeliveryRecord,
@@ -960,6 +962,35 @@ export class PersistentNotifierRuntime {
       updatePolicy: (id: string, patch: AlertPolicyPatch) => {
         const current = this.getDefinition(id);
         if (!current) return undefined;
+        const previousOverrides = new Set(current.policy.overriddenFields);
+        const changedFields: AlertPolicyField[] = [];
+        if (patch.enabled !== undefined) changedFields.push("enabled");
+        if (patch.oneTime !== undefined) changedFields.push("oneTime");
+        if (patch.minimumSeverity !== undefined)
+          changedFields.push("minimumSeverity");
+        if (patch.activationDelaySeconds !== undefined)
+          changedFields.push("activationDelaySeconds");
+        if (patch.rearmAfterSeconds !== undefined)
+          changedFields.push("rearmAfterSeconds");
+        if (patch.connectivity !== undefined)
+          changedFields.push("connectivity");
+        if (patch.notifierIds !== undefined) changedFields.push("notifierIds");
+        if (patch.audio !== undefined)
+          changedFields.push(
+            ...alertPolicyFields.filter((field) => field.startsWith("audio.")),
+          );
+        const overrideFields = patch.overrideFields
+          ? [...patch.overrideFields]
+          : [...new Set([...previousOverrides, ...changedFields])];
+        if (overrideFields.length === 0) {
+          this.db().clearPolicy(id);
+          const inherited = this.getDefinition(id);
+          this.debug(
+            `Reset alert policy to global defaults: definitionId=${id}`,
+          );
+          this.emitChange("policy");
+          return inherited;
+        }
         this.db().setPolicy(id, {
           enabled: patch.enabled ?? current.policy.enabled,
           oneTime: patch.oneTime ?? current.policy.oneTime,
@@ -975,9 +1006,19 @@ export class PersistentNotifierRuntime {
           connectivity: patch.connectivity ?? current.policy.connectivity,
           notifierIds: patch.notifierIds ?? current.policy.notifierIds,
           audio: patch.audio ?? current.policy.audio,
+          overrideFields,
         });
         const updated = this.getDefinition(id);
         this.debug(`Updated alert policy: definitionId=${id}`);
+        this.emitChange("policy");
+        return updated;
+      },
+      resetPolicy: (id: string) => {
+        const current = this.getDefinition(id);
+        if (!current) return undefined;
+        this.db().clearPolicy(id);
+        const updated = this.getDefinition(id);
+        this.debug(`Reset alert policy to global defaults: definitionId=${id}`);
         this.emitChange("policy");
         return updated;
       },
