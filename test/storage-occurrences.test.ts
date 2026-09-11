@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { NormalizedAlert } from "../src/alerts/types";
 import { AlertDatabase } from "../src/storage/db";
-import { schema } from "../src/storage/schema";
+import { migrations, schema } from "../src/storage/schema";
 
 const active = (overrides: Partial<NormalizedAlert> = {}): NormalizedAlert => ({
   sourceKey: "notifications.navigation.anchor",
@@ -49,7 +49,7 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(4);
+    expect(migrated.schemaVersion()).toBe(5);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -80,6 +80,62 @@ describe("occurrence storage", () => {
     ).toContain("audio_policy_json");
   });
 
+  it("preserves version-four stored values as explicit overrides", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-policy-migration-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(schema);
+    legacy
+      .prepare(
+        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
+      )
+      .run("2026-01-01T00:00:00.000Z");
+    for (const migration of migrations.filter((item) => item.version <= 4)) {
+      legacy.exec(migration.sql);
+      legacy
+        .prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        )
+        .run(migration.version, "2026-01-01T00:00:00.000Z");
+    }
+    legacy
+      .prepare(
+        `INSERT INTO alert_definitions
+          (id, source_type, path_pattern, name, created_at, updated_at)
+         VALUES (?, 'recognized', ?, 'Anchor', ?, ?)`,
+      )
+      .run(
+        "anchor",
+        "notifications.navigation.anchor",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+    legacy
+      .prepare(
+        `INSERT INTO alert_policies
+          (definition_id, enabled, minimum_severity, activation_delay_seconds,
+           updated_at)
+         VALUES ('anchor', 0, 'alarm', 30, ?)`,
+      )
+      .run("2026-01-01T00:00:00.000Z");
+    legacy.close();
+
+    const migrated = new AlertDatabase(filename);
+    databases.push(migrated);
+    expect(migrated.getPolicy("anchor")).toMatchObject({
+      enabled: false,
+      minimumSeverity: "alarm",
+      activationDelaySeconds: 30,
+      overrideFields: [
+        "enabled",
+        "minimumSeverity",
+        "activationDelaySeconds",
+        "notifierIds",
+      ],
+    });
+  });
+
   it("reports a schema health fault without throwing from status", () => {
     const db = database();
     db.db.exec("DELETE FROM schema_migrations");
@@ -87,7 +143,7 @@ describe("occurrence storage", () => {
     expect(db.operationalStatus()).toMatchObject({
       healthy: false,
       schemaVersion: 0,
-      expectedSchemaVersion: 4,
+      expectedSchemaVersion: 5,
     });
   });
 
@@ -155,11 +211,12 @@ describe("occurrence storage", () => {
       connectivity: { mode: "queue" },
       activationDelaySeconds: 0,
       notifierIds: ["ntfy"],
+      overrideFields: ["enabled"],
     });
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(4);
+    expect(db.schemaVersion()).toBe(5);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
@@ -326,6 +383,7 @@ describe("occurrence storage", () => {
       activationDelaySeconds: 0,
       rearmAfterSeconds: 60,
       notifierIds: ["ntfy"],
+      overrideFields: ["rearmAfterSeconds"],
     });
     expect(policy.rearmAfterSeconds).toBe(60);
 

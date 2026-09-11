@@ -1,5 +1,7 @@
 import {
   AlertAudioPolicy,
+  AlertPolicyField,
+  alertPolicyFields,
   isBuiltInAudioSoundSelection,
   severities,
 } from "../alerts/types";
@@ -38,6 +40,7 @@ export interface DeliveryQuery {
   cursor?: string;
 }
 export interface AlertPolicyPatch {
+  overrideFields?: AlertPolicyField[];
   enabled?: boolean;
   oneTime?: boolean;
   rearmAfterSeconds?: number | null;
@@ -64,6 +67,7 @@ export interface AlertCenterRepository {
     id: string,
     patch: AlertPolicyPatch,
   ): MaybePromise<unknown | undefined>;
+  resetPolicy(id: string): MaybePromise<unknown | undefined>;
   forgetDefinition(
     id: string,
   ): MaybePromise<"deleted" | "active" | "not_discovered" | "not_found">;
@@ -301,6 +305,7 @@ function parsePolicy(
     "minimumSeverity",
     "connectivity",
     "audio",
+    "overrideFields",
   ]);
   const extra = Object.keys(value).filter((key) => !allowed.has(key));
   if (extra.length)
@@ -308,6 +313,24 @@ function parsePolicy(
       fields: extra,
     });
   const patch: AlertPolicyPatch = {};
+  if (value.overrideFields !== undefined) {
+    if (
+      !Array.isArray(value.overrideFields) ||
+      value.overrideFields.some(
+        (field) =>
+          typeof field !== "string" ||
+          !alertPolicyFields.includes(field as AlertPolicyField),
+      )
+    )
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "overrideFields must contain supported policy field names",
+      );
+    patch.overrideFields = [
+      ...new Set(value.overrideFields as AlertPolicyField[]),
+    ];
+  }
   if (value.enabled !== undefined) {
     if (typeof value.enabled !== "boolean")
       throw new ApiError(400, "INVALID_BODY", "enabled must be boolean");
@@ -543,6 +566,18 @@ export function registerAlertCenterRoutes(
     wrap(async (req, res) =>
       res.json(await repo().listDefinitions(parseDefinitions(req))),
     ),
+  );
+  addRoute(
+    router,
+    "delete",
+    "/definitions/:id/policy",
+    "readwrite",
+    wrap(async (req, res) => {
+      const result = await repo().resetPolicy(req.params?.id ?? "");
+      if (result === undefined)
+        throw new ApiError(404, "NOT_FOUND", "Alert definition was not found");
+      res.json(result);
+    }),
   );
   addRoute(
     router,

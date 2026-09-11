@@ -14,6 +14,8 @@ const state = {
   selectedDelivery: undefined,
   loading: false,
   reloadQueued: false,
+  policyDefaults: undefined,
+  policyHiddenOverrides: [],
 };
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -73,6 +75,23 @@ const pageItems = (value) =>
 const mergeById = (...collections) => [
   ...new Map(collections.flat().map((item) => [item.id, item])).values(),
 ];
+const policyFieldNames = {
+  enabled: "remote notifications",
+  minimumSeverity: "lowest severity sent",
+  activationDelaySeconds: "wait before sending",
+  rearmAfterSeconds: "repeat while active",
+  connectivity: "internet connection behavior",
+  notifierIds: "notification services",
+  "audio.enabled": "local sound",
+  "audio.sound": "sound",
+  "audio.minimumSeverity": "lowest audio severity",
+  "audio.mode": "playback behavior",
+  "audio.repeatIntervalSeconds": "audio repeat interval",
+  "audio.stopOn.clear": "stop sound when cleared",
+  "audio.stopOn.acknowledge": "stop sound when acknowledged",
+  "audio.stopOn.silence": "stop sound when silenced",
+  "audio.stopOn.dismiss": "stop sound when dismissed",
+};
 
 async function api(path, options = {}) {
   const response = await fetch(`${apiBase}${path}`, {
@@ -760,12 +779,7 @@ function closeDrawer() {
   state.selectedOccurrence = undefined;
 }
 
-function openPolicy(id) {
-  const definition = state.definitions.find((item) => item.id === id);
-  if (!definition) return;
-  const policy = definition.policy ?? {};
-  $("#policy-title").textContent = definition.name ?? definition.pathPattern;
-  $("#policy-definition-id").value = id;
+function setPolicyControlValues(policy) {
   $("#activation-delay").value = policy.activationDelaySeconds ?? 0;
   $("#minimum-severity").value = policy.minimumSeverity ?? "normal";
   $("#policy-enabled").checked = policy.enabled !== false;
@@ -784,6 +798,112 @@ function openPolicy(id) {
   $("#audio-stop-acknowledge").checked = audio.stopOn?.acknowledge !== false;
   $("#audio-stop-silence").checked = audio.stopOn?.silence !== false;
   $("#audio-stop-dismiss").checked = audio.stopOn?.dismiss !== false;
+}
+
+function applyDefaultForField(field) {
+  const defaults = state.policyDefaults;
+  if (!defaults) return;
+  const setters = {
+    enabled: () => ($("#policy-enabled").checked = defaults.enabled),
+    minimumSeverity: () =>
+      ($("#minimum-severity").value = defaults.minimumSeverity),
+    activationDelaySeconds: () =>
+      ($("#activation-delay").value = defaults.activationDelaySeconds),
+    rearmAfterSeconds: () =>
+      ($("#rearm-after").value = defaults.rearmAfterSeconds ?? ""),
+    connectivity: () => {
+      $("#connectivity-mode").value = defaults.connectivity.mode;
+      $("#wake-delay").value = defaults.connectivity.delaySeconds ?? 0;
+      toggleWakeDelay();
+    },
+    notifierIds: () => {
+      document.querySelectorAll('input[name="notifier"]').forEach((input) => {
+        input.checked = defaults.notifierIds.includes(input.value);
+      });
+    },
+    "audio.enabled": () =>
+      ($("#audio-enabled").checked = defaults.audio.enabled),
+    "audio.sound": () => ($("#audio-sound").value = defaults.audio.sound),
+    "audio.minimumSeverity": () =>
+      ($("#audio-minimum-severity").value = defaults.audio.minimumSeverity),
+    "audio.mode": () => {
+      $("#audio-mode").value = defaults.audio.mode;
+      toggleAudioRepeat();
+    },
+    "audio.repeatIntervalSeconds": () =>
+      ($("#audio-repeat-interval").value =
+        defaults.audio.repeatIntervalSeconds),
+    "audio.stopOn.clear": () =>
+      ($("#audio-stop-clear").checked = defaults.audio.stopOn.clear),
+    "audio.stopOn.acknowledge": () =>
+      ($("#audio-stop-acknowledge").checked =
+        defaults.audio.stopOn.acknowledge),
+    "audio.stopOn.silence": () =>
+      ($("#audio-stop-silence").checked = defaults.audio.stopOn.silence),
+    "audio.stopOn.dismiss": () =>
+      ($("#audio-stop-dismiss").checked = defaults.audio.stopOn.dismiss),
+  };
+  setters[field]?.();
+}
+
+function setPolicyOverrideState(field, overridden) {
+  const host = document.querySelector(`[data-policy-field="${field}"]`);
+  if (!host) return;
+  const button = host.querySelector(":scope > .policy-override-button");
+  button.setAttribute("aria-pressed", String(overridden));
+  button.textContent = overridden ? "Custom" : "Global default";
+  button.setAttribute(
+    "aria-label",
+    `${overridden ? "Use global default for" : "Customize"} ${policyFieldNames[field] ?? field}`,
+  );
+  button.classList.toggle("is-custom", overridden);
+  host
+    .querySelectorAll("input, select")
+    .forEach((control) => (control.disabled = !overridden));
+  if (field === "connectivity") $("#wake-delay").disabled = !overridden;
+  if (!overridden) applyDefaultForField(field);
+}
+
+function initializePolicyOverrideControls() {
+  document.querySelectorAll("[data-policy-field]").forEach((host) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "policy-override-button";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const field = host.dataset.policyField;
+      const overridden = button.getAttribute("aria-pressed") !== "true";
+      setPolicyOverrideState(field, overridden);
+      updateInheritanceSummary();
+    });
+    host.prepend(button);
+  });
+}
+
+function selectedOverrideFields() {
+  const visible = [...document.querySelectorAll(".policy-override-button")]
+    .filter((button) => button.getAttribute("aria-pressed") === "true")
+    .map((button) => button.parentElement.dataset.policyField);
+  return [...new Set([...state.policyHiddenOverrides, ...visible])];
+}
+
+function updateInheritanceSummary() {
+  const count = selectedOverrideFields().length;
+  $("#policy-inheritance-status").textContent = count
+    ? `${count} custom ${count === 1 ? "setting" : "settings"}`
+    : "Using global defaults";
+  $("#policy-reset").disabled = count === 0;
+}
+
+function openPolicy(id) {
+  const definition = state.definitions.find((item) => item.id === id);
+  if (!definition) return;
+  const policy = definition.policy ?? {};
+  $("#policy-title").textContent = definition.name ?? definition.pathPattern;
+  $("#policy-definition-id").value = id;
+  state.policyDefaults = policy.defaults ?? policy;
+  setPolicyControlValues(policy);
   toggleWakeDelay();
   toggleAudioRepeat();
   elements.policyResult.textContent = "";
@@ -805,7 +925,20 @@ function openPolicy(id) {
         })
         .join("")
     : '<p class="alert-meta">No notification services are configured. Add one in the Signal K plugin settings first.</p>';
-  elements.policyDialog.showModal();
+  const overridden = new Set(policy.overriddenFields ?? []);
+  state.policyHiddenOverrides = [...overridden].filter(
+    (field) => !document.querySelector(`[data-policy-field="${field}"]`),
+  );
+  document
+    .querySelectorAll("[data-policy-field]")
+    .forEach((host) =>
+      setPolicyOverrideState(
+        host.dataset.policyField,
+        overridden.has(host.dataset.policyField),
+      ),
+    );
+  updateInheritanceSummary();
+  if (!elements.policyDialog.open) elements.policyDialog.showModal();
 }
 async function forgetDefinition() {
   const id = $("#policy-definition-id").value;
@@ -840,6 +973,7 @@ async function savePolicy(event) {
   const id = $("#policy-definition-id").value;
   const mode = $("#connectivity-mode").value;
   const body = {
+    overrideFields: selectedOverrideFields(),
     enabled: $("#policy-enabled").checked,
     rearmAfterSeconds:
       $("#rearm-after").value === "" ? null : Number($("#rearm-after").value),
@@ -882,6 +1016,25 @@ async function savePolicy(event) {
     elements.policyResult.textContent = error.message;
   } finally {
     $("#policy-save").disabled = false;
+  }
+}
+
+async function resetPolicy() {
+  const id = $("#policy-definition-id").value;
+  $("#policy-reset").disabled = true;
+  try {
+    const updated = await api(`/definitions/${encodeURIComponent(id)}/policy`, {
+      method: "DELETE",
+    });
+    state.definitions = state.definitions.map((item) =>
+      item.id === id ? updated : item,
+    );
+    renderDefinitions();
+    openPolicy(id);
+    elements.policyResult.textContent = "Now using global defaults.";
+  } catch (error) {
+    elements.policyResult.textContent = error.message;
+    $("#policy-reset").disabled = false;
   }
 }
 
@@ -946,6 +1099,8 @@ $("#policy-cancel").addEventListener("click", () =>
   elements.policyDialog.close(),
 );
 $("#policy-forget").addEventListener("click", forgetDefinition);
+$("#policy-reset").addEventListener("click", resetPolicy);
+initializePolicyOverrideControls();
 for (const [view, button] of [
   ["alerts", $("#alerts-tab")],
   ["deliveries", $("#deliveries-tab")],

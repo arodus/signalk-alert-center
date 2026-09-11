@@ -7,6 +7,7 @@ import {
   PlayableAudioSound,
   AudioPlaybackRecord,
   AlertPolicyRecord,
+  AlertPolicyField,
   AlertRecord,
   DeliveryAttemptRecord,
   DeliveryAttemptPage,
@@ -562,14 +563,16 @@ export class AlertDatabase {
         .prepare(
           `INSERT INTO alert_policies
             (definition_id, enabled, minimum_severity, connectivity_json,
-             one_time, activation_delay_seconds, rearm_after_seconds, audio_policy_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             one_time, activation_delay_seconds, rearm_after_seconds, audio_policy_json,
+             override_fields_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(definition_id) DO UPDATE SET
             enabled=excluded.enabled, minimum_severity=excluded.minimum_severity,
             connectivity_json=excluded.connectivity_json, one_time=excluded.one_time,
             activation_delay_seconds=excluded.activation_delay_seconds,
             rearm_after_seconds=excluded.rearm_after_seconds,
             audio_policy_json=excluded.audio_policy_json,
+            override_fields_json=excluded.override_fields_json,
             updated_at=excluded.updated_at`,
         )
         .run(
@@ -583,6 +586,7 @@ export class AlertDatabase {
           policy.activationDelaySeconds ?? null,
           policy.rearmAfterSeconds ?? null,
           policy.audio === undefined ? null : JSON.stringify(policy.audio),
+          JSON.stringify([...new Set(policy.overrideFields)]),
           timestamp,
         );
       this.db
@@ -632,8 +636,28 @@ export class AlertDatabase {
           : Number(row.rearm_after_seconds),
       notifierIds: notifiers.map((item) => String(item.transport_instance_id)),
       audio: json(row.audio_policy_json) as AlertAudioPolicy | undefined,
+      overrideFields:
+        (json(row.override_fields_json) as AlertPolicyField[] | undefined) ??
+        [],
       updatedAt: new Date(String(row.updated_at)),
     };
+  }
+
+  clearPolicy(definitionId: string): boolean {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare("DELETE FROM alert_policy_notifiers WHERE definition_id=?")
+        .run(definitionId);
+      const result = this.db
+        .prepare("DELETE FROM alert_policies WHERE definition_id=?")
+        .run(definitionId);
+      this.db.exec("COMMIT");
+      return result.changes > 0;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private eligibleNotifierCount(

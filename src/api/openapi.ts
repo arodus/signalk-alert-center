@@ -188,6 +188,16 @@ export function getAlertCenterOpenApi() {
             ...errors,
           },
         },
+        delete: {
+          summary: "Use current global defaults for an alert definition",
+          parameters: [idParameter],
+          responses: {
+            "200": response("Updated definition", {
+              $ref: "#/components/schemas/Definition",
+            }),
+            ...errors,
+          },
+        },
       },
       "/notifiers": {
         get: {
@@ -389,7 +399,7 @@ export function getAlertCenterOpenApi() {
           type: "string",
           enum: ["normal", "warn", "alert", "alarm", "emergency"],
         },
-        Policy: {
+        PolicyValues: {
           type: "object",
           required: [
             "enabled",
@@ -398,7 +408,6 @@ export function getAlertCenterOpenApi() {
             "minimumSeverity",
             "connectivity",
             "audio",
-            "provenance",
           ],
           properties: {
             enabled: { type: "boolean" },
@@ -422,17 +431,60 @@ export function getAlertCenterOpenApi() {
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             connectivity: { $ref: "#/components/schemas/Connectivity" },
             audio: { $ref: "#/components/schemas/AudioPolicy" },
-            provenance: {
-              type: "string",
-              enum: ["override", "default"],
-            },
           },
+        },
+        Policy: {
+          allOf: [
+            { $ref: "#/components/schemas/PolicyValues" },
+            {
+              type: "object",
+              required: ["provenance", "overriddenFields", "defaults"],
+              properties: {
+                provenance: {
+                  type: "string",
+                  enum: ["override", "partial", "default"],
+                },
+                overriddenFields: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/AlertPolicyField" },
+                  uniqueItems: true,
+                },
+                defaults: { $ref: "#/components/schemas/PolicyValues" },
+              },
+            },
+          ],
+        },
+        AlertPolicyField: {
+          type: "string",
+          enum: [
+            "enabled",
+            "oneTime",
+            "minimumSeverity",
+            "activationDelaySeconds",
+            "rearmAfterSeconds",
+            "connectivity",
+            "notifierIds",
+            "audio.enabled",
+            "audio.sound",
+            "audio.minimumSeverity",
+            "audio.mode",
+            "audio.repeatIntervalSeconds",
+            "audio.stopOn.clear",
+            "audio.stopOn.acknowledge",
+            "audio.stopOn.silence",
+            "audio.stopOn.dismiss",
+          ],
         },
         PolicyPatch: {
           type: "object",
           minProperties: 1,
           additionalProperties: false,
           properties: {
+            overrideFields: {
+              type: "array",
+              items: { $ref: "#/components/schemas/AlertPolicyField" },
+              uniqueItems: true,
+            },
             enabled: { type: "boolean" },
             oneTime: { type: "boolean" },
             rearmAfterSeconds: {

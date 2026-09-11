@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 4;
+export const currentSchemaVersion = 5;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -65,6 +65,23 @@ CREATE TABLE audio_attempts (
   error_message TEXT,
   UNIQUE(playback_id, attempt_number)
 );
+`,
+  },
+  {
+    version: 5,
+    sql: `
+ALTER TABLE alert_policies ADD COLUMN override_fields_json TEXT NOT NULL DEFAULT '[]';
+UPDATE alert_policies
+SET override_fields_json = '[' ||
+  CASE WHEN enabled IS NOT NULL THEN '"enabled",' ELSE '' END ||
+  CASE WHEN one_time IS NOT NULL THEN '"oneTime",' ELSE '' END ||
+  CASE WHEN minimum_severity IS NOT NULL THEN '"minimumSeverity",' ELSE '' END ||
+  CASE WHEN activation_delay_seconds IS NOT NULL THEN '"activationDelaySeconds",' ELSE '' END ||
+  CASE WHEN rearm_after_seconds IS NOT NULL THEN '"rearmAfterSeconds",' ELSE '' END ||
+  CASE WHEN connectivity_json IS NOT NULL THEN '"connectivity",' ELSE '' END ||
+  '"notifierIds"' ||
+  CASE WHEN audio_policy_json IS NOT NULL THEN ',"audio.enabled","audio.sound","audio.minimumSeverity","audio.mode","audio.repeatIntervalSeconds","audio.stopOn.clear","audio.stopOn.acknowledge","audio.stopOn.silence","audio.stopOn.dismiss"' ELSE '' END ||
+  ']';
 `,
   },
 ];

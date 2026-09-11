@@ -90,6 +90,7 @@ function fixture() {
     },
     getDefinition: (id) => (id === "bilge" ? { id } : undefined),
     updatePolicy: (id, policy) => (id === "bilge" ? { id, policy } : undefined),
+    resetPolicy: (id) => (id === "bilge" ? { id, reset: true } : undefined),
     forgetDefinition: (id) => (id === "bilge" ? "deleted" : "not_found"),
     listOccurrences(query) {
       queries.push(query);
@@ -167,7 +168,7 @@ describe("alert-center routes", () => {
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
     expect(access.filter((value) => value === "readonly")).toHaveLength(11);
-    expect(access.filter((value) => value === "readwrite")).toHaveLength(6);
+    expect(access.filter((value) => value === "readwrite")).toHaveLength(7);
   });
 
   it("pages delivery summaries, details, attempts, and retries", async () => {
@@ -282,6 +283,7 @@ describe("alert-center routes", () => {
       {
         params: { id: "bilge" },
         body: {
+          overrideFields: ["notifierIds", "notifierIds", "audio.sound"],
           enabled: true,
           oneTime: true,
           rearmAfterSeconds: 3600,
@@ -308,6 +310,7 @@ describe("alert-center routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       policy: {
+        overrideFields: ["notifierIds", "audio.sound"],
         notifierIds: ["ntfy-main"],
         activationDelaySeconds: 30,
         audio: { sound: "severity", mode: "repeat" },
@@ -398,6 +401,16 @@ describe("alert-center routes", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ status: "deleted" });
+  });
+
+  it("resets an alert policy without deleting its definition", async () => {
+    const response = await fixture().invoke(
+      "DELETE",
+      "/definitions/:id/policy",
+      { params: { id: "bilge" } },
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ id: "bilge", reset: true });
   });
 
   it("rejects acknowledge and silence for inactive occurrences", async () => {

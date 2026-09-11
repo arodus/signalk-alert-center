@@ -308,7 +308,25 @@
           Changes apply the next time this alert fires. Deliveries already in
           progress keep their original settings.
         </p>
-        <label class="form-field"
+        <div class="inheritance-summary">
+          <div>
+            <strong id="policy-inheritance-status"
+              >Using global defaults</strong
+            >
+            <small id="policy-inheritance-help" class="field-help"
+              >Customize only the settings that should differ for this
+              alert.</small
+            >
+          </div>
+          <button
+            id="policy-reset"
+            class="button button-quiet button-small"
+            type="button"
+          >
+            Use global defaults
+          </button>
+        </div>
+        <label class="form-field" data-policy-field="activationDelaySeconds"
           ><span
             >Wait before sending (seconds)
             <small class="field-help"
@@ -322,7 +340,7 @@
             max="604800"
             required
         /></label>
-        <label class="form-field"
+        <label class="form-field" data-policy-field="minimumSeverity"
           ><span
             >Lowest severity sent
             <small class="field-help"
@@ -337,7 +355,7 @@
             <option>emergency</option>
           </select></label
         >
-        <label class="form-field"
+        <label class="form-field" data-policy-field="rearmAfterSeconds"
           ><span
             >Repeat while still active (seconds)
             <small class="field-help"
@@ -353,11 +371,11 @@
             open. The global audio player must also be enabled in plugin
             configuration.
           </p>
-          <label class="check-label"
+          <label class="check-label" data-policy-field="audio.enabled"
             ><input id="audio-enabled" type="checkbox" /> Play a local
             sound</label
           >
-          <label class="form-field"
+          <label class="form-field" data-policy-field="audio.sound"
             ><span
               >Sound
               <small class="field-help"
@@ -372,7 +390,7 @@
               <option value="emergency">Emergency</option>
             </select></label
           >
-          <label class="form-field"
+          <label class="form-field" data-policy-field="audio.minimumSeverity"
             ><span>Lowest severity that plays</span
             ><select id="audio-minimum-severity">
               <option>normal</option>
@@ -382,14 +400,18 @@
               <option>emergency</option>
             </select></label
           >
-          <label class="form-field"
+          <label class="form-field" data-policy-field="audio.mode"
             ><span>Playback behavior</span
             ><select id="audio-mode">
               <option value="once">Play once</option>
               <option value="repeat">Repeat while active</option>
             </select></label
           >
-          <label id="audio-repeat-field" class="form-field" hidden
+          <label
+            id="audio-repeat-field"
+            class="form-field"
+            data-policy-field="audio.repeatIntervalSeconds"
+            hidden
             ><span
               >Repeat interval (seconds)
               <small class="field-help"
@@ -406,26 +428,32 @@
           <div class="form-field">
             <span>Stop local sound when</span>
             <div class="check-grid">
-              <label class="check-label"
+              <label class="check-label" data-policy-field="audio.stopOn.clear"
                 ><input id="audio-stop-clear" type="checkbox" /> Alert
                 clears</label
               >
-              <label class="check-label"
+              <label
+                class="check-label"
+                data-policy-field="audio.stopOn.acknowledge"
                 ><input id="audio-stop-acknowledge" type="checkbox" />
                 Acknowledged</label
               >
-              <label class="check-label"
+              <label
+                class="check-label"
+                data-policy-field="audio.stopOn.silence"
                 ><input id="audio-stop-silence" type="checkbox" />
                 Silenced</label
               >
-              <label class="check-label"
+              <label
+                class="check-label"
+                data-policy-field="audio.stopOn.dismiss"
                 ><input id="audio-stop-dismiss" type="checkbox" />
                 Dismissed</label
               >
             </div>
           </div>
         </fieldset>
-        <fieldset>
+        <fieldset data-policy-field="notifierIds">
           <legend>Notification services</legend>
           <p class="field-help">
             Select the globally configured services that should receive this
@@ -433,7 +461,7 @@
           </p>
           <div id="notifier-options"></div>
         </fieldset>
-        <label class="form-field"
+        <label class="form-field" data-policy-field="connectivity"
           ><span
             >Internet connection behavior
             <small class="field-help"
@@ -455,7 +483,7 @@
             ></span
           ><input id="wake-delay" type="number" min="0" max="604800"
         /></label>
-        <div class="form-field">
+        <div class="form-field" data-policy-field="enabled">
           <label class="check-label"
             ><input id="policy-enabled" type="checkbox" /> Send remote
             notifications</label
