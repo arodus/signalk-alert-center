@@ -97,6 +97,21 @@ function fixture() {
     },
     getOccurrence: () => undefined,
     listOccurrenceEvents: () => ({ items: [] }),
+    listDeliveries(query) {
+      queries.push(query);
+      return { items: [{ id: "delivery-1" }], nextCursor: "delivery-1" };
+    },
+    getDelivery: (id) => (id === "delivery-1" ? { id } : undefined),
+    listDeliveryAttempts: (id, query) =>
+      id === "delivery-1"
+        ? { items: [{ id: 1, attemptNumber: 1, query }] }
+        : undefined,
+    retryDelivery: (id) =>
+      id === "delivery-1"
+        ? "scheduled"
+        : id === "pending"
+          ? "not_retryable"
+          : "not_found",
     dismissOccurrence: () => ({ status: "dismissed" }),
     acknowledgeOccurrence: (id) =>
       id === "inactive" ? "inactive" : { status: "acknowledged" },
@@ -151,8 +166,45 @@ describe("alert-center routes", () => {
     const { access } = fixture();
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
-    expect(access.filter((value) => value === "readonly")).toHaveLength(8);
-    expect(access.filter((value) => value === "readwrite")).toHaveLength(5);
+    expect(access.filter((value) => value === "readonly")).toHaveLength(11);
+    expect(access.filter((value) => value === "readwrite")).toHaveLength(6);
+  });
+
+  it("pages delivery summaries, details, attempts, and retries", async () => {
+    const current = fixture();
+    const list = await current.invoke("GET", "/deliveries", {
+      query: { limit: "25", cursor: "previous" },
+    });
+    expect(list.body).toMatchObject({
+      items: [{ id: "delivery-1" }],
+      nextCursor: "delivery-1",
+    });
+    expect(current.queries.at(-1)).toEqual({
+      limit: 25,
+      cursor: "previous",
+    });
+
+    const detail = await current.invoke("GET", "/deliveries/:id", {
+      params: { id: "delivery-1" },
+    });
+    expect(detail.body).toEqual({ id: "delivery-1" });
+
+    const attempts = await current.invoke("GET", "/deliveries/:id/attempts", {
+      params: { id: "delivery-1" },
+      query: { limit: "10", cursor: "4" },
+    });
+    expect(attempts.body).toMatchObject({
+      items: [{ attemptNumber: 1, query: { limit: 10, cursor: "4" } }],
+    });
+
+    const retry = await current.invoke("POST", "/deliveries/:id/retry", {
+      params: { id: "delivery-1" },
+    });
+    expect(retry.body).toEqual({ status: "scheduled" });
+    const conflict = await current.invoke("POST", "/deliveries/:id/retry", {
+      params: { id: "pending" },
+    });
+    expect(conflict.statusCode).toBe(409);
   });
 
   it("streams change notifications and releases closed clients", async () => {

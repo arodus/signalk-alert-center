@@ -4,9 +4,14 @@ const state = {
   occurrences: [],
   notifiers: [],
   audioSounds: [],
+  deliveries: [],
   occurrenceCursor: undefined,
+  deliveryCursor: undefined,
   eventCursor: undefined,
+  deliveryAttemptCursor: undefined,
+  deliveryAttempts: [],
   selectedOccurrence: undefined,
+  selectedDelivery: undefined,
   loading: false,
   reloadQueued: false,
 };
@@ -20,6 +25,8 @@ const elements = {
   diagnostics: $("#diagnostics-list"),
   definitions: $("#definition-list"),
   deliveries: $("#delivery-list"),
+  moreDeliveries: $("#deliveries-more"),
+  deliveryTabCount: $("#delivery-tab-count"),
   updated: $("#updated"),
   error: $("#error"),
   login: $("#login"),
@@ -33,6 +40,13 @@ const elements = {
   moreEvents: $("#events-more"),
   policyDialog: $("#policy-dialog"),
   policyResult: $("#policy-result"),
+  deliveryDialog: $("#delivery-dialog"),
+  deliveryDialogTitle: $("#delivery-dialog-title"),
+  deliveryDialogBody: $("#delivery-dialog-body"),
+  deliveryDialogResult: $("#delivery-dialog-result"),
+  deliveryAttempts: $("#delivery-attempt-list"),
+  moreDeliveryAttempts: $("#delivery-attempts-more"),
+  deliveryRetry: $("#delivery-retry"),
 };
 
 const escapeHtml = (value) =>
@@ -367,13 +381,50 @@ function renderDefinitions() {
 
 function renderDeliveries(deliveries) {
   elements.deliveries.innerHTML = deliveries.length
-    ? deliveries
-        .map(
-          (delivery) =>
-            `<article class="delivery-row"><div><p class="delivery-id">${escapeHtml(delivery.transportInstanceId ?? delivery.notifierId)}</p><div class="delivery-meta">Attempt ${delivery.attemptCount ?? 0}${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</div></div><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span></article>`,
-        )
-        .join("")
-    : '<div class="empty">No deliveries have been queued.</div>';
+    ? `<table class="data-table delivery-table">
+        <thead><tr><th>Alert</th><th>Service</th><th>Status</th><th>Timing</th><th>Attempts</th></tr></thead>
+        <tbody>${deliveries
+          .map((delivery) => {
+            const alert = delivery.alert ?? {};
+            const service = delivery.service ?? {};
+            const alertTitle = alert.path
+              ? alertName({
+                  name: alert.name ?? alert.path,
+                  pathPattern: alert.path,
+                })
+              : "Unknown alert";
+            const failed = ["failed_retryable", "failed_terminal"].includes(
+              delivery.state,
+            );
+            const primaryTime = delivery.lastAttemptAt
+              ? `Last attempt ${formatDate(delivery.lastAttemptAt)}`
+              : `Queued ${formatDate(delivery.createdAt)}`;
+            const outcomeTime = delivery.deliveredAt
+              ? `Delivered ${formatDate(delivery.deliveredAt)}`
+              : delivery.nextAttemptAt
+                ? `Next retry ${formatDate(delivery.nextAttemptAt)}`
+                : "No retry scheduled";
+            return `<tr class="clickable-row delivery-row" data-delivery-id="${escapeHtml(delivery.id)}" tabindex="0" aria-label="Open delivery for ${escapeHtml(alertTitle)}">
+              <td data-label="Alert"><strong class="cell-title">${escapeHtml(alertTitle)}</strong><span class="cell-detail">${escapeHtml(alert.path ?? "Occurrence unavailable")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</span></td>
+              <td data-label="Service"><strong class="cell-title">${escapeHtml(service.name ?? delivery.transportInstanceId)}</strong><span class="cell-detail">${escapeHtml(service.type ?? "unknown service")}</span></td>
+              <td data-label="Status"><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span>${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
+              <td data-label="Timing"><span class="cell-title">${escapeHtml(primaryTime)}</span><span class="cell-detail">${escapeHtml(outcomeTime)}</span>${delivery.lastErrorMessage ? `<span class="cell-detail compact-detail error-detail" title="${escapeHtml(delivery.lastErrorMessage)}">${escapeHtml(delivery.lastErrorMessage)}</span>` : ""}</td>
+              <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail">Can retry</span>' : ""}</td>
+            </tr>`;
+          })
+          .join("")}</tbody></table>`
+    : '<div class="empty"><strong>No deliveries yet</strong><p>Delivery attempts appear here after an alert sends to a notification service.</p></div>';
+  elements.moreDeliveries.hidden = !state.deliveryCursor;
+  document.querySelectorAll("[data-delivery-id]").forEach((row) => {
+    const open = () => openDelivery(row.dataset.deliveryId);
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+  });
 }
 function occurrenceParams(cursor) {
   const params = new URLSearchParams({ limit: "100" });
@@ -422,6 +473,17 @@ async function loadOccurrences(append = false) {
   elements.moreOccurrences.hidden = !page.nextCursor;
   renderDefinitions();
 }
+async function loadDeliveries(append = false) {
+  const params = new URLSearchParams({ limit: "50" });
+  if (append && state.deliveryCursor)
+    params.set("cursor", state.deliveryCursor);
+  const page = await api(`/deliveries?${params}`);
+  state.deliveries = append
+    ? mergeById(state.deliveries, pageItems(page))
+    : pageItems(page);
+  state.deliveryCursor = page.nextCursor;
+  renderDeliveries(state.deliveries);
+}
 async function load() {
   if (state.loading) {
     state.reloadQueued = true;
@@ -438,7 +500,7 @@ async function load() {
       notifiers,
       audioSounds,
       status,
-      deliveries,
+      deliveryPage,
     ] = await Promise.all([
       allPages("/definitions"),
       allPages("/occurrences?state=active"),
@@ -446,7 +508,7 @@ async function load() {
       api("/notifiers"),
       api("/audio/sounds"),
       api("/status").catch(() => ({})),
-      api("/deliveries?limit=100").catch(() => []),
+      api("/deliveries?limit=50"),
     ]);
     state.definitions = definitions;
     renderPathOptions();
@@ -455,6 +517,8 @@ async function load() {
       : mergeById(activeOccurrences, pageItems(occurrences));
     state.notifiers = pageItems(notifiers);
     state.audioSounds = pageItems(audioSounds);
+    state.deliveries = pageItems(deliveryPage);
+    state.deliveryCursor = deliveryPage.nextCursor;
     renderAudioSoundOptions();
     state.occurrenceCursor = occurrences.nextCursor;
     elements.activeCount.textContent = activeOccurrences.filter(
@@ -462,11 +526,13 @@ async function load() {
     ).length;
     elements.definitionCount.textContent =
       status.alerts?.definitions ?? state.definitions.length;
-    elements.pendingCount.textContent =
+    const pendingDeliveryCount =
       status.alerts?.pendingDelivery ??
-      deliveries.filter(
+      state.deliveries.filter(
         (item) => !["delivered", "failed_terminal"].includes(item.state),
       ).length;
+    elements.pendingCount.textContent = pendingDeliveryCount;
+    elements.deliveryTabCount.textContent = pendingDeliveryCount;
     elements.connectivityNote.textContent = status.connectivity?.state
       ? `${status.health?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
       : "delivery intents waiting";
@@ -474,7 +540,8 @@ async function load() {
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     elements.moreOccurrences.hidden = !state.occurrenceCursor;
     renderDefinitions();
-    renderDeliveries(deliveries);
+    renderDeliveries(state.deliveries);
+    if (state.selectedDelivery) await refreshDeliveryDetail();
   } catch (error) {
     showError(error);
   } finally {
@@ -534,6 +601,81 @@ async function mutateOccurrence(id, action) {
   } catch (error) {
     showError(error);
   }
+}
+function renderDeliveryAttempts() {
+  elements.deliveryAttempts.innerHTML = state.deliveryAttempts.length
+    ? state.deliveryAttempts
+        .map(
+          (attempt) =>
+            `<article class="event-row"><span class="event-dot"></span><div><strong>Attempt ${attempt.attemptNumber} · ${escapeHtml(String(attempt.outcome).replaceAll("_", " "))}</strong><time>${formatDate(attempt.startedAt)} → ${formatDate(attempt.finishedAt)}</time>${attempt.errorCode || attempt.errorMessage ? `<p>${escapeHtml([attempt.errorCode, attempt.errorMessage].filter(Boolean).join(" · "))}</p>` : ""}${attempt.remoteId ? `<p>Remote ID: ${escapeHtml(attempt.remoteId)}</p>` : ""}</div></article>`,
+        )
+        .join("")
+    : '<div class="empty">No delivery attempt has started yet.</div>';
+  elements.moreDeliveryAttempts.hidden = !state.deliveryAttemptCursor;
+}
+function renderDeliveryDetail(delivery) {
+  const alert = delivery.alert ?? {};
+  const service = delivery.service ?? {};
+  const alertTitle = alert.path
+    ? alertName({ name: alert.name ?? alert.path, pathPattern: alert.path })
+    : "Delivery details";
+  const retryable = ["failed_retryable", "failed_terminal"].includes(
+    delivery.state,
+  );
+  elements.deliveryDialogTitle.textContent = alertTitle;
+  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Status</dt><dd><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span></dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>Delivered</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(delivery.remoteId ?? "—")}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}`;
+  elements.deliveryRetry.hidden = !retryable;
+  elements.deliveryRetry.dataset.id = delivery.id;
+}
+async function refreshDeliveryDetail() {
+  if (!state.selectedDelivery) return;
+  const id = state.selectedDelivery;
+  const [delivery, attempts] = await Promise.all([
+    api(`/deliveries/${encodeURIComponent(id)}`),
+    api(`/deliveries/${encodeURIComponent(id)}/attempts?limit=50`),
+  ]);
+  if (state.selectedDelivery !== id) return;
+  state.deliveryAttempts = pageItems(attempts);
+  state.deliveryAttemptCursor = attempts.nextCursor;
+  renderDeliveryDetail(delivery);
+  renderDeliveryAttempts();
+}
+async function openDelivery(id) {
+  state.selectedDelivery = id;
+  state.deliveryAttempts = [];
+  state.deliveryAttemptCursor = undefined;
+  elements.deliveryDialogTitle.textContent = "Loading delivery…";
+  elements.deliveryDialogBody.innerHTML =
+    '<div class="empty">Loading details…</div>';
+  elements.deliveryAttempts.innerHTML =
+    '<div class="empty">Loading attempts…</div>';
+  elements.deliveryDialogResult.textContent = "";
+  elements.deliveryRetry.hidden = true;
+  if (!elements.deliveryDialog.open) elements.deliveryDialog.showModal();
+  try {
+    await refreshDeliveryDetail();
+  } catch (error) {
+    elements.deliveryDialogBody.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+  }
+}
+async function loadMoreDeliveryAttempts() {
+  if (!state.selectedDelivery || !state.deliveryAttemptCursor) return;
+  try {
+    const page = await api(
+      `/deliveries/${encodeURIComponent(state.selectedDelivery)}/attempts?limit=50&cursor=${encodeURIComponent(state.deliveryAttemptCursor)}`,
+    );
+    state.deliveryAttempts = mergeById(state.deliveryAttempts, pageItems(page));
+    state.deliveryAttemptCursor = page.nextCursor;
+    renderDeliveryAttempts();
+  } catch (error) {
+    elements.deliveryDialogResult.textContent = error.message;
+  }
+}
+function closeDeliveryDialog() {
+  elements.deliveryDialog.close();
+  state.selectedDelivery = undefined;
+  state.deliveryAttempts = [];
+  state.deliveryAttemptCursor = undefined;
 }
 function openDefinition(id) {
   const definition = state.definitions.find((item) => item.id === id);
@@ -743,6 +885,27 @@ async function savePolicy(event) {
   }
 }
 
+function selectView(view, moveFocus = false) {
+  const deliveries = view === "deliveries";
+  $("#alerts-panel").hidden = deliveries;
+  $("#deliveries-panel").hidden = !deliveries;
+  for (const [name, button] of [
+    ["alerts", $("#alerts-tab")],
+    ["deliveries", $("#deliveries-tab")],
+  ]) {
+    const selected = name === view;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    if (selected && moveFocus) button.focus();
+  }
+  history.replaceState(
+    null,
+    "",
+    deliveries ? "#deliveries" : location.pathname,
+  );
+}
+
 $("#refresh").addEventListener("click", load);
 $("#history-filters").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -759,7 +922,14 @@ $("#filters-clear").addEventListener("click", () => {
 elements.moreOccurrences.addEventListener("click", () =>
   loadOccurrences(true).catch(showError),
 );
+elements.moreDeliveries.addEventListener("click", () =>
+  loadDeliveries(true).catch(showError),
+);
 elements.moreEvents.addEventListener("click", () => loadEvents(true));
+elements.moreDeliveryAttempts.addEventListener(
+  "click",
+  loadMoreDeliveryAttempts,
+);
 $("#drawer-close").addEventListener("click", closeDrawer);
 elements.backdrop.addEventListener("click", closeDrawer);
 document.addEventListener("keydown", (event) => {
@@ -776,13 +946,50 @@ $("#policy-cancel").addEventListener("click", () =>
   elements.policyDialog.close(),
 );
 $("#policy-forget").addEventListener("click", forgetDefinition);
+for (const [view, button] of [
+  ["alerts", $("#alerts-tab")],
+  ["deliveries", $("#deliveries-tab")],
+]) {
+  button.addEventListener("click", () => selectView(view));
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    selectView(view === "alerts" ? "deliveries" : "alerts", true);
+  });
+}
+$("#delivery-dialog-close").addEventListener("click", closeDeliveryDialog);
+$("#delivery-dialog-done").addEventListener("click", closeDeliveryDialog);
+elements.deliveryDialog.addEventListener("close", () => {
+  state.selectedDelivery = undefined;
+});
+elements.deliveryRetry.addEventListener("click", async () => {
+  const id = elements.deliveryRetry.dataset.id;
+  if (!id) return;
+  elements.deliveryRetry.disabled = true;
+  elements.deliveryDialogResult.textContent = "Scheduling this delivery…";
+  try {
+    await api(`/deliveries/${encodeURIComponent(id)}/retry`, {
+      method: "POST",
+    });
+    elements.deliveryDialogResult.textContent = "Delivery scheduled for retry.";
+    await load();
+  } catch (error) {
+    elements.deliveryDialogResult.textContent = error.message;
+  } finally {
+    elements.deliveryRetry.disabled = false;
+  }
+});
 $("#retry").addEventListener("click", async () => {
+  $("#retry").disabled = true;
   try {
     await api("/retry", { method: "POST" });
     await load();
   } catch (error) {
     showError(error);
+  } finally {
+    $("#retry").disabled = false;
   }
 });
+selectView(location.hash === "#deliveries" ? "deliveries" : "alerts");
 connectLiveUpdates();
 void load();

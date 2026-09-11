@@ -49,7 +49,38 @@
         <div id="diagnostics-list" class="diagnostics-grid"></div>
       </details>
 
-      <section class="workspace">
+      <nav class="view-tabs" role="tablist" aria-label="Alert center views">
+        <button
+          id="alerts-tab"
+          class="view-tab is-active"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="alerts-panel"
+        >
+          Alerts
+        </button>
+        <button
+          id="deliveries-tab"
+          class="view-tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="deliveries-panel"
+        >
+          Deliveries
+          <span id="delivery-tab-count" class="tab-count" aria-hidden="true"
+            >0</span
+          >
+        </button>
+      </nav>
+
+      <section
+        id="alerts-panel"
+        class="workspace tab-panel"
+        role="tabpanel"
+        aria-labelledby="alerts-tab"
+      >
         <div class="section-heading">
           <div>
             <h2>Alerts</h2>
@@ -131,7 +162,13 @@
         </button>
       </section>
 
-      <section class="workspace delivery-section">
+      <section
+        id="deliveries-panel"
+        class="workspace tab-panel delivery-section"
+        role="tabpanel"
+        aria-labelledby="deliveries-tab"
+        hidden
+      >
         <div class="section-heading">
           <div>
             <h2>Notification deliveries</h2>
@@ -142,10 +179,20 @@
             class="button button-quiet button-small"
             type="button"
           >
-            Retry pending deliveries
+            Retry all failed deliveries
           </button>
         </div>
-        <div id="delivery-list" class="delivery-list" aria-live="polite"></div>
+        <div id="delivery-list" class="table-shell" aria-live="polite">
+          <div class="empty">Loading deliveries…</div>
+        </div>
+        <button
+          id="deliveries-more"
+          class="button button-quiet load-more"
+          type="button"
+          hidden
+        >
+          Load more deliveries
+        </button>
       </section>
       <p id="error" class="error" role="alert" hidden></p>
       <a id="login" class="login button button-primary" href="/login" hidden
@@ -188,6 +235,56 @@
         Older events
       </button>
     </aside>
+
+    <dialog id="delivery-dialog" aria-labelledby="delivery-dialog-title">
+      <div class="drawer-header">
+        <div>
+          <p class="eyebrow">Notification delivery</p>
+          <h2 id="delivery-dialog-title">Delivery details</h2>
+        </div>
+        <button
+          id="delivery-dialog-close"
+          class="icon-button"
+          type="button"
+          aria-label="Close delivery details"
+        >
+          ×
+        </button>
+      </div>
+      <div id="delivery-dialog-body"></div>
+      <h3>Attempt history</h3>
+      <div
+        id="delivery-attempt-list"
+        class="event-list"
+        aria-live="polite"
+      ></div>
+      <button
+        id="delivery-attempts-more"
+        class="button button-quiet load-more"
+        type="button"
+        hidden
+      >
+        Load more attempts
+      </button>
+      <p id="delivery-dialog-result" class="form-result" role="status"></p>
+      <div class="dialog-actions delivery-dialog-actions">
+        <button
+          id="delivery-retry"
+          class="button button-primary button-small"
+          type="button"
+          hidden
+        >
+          Retry this delivery
+        </button>
+        <button
+          id="delivery-dialog-done"
+          class="button button-quiet button-small"
+          type="button"
+        >
+          Close
+        </button>
+      </div>
+    </dialog>
 
     <dialog id="policy-dialog" aria-labelledby="policy-title">
       <form id="policy-form" method="dialog">

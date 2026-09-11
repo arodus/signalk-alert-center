@@ -9,6 +9,8 @@ import {
   AlertPolicyRecord,
   AlertRecord,
   DeliveryAttemptRecord,
+  DeliveryAttemptPage,
+  DeliveryPage,
   DeliveryRecord,
   IngestOptions,
   NormalizedAlert,
@@ -45,6 +47,15 @@ const date = (value: unknown): Date | undefined =>
 const json = (value: unknown): unknown | undefined =>
   value === null || value === undefined ? undefined : JSON.parse(String(value));
 
+const deliveryContextSelect = `SELECT d.*,
+  o.id AS occurrence_id, o.occurrence_number, o.definition_id,
+  o.path AS alert_path, o.message AS alert_message,
+  o.max_severity AS alert_severity, o.started_at AS alert_started_at,
+  f.name AS definition_name
+FROM deliveries d
+LEFT JOIN alert_occurrences o ON o.id=d.alert_id
+LEFT JOIN alert_definitions f ON f.id=o.definition_id`;
+
 const deliveryRecord = (row: Row): DeliveryRecord => ({
   id: String(row.id),
   alertId: String(row.alert_id),
@@ -58,6 +69,40 @@ const deliveryRecord = (row: Row): DeliveryRecord => ({
   lastErrorMessage: row.last_error_message
     ? String(row.last_error_message)
     : undefined,
+  remoteId: row.remote_id ? String(row.remote_id) : undefined,
+  createdAt: new Date(String(row.created_at)),
+  updatedAt: new Date(String(row.updated_at)),
+  ...(row.occurrence_id
+    ? {
+        alert: {
+          occurrenceId: String(row.occurrence_id),
+          occurrenceNumber:
+            row.occurrence_number === null ||
+            row.occurrence_number === undefined
+              ? undefined
+              : Number(row.occurrence_number),
+          definitionId: row.definition_id
+            ? String(row.definition_id)
+            : undefined,
+          name: String(row.definition_name ?? row.alert_path),
+          path: String(row.alert_path),
+          message: row.alert_message ? String(row.alert_message) : undefined,
+          severity: row.alert_severity as AlertRecord["maxSeverity"],
+          startedAt: new Date(String(row.alert_started_at)),
+        },
+      }
+    : {}),
+});
+
+const deliveryAttemptRecord = (row: Row): DeliveryAttemptRecord => ({
+  id: Number(row.id),
+  deliveryId: String(row.delivery_id),
+  attemptNumber: Number(row.attempt_number),
+  startedAt: new Date(String(row.started_at)),
+  finishedAt: date(row.finished_at),
+  outcome: row.outcome as DeliveryAttemptRecord["outcome"],
+  errorCode: row.error_code ? String(row.error_code) : undefined,
+  errorMessage: row.error_message ? String(row.error_message) : undefined,
   remoteId: row.remote_id ? String(row.remote_id) : undefined,
 });
 
@@ -1640,17 +1685,57 @@ export class AlertDatabase {
   }
 
   listRecentDeliveries(limit = 100): DeliveryRecord[] {
-    const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
-    return (
-      this.db
+    return this.queryDeliveries(limit).items;
+  }
+
+  queryDeliveries(limit = 30, cursor?: string): DeliveryPage {
+    const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    let cursorPriority: number | undefined;
+    let cursorRowId: number | undefined;
+    if (cursor) {
+      const row = this.db
         .prepare(
-          `SELECT * FROM deliveries
-           ORDER BY CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
-                         THEN 0 ELSE 1 END,
-                    rowid DESC LIMIT ?`,
+          `SELECT rowid,
+                  CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+                       THEN 0 ELSE 1 END AS priority
+           FROM deliveries WHERE id=?`,
         )
-        .all(boundedLimit) as Row[]
-    ).map(deliveryRecord);
+        .get(cursor) as Row | undefined;
+      if (!row) return { items: [] };
+      cursorPriority = Number(row.priority);
+      cursorRowId = Number(row.rowid);
+    }
+    const rows = this.db
+      .prepare(
+        `${deliveryContextSelect}
+         WHERE ? IS NULL
+            OR CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+                    THEN 0 ELSE 1 END > ?
+            OR (CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+                     THEN 0 ELSE 1 END = ? AND d.rowid < ?)
+         ORDER BY CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+                       THEN 0 ELSE 1 END,
+                  d.rowid DESC LIMIT ?`,
+      )
+      .all(
+        cursorPriority ?? null,
+        cursorPriority ?? null,
+        cursorPriority ?? null,
+        cursorRowId ?? null,
+        boundedLimit + 1,
+      ) as Row[];
+    const selected = rows.slice(0, boundedLimit).map(deliveryRecord);
+    return {
+      items: selected,
+      nextCursor: rows.length > boundedLimit ? selected.at(-1)?.id : undefined,
+    };
+  }
+
+  getDelivery(id: string): DeliveryRecord | undefined {
+    const row = this.db
+      .prepare(`${deliveryContextSelect} WHERE d.id=?`)
+      .get(id) as Row | undefined;
+    return row ? deliveryRecord(row) : undefined;
   }
 
   listDeliveriesForAlert(alertId: string): DeliveryRecord[] {
@@ -1790,16 +1875,56 @@ export class AlertDatabase {
             .prepare("SELECT * FROM delivery_attempts ORDER BY started_at, id")
             .all()
     ) as Row[];
-    return rows.map((row) => ({
-      id: Number(row.id),
-      deliveryId: String(row.delivery_id),
-      attemptNumber: Number(row.attempt_number),
-      startedAt: new Date(String(row.started_at)),
-      finishedAt: date(row.finished_at),
-      outcome: row.outcome as DeliveryAttemptRecord["outcome"],
-      errorCode: row.error_code ? String(row.error_code) : undefined,
-      errorMessage: row.error_message ? String(row.error_message) : undefined,
-      remoteId: row.remote_id ? String(row.remote_id) : undefined,
-    }));
+    return rows.map(deliveryAttemptRecord);
+  }
+
+  queryDeliveryAttempts(
+    deliveryId: string,
+    limit = 50,
+    cursor?: string,
+  ): DeliveryAttemptPage | undefined {
+    if (!this.getDelivery(deliveryId)) return undefined;
+    const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    const cursorId = cursor === undefined ? undefined : Number(cursor);
+    if (
+      cursor !== undefined &&
+      (!Number.isInteger(cursorId) || (cursorId ?? -1) < 0)
+    )
+      return { items: [] };
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM delivery_attempts
+         WHERE delivery_id=? AND (? IS NULL OR id > ?)
+         ORDER BY id LIMIT ?`,
+      )
+      .all(
+        deliveryId,
+        cursorId ?? null,
+        cursorId ?? null,
+        boundedLimit + 1,
+      ) as Row[];
+    const selected = rows.slice(0, boundedLimit).map(deliveryAttemptRecord);
+    return {
+      items: selected,
+      nextCursor:
+        rows.length > boundedLimit ? String(selected.at(-1)?.id) : undefined,
+    };
+  }
+
+  retryDelivery(
+    id: string,
+    now = new Date(),
+  ): "scheduled" | "not_retryable" | "not_found" {
+    const delivery = this.getDelivery(id);
+    if (!delivery) return "not_found";
+    if (!["failed_retryable", "failed_terminal"].includes(delivery.state))
+      return "not_retryable";
+    this.db
+      .prepare(
+        `UPDATE deliveries SET state='pending', next_attempt_at=NULL,
+         last_error_code=NULL, last_error_message=NULL, updated_at=? WHERE id=?`,
+      )
+      .run(now.toISOString(), id);
+    return "scheduled";
   }
 }

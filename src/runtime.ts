@@ -14,6 +14,7 @@ import {
   AlertRecord,
   audioSounds,
   CustomAudioSound,
+  DeliveryRecord,
 } from "./alerts/types";
 import { listConfiguredZones } from "./alerts/zones";
 import {
@@ -773,6 +774,45 @@ export class PersistentNotifierRuntime {
     };
   }
 
+  private deliveryView(delivery: DeliveryRecord) {
+    const occurrence = delivery.alert
+      ? undefined
+      : this.getOccurrence(delivery.alertId);
+    let definition: AlertDefinitionRecord | undefined;
+    if (occurrence?.definitionId) {
+      try {
+        definition = this.db().getDefinition(occurrence.definitionId);
+      } catch {
+        definition = undefined;
+      }
+    }
+    const notifier = (this.config.notifiers ?? []).find(
+      (item) => item.name === delivery.transportInstanceId,
+    );
+    return {
+      ...delivery,
+      alert:
+        delivery.alert ??
+        (occurrence
+          ? {
+              occurrenceId: occurrence.id,
+              occurrenceNumber: occurrence.occurrenceNumber,
+              definitionId: occurrence.definitionId,
+              name: definition?.name ?? occurrence.path,
+              path: occurrence.path,
+              message: occurrence.message,
+              severity: occurrence.maxSeverity,
+              startedAt: occurrence.firstSeenAt,
+            }
+          : undefined),
+      service: {
+        id: delivery.transportInstanceId,
+        name: delivery.transportInstanceId,
+        type: notifier?.type ?? "unknown",
+      },
+    };
+  }
+
   private page<T extends { id: string }>(
     items: T[],
     limit: number,
@@ -949,6 +989,28 @@ export class PersistentNotifierRuntime {
         if (query.eventType)
           items = items.filter((event) => event.eventType === query.eventType);
         return this.page(items, query.limit, query.cursor);
+      },
+      listDeliveries: (query) => {
+        const page = this.db().queryDeliveries(query.limit, query.cursor);
+        return {
+          items: page.items.map((delivery) => this.deliveryView(delivery)),
+          nextCursor: page.nextCursor,
+        };
+      },
+      getDelivery: (id) => {
+        const delivery = this.db().getDelivery(id);
+        return delivery ? this.deliveryView(delivery) : undefined;
+      },
+      listDeliveryAttempts: (id, query) =>
+        this.db().queryDeliveryAttempts(id, query.limit, query.cursor),
+      retryDelivery: (id) => {
+        const result = this.db().retryDelivery(id);
+        if (result === "scheduled") {
+          this.debug(`Retrying delivery: deliveryId=${id}`);
+          this.requestDeliveryRun();
+          this.emitChange("deliveries");
+        }
+        return result;
       },
       dismissOccurrence: (id) => {
         const occurrence = this.getOccurrence(id);

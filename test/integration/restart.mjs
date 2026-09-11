@@ -131,8 +131,8 @@ try {
   assert.equal(after.state, "active");
   await eventually(
     () => json(`${api}/deliveries`),
-    (items) =>
-      items.some(
+    (page) =>
+      page.items.some(
         (delivery) =>
           delivery.alertId === id && delivery.state === "failed_retryable",
       ),
@@ -146,8 +146,8 @@ try {
   );
   await eventually(
     () => json(`${api}/deliveries`),
-    (items) =>
-      items.some(
+    (page) =>
+      page.items.some(
         (delivery) => delivery.alertId === id && delivery.state === "delivered",
       ),
     "retry delivery after restart",
