@@ -66,6 +66,9 @@ export interface PluginConfig {
     maxAttempts?: number;
     beforePlaybackCommand?: Partial<AudioCommand>;
     afterPlaybackCommand?: Partial<AudioCommand>;
+    sessionStartCommand?: Partial<AudioCommand>;
+    sessionStopCommand?: Partial<AudioCommand>;
+    sessionIdleCooldownSeconds?: number;
     commandTimeoutSeconds?: number;
     customSounds?: Array<{ name: string; filePath: string }>;
     quietHours?: { enabled?: boolean; start?: string; end?: string };
@@ -289,6 +292,7 @@ function validateAudio(audio: PluginConfig["audio"]): void {
     ["failureRetrySeconds", audio.failureRetrySeconds],
     ["maxAttempts", audio.maxAttempts],
     ["commandTimeoutSeconds", audio.commandTimeoutSeconds],
+    ["sessionIdleCooldownSeconds", audio.sessionIdleCooldownSeconds],
   ] as const) {
     if (value !== undefined && (!Number.isInteger(value) || value < 1))
       throw new Error(`audio.${name} must be a positive integer`);
@@ -300,8 +304,21 @@ function validateAudio(audio: PluginConfig["audio"]): void {
     audio.commandTimeoutSeconds > 300
   )
     throw new Error("audio.commandTimeoutSeconds must not exceed 300");
+  if (
+    audio.sessionIdleCooldownSeconds !== undefined &&
+    audio.sessionIdleCooldownSeconds > 86_400
+  )
+    throw new Error("audio.sessionIdleCooldownSeconds must not exceed 86400");
   validateAudioCommand(audio.beforePlaybackCommand, "beforePlaybackCommand");
   validateAudioCommand(audio.afterPlaybackCommand, "afterPlaybackCommand");
+  validateAudioCommand(audio.sessionStartCommand, "sessionStartCommand");
+  validateAudioCommand(audio.sessionStopCommand, "sessionStopCommand");
+  const hasSessionStart = hasConfiguredAudioCommand(audio.sessionStartCommand);
+  const hasSessionStop = hasConfiguredAudioCommand(audio.sessionStopCommand);
+  if (hasSessionStart !== hasSessionStop)
+    throw new Error(
+      "audio.sessionStartCommand and audio.sessionStopCommand must be configured together",
+    );
   validateCustomSounds(audio.customSounds);
   if (
     audio.defaults?.repeatIntervalSeconds !== undefined &&
@@ -410,6 +427,14 @@ function validateAudioCommand(
     )
       throw new Error(`audio.${name}.arguments contains an invalid value`);
   }
+}
+
+function hasConfiguredAudioCommand(
+  command: Partial<AudioCommand> | undefined,
+): boolean {
+  return (
+    typeof command?.executable === "string" && command.executable.trim() !== ""
+  );
 }
 
 function isClockTime(value: unknown): value is string {

@@ -22,6 +22,7 @@ import {
   AudioPlayer,
   CommandAudioPlayer,
   HookedAudioPlayer,
+  SessionAudioPlayer,
 } from "./audio/player";
 import { AudioScheduler } from "./audio/scheduler";
 import {
@@ -164,11 +165,13 @@ export class PersistentNotifierRuntime {
       this.app.error(
         `[persistent-notifier] Local audio test failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      await player.stop?.();
     }
   }
 
   private createAudioPlayer(options: PluginConfig): AudioPlayer {
-    const player = this.audioPlayerFactory
+    let player = this.audioPlayerFactory
       ? this.audioPlayerFactory(options)
       : new CommandAudioPlayer({
           backend: options.audio?.backend ?? "auto",
@@ -190,14 +193,38 @@ export class PersistentNotifierRuntime {
         });
     const before = configuredAudioCommand(options.audio?.beforePlaybackCommand);
     const after = configuredAudioCommand(options.audio?.afterPlaybackCommand);
-    if (!before && !after) return player;
-    return new HookedAudioPlayer(player, {
-      before,
-      after,
-      timeoutSeconds: options.audio?.commandTimeoutSeconds ?? 10,
-      onCommandError: (_stage, message) =>
-        this.app.error(`[persistent-notifier] ${message}`),
-    });
+    if (before || after)
+      player = new HookedAudioPlayer(player, {
+        before,
+        after,
+        timeoutSeconds: options.audio?.commandTimeoutSeconds ?? 10,
+        onCommandError: (_stage, message) =>
+          this.app.error(`[persistent-notifier] ${message}`),
+      });
+    const sessionStart = configuredAudioCommand(
+      options.audio?.sessionStartCommand,
+    );
+    const sessionStop = configuredAudioCommand(
+      options.audio?.sessionStopCommand,
+    );
+    if (sessionStart && sessionStop)
+      player = new SessionAudioPlayer(player, {
+        start: sessionStart,
+        stop: sessionStop,
+        idleCooldownSeconds: options.audio?.sessionIdleCooldownSeconds ?? 30,
+        timeoutSeconds: options.audio?.commandTimeoutSeconds ?? 10,
+        onCommandError: (stage, message) =>
+          this.app.error(
+            `[persistent-notifier] Audio session ${stage} failed: ${message}`,
+          ),
+        onStateChange: (status) => {
+          this.debug(
+            `Audio session: state=${status.state}, ownedByPlugin=${status.ownedByPlugin}`,
+          );
+          this.emitChange("audio-session");
+        },
+      });
+    return player;
   }
 
   status() {
@@ -244,6 +271,9 @@ export class PersistentNotifierRuntime {
         ? `Delivery scheduler failed: ${scheduler.lastError}`
         : undefined,
       audio.lastError ? `Local audio failed: ${audio.lastError}` : undefined,
+      audio.session?.lastError && audio.session.lastError !== audio.lastError
+        ? `Local audio session failed: ${audio.session.lastError}`
+        : undefined,
       ingestion.rejected > 0
         ? `${ingestion.rejected} notification update(s) rejected at the ingestion queue limit`
         : undefined,

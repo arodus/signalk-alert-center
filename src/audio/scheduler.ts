@@ -22,6 +22,7 @@ export interface AudioSchedulerStatus {
   lastRunCompletedAt?: Date;
   lastPlayedAt?: Date;
   lastError?: string;
+  session?: ReturnType<NonNullable<AudioPlayer["sessionStatus"]>>;
 }
 
 export class AudioScheduler {
@@ -47,6 +48,7 @@ export class AudioScheduler {
       lastRunCompletedAt: this.lastRunCompletedAt,
       lastPlayedAt: this.lastPlayedAt,
       lastError: this.lastError,
+      session: this.player.sessionStatus?.(),
     };
   }
 
@@ -189,6 +191,7 @@ export class AudioScheduler {
     this.stopped = true;
     this.active?.controller.abort();
     await this.activeRun;
+    await this.player.stop?.();
     this.database.recoverPlayingAudio();
   }
 }

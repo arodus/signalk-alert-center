@@ -107,6 +107,10 @@ describe("validateConfig", () => {
     expect(
       audio.properties.afterPlaybackCommand.properties.arguments.type,
     ).toBe("array");
+    expect(
+      audio.properties.sessionStartCommand.properties.executable.title,
+    ).toBe("Start executable");
+    expect(audio.properties.sessionIdleCooldownSeconds.default).toBe(30);
     expect(audio.properties.customSounds.items.properties.filePath.title).toBe(
       "WAV file path",
     );
@@ -191,6 +195,22 @@ describe("validateConfig", () => {
         },
       }),
     ).toThrow("beforePlaybackCommand");
+    expect(() =>
+      validateConfig({
+        audio: {
+          sessionStartCommand: { executable: "/usr/local/bin/amp-on" },
+        },
+      }),
+    ).toThrow("must be configured together");
+    expect(() =>
+      validateConfig({
+        audio: {
+          sessionStartCommand: { executable: "/usr/local/bin/amp-on" },
+          sessionStopCommand: { executable: "/usr/local/bin/amp-off" },
+          sessionIdleCooldownSeconds: 30,
+        },
+      }),
+    ).not.toThrow();
   });
 
   it("rejects invalid notifier credentials", () => {

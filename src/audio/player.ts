@@ -14,6 +14,8 @@ export interface AudioPlayer {
     sound: PlayableAudioSound,
     signal?: AbortSignal,
   ): Promise<{ backend: string }>;
+  stop?(): Promise<void>;
+  sessionStatus?(): AudioSessionStatus;
 }
 
 export interface AudioCommand {
@@ -26,6 +28,29 @@ export interface HookedAudioPlayerOptions {
   after?: AudioCommand;
   timeoutSeconds: number;
   onCommandError?: (stage: "before" | "after", message: string) => void;
+}
+
+export type AudioSessionState =
+  "inactive" | "starting" | "active" | "cooldown" | "stopping" | "stop_failed";
+
+export interface AudioSessionStatus {
+  state: AudioSessionState;
+  ownedByPlugin: boolean;
+  stopScheduledAt?: Date;
+  lastStartedAt?: Date;
+  lastStoppedAt?: Date;
+  lastError?: string;
+}
+
+export interface SessionAudioPlayerOptions {
+  start: AudioCommand;
+  stop: AudioCommand;
+  idleCooldownSeconds: number;
+  timeoutSeconds: number;
+  onCommandError?: (stage: "start" | "stop", message: string) => void;
+  onStateChange?: (status: AudioSessionStatus) => void;
+  runCommand?: typeof runAudioCommand;
+  now?: () => Date;
 }
 
 export interface CommandAudioPlayerOptions {
@@ -249,6 +274,156 @@ export class HookedAudioPlayer implements AudioPlayer {
         }
       }
     }
+  }
+
+  async stop(): Promise<void> {
+    await this.player.stop?.();
+  }
+}
+
+export class SessionAudioPlayer implements AudioPlayer {
+  private state: AudioSessionState = "inactive";
+  private ownedByPlugin = false;
+  private stopTimer?: ReturnType<typeof setTimeout>;
+  private stopScheduledAt?: Date;
+  private startPromise?: Promise<void>;
+  private stopPromise?: Promise<void>;
+  private lastStartedAt?: Date;
+  private lastStoppedAt?: Date;
+  private lastError?: string;
+  private shuttingDown = false;
+  private readonly runCommand: typeof runAudioCommand;
+  private readonly now: () => Date;
+
+  constructor(
+    private readonly player: AudioPlayer,
+    private readonly options: SessionAudioPlayerOptions,
+  ) {
+    this.runCommand = options.runCommand ?? runAudioCommand;
+    this.now = options.now ?? (() => new Date());
+  }
+
+  sessionStatus(): AudioSessionStatus {
+    return {
+      state: this.state,
+      ownedByPlugin: this.ownedByPlugin,
+      stopScheduledAt: this.stopScheduledAt,
+      lastStartedAt: this.lastStartedAt,
+      lastStoppedAt: this.lastStoppedAt,
+      lastError: this.lastError,
+    };
+  }
+
+  async play(
+    sound: PlayableAudioSound,
+    signal?: AbortSignal,
+  ): Promise<{ backend: string }> {
+    if (this.shuttingDown) throw abortedError();
+    this.cancelPendingStop();
+    if (this.stopPromise) await this.stopPromise;
+    await this.ensureStarted(signal);
+    try {
+      return await this.player.play(sound, signal);
+    } finally {
+      this.scheduleStop();
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.shuttingDown = true;
+    this.cancelPendingStop();
+    if (this.startPromise) await this.startPromise.catch(() => undefined);
+    if (this.stopPromise) await this.stopPromise;
+    if (this.ownedByPlugin) await this.stopSession();
+    await this.player.stop?.();
+  }
+
+  private async ensureStarted(signal?: AbortSignal): Promise<void> {
+    if (this.ownedByPlugin) {
+      this.setState("active");
+      return;
+    }
+    if (this.startPromise) return this.startPromise;
+    this.setState("starting");
+    const start = (async () => {
+      try {
+        await this.runCommand(
+          this.options.start,
+          this.options.timeoutSeconds,
+          signal,
+        );
+        this.ownedByPlugin = true;
+        this.lastStartedAt = this.now();
+        this.lastError = undefined;
+        this.setState("active");
+      } catch (error) {
+        const message = commandErrorMessage("Audio session start", error);
+        this.lastError = message;
+        this.setState("inactive");
+        this.options.onCommandError?.("start", message);
+        const wrapped = new Error(message, { cause: error });
+        Object.assign(wrapped, { code: "SESSION_START_FAILED" });
+        throw wrapped;
+      }
+    })();
+    this.startPromise = start;
+    try {
+      await start;
+    } finally {
+      if (this.startPromise === start) this.startPromise = undefined;
+    }
+  }
+
+  private cancelPendingStop(): void {
+    if (this.stopTimer) clearTimeout(this.stopTimer);
+    this.stopTimer = undefined;
+    this.stopScheduledAt = undefined;
+    if (this.ownedByPlugin && !this.stopPromise) this.setState("active");
+  }
+
+  private scheduleStop(): void {
+    if (!this.ownedByPlugin || this.shuttingDown) return;
+    this.cancelPendingStop();
+    const delay = this.options.idleCooldownSeconds * 1000;
+    this.stopScheduledAt = new Date(this.now().getTime() + delay);
+    this.setState("cooldown");
+    this.stopTimer = setTimeout(() => {
+      this.stopTimer = undefined;
+      this.stopScheduledAt = undefined;
+      void this.stopSession();
+    }, delay);
+    this.stopTimer.unref?.();
+  }
+
+  private async stopSession(): Promise<void> {
+    if (!this.ownedByPlugin) return;
+    if (this.stopPromise) return this.stopPromise;
+    this.setState("stopping");
+    const stop = (async () => {
+      try {
+        await this.runCommand(this.options.stop, this.options.timeoutSeconds);
+        this.ownedByPlugin = false;
+        this.lastStoppedAt = this.now();
+        this.lastError = undefined;
+        this.setState("inactive");
+      } catch (error) {
+        const message = commandErrorMessage("Audio session stop", error);
+        this.lastError = message;
+        this.setState("stop_failed");
+        this.options.onCommandError?.("stop", message);
+      }
+    })();
+    this.stopPromise = stop;
+    try {
+      await stop;
+    } finally {
+      if (this.stopPromise === stop) this.stopPromise = undefined;
+    }
+  }
+
+  private setState(state: AudioSessionState): void {
+    this.state = state;
+    this.options.onStateChange?.(this.sessionStatus());
   }
 }
 
