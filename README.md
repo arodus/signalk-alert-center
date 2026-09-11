@@ -402,13 +402,30 @@ remote notifications. Custom WAV files retain their own encoded level; the plugi
 master volume applies only to generated built-in tones.
 
 Optional **Command before each sound** and **Command after each sound** settings
-can pause/resume music, power an amplifier, adjust a mixer, or control an external
-indicator. Configure the executable separately from its ordered argument list. The
-before command must succeed before playback starts. The after command runs after
-every attempted sound, including a failed or cancelled sound; its failure is logged
-but does not replay an already completed sound. Both commands have a bounded timeout.
-They run once per playback attempt, so a repeating alert runs both hooks around
-every repetition.
+can pause/resume music, adjust a mixer, or control an indicator around one sound.
+Configure the executable separately from its ordered argument list. The before
+command must succeed before playback starts. The after command runs after every
+attempted sound, including a failed or cancelled sound; its failure is logged but
+does not replay an already completed sound. They run once per playback attempt,
+so a repeating alert runs both hooks around every repetition.
+
+Use **Command when audio becomes active** and **Command when audio becomes idle**
+for hardware that should remain enabled across multiple sounds. These queue-session
+commands must be configured together. The start command runs once immediately
+before the first actual playback. After the final sound, the plugin waits for the
+configured **Audio-session idle cooldown**; new queued or repeating playback during
+that time cancels the pending stop and reuses the active session. The stop command
+runs once after an uninterrupted cooldown. Plugin shutdown also attempts it when
+the current plugin process successfully ran the start command. Startup never sends
+a stop command for a session it does not own.
+
+For an amplifier, configure `/usr/local/bin/amplifier-on` as the session start,
+`/usr/local/bin/amplifier-off` as the session stop, and a cooldown longer than the
+normal gap between repeating alerts. A start failure prevents that sound from
+playing and uses the normal bounded audio retry policy. A stop failure is logged
+and shown in diagnostics, but completed sounds are not replayed. All per-sound and
+session commands share the bounded command timeout and run directly without a
+shell or alert-data interpolation.
 
 For example, to pause and resume MPD playback, set the before executable to
 `/usr/bin/mpc` with one argument, `pause`, and the after executable to
@@ -470,7 +487,7 @@ contract is returned through the plugin's OpenAPI document.
 notification payloads. It includes runtime generation and listener counts; ingestion
 queue depth, limit, high-water mark, and totals; startup reconciliation state and duration;
 the last delivery and audio scheduler runs; active request count and oldest request;
-pending sounds; the oldest pending
+pending sounds; audio-session ownership, cooldown, and command failures; the oldest pending
 delivery, overdue activation count, database/schema health, pending connectivity wake work, switch ownership,
 the last connectivity transition and probe result, and per-service pending count
 plus last success/failure time and failure code. The dashboard exposes the same
