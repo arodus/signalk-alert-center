@@ -13,11 +13,29 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await page.goto("/signalk-persistent-notifier/");
   await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
   await expect(page.locator("#health-state")).toHaveText(/healthy|degraded/);
-  await page.getByText("System diagnostics").click();
+  const diagnostics = page.locator(".system-diagnostics");
+  await expect(diagnostics).not.toHaveAttribute("open", "");
+  expect(
+    await page
+      .locator("#deliveries-panel")
+      .evaluate((deliveries) =>
+        Boolean(
+          deliveries.compareDocumentPosition(
+            document.querySelector(".system-diagnostics")!,
+          ) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ),
+  ).toBe(true);
+  const diagnosticsSummary = diagnostics.locator("summary");
+  await diagnosticsSummary.focus();
+  await diagnosticsSummary.press("Enter");
+  await expect(diagnostics).toHaveAttribute("open", "");
   await expect(page.locator("#diagnostics-list")).toContainText("Database");
   await expect(page.locator("#diagnostics-list")).toContainText(
     "Startup reconciliation",
   );
+  await diagnosticsSummary.press("Enter");
+  await expect(diagnostics).not.toHaveAttribute("open", "");
   const fridge = page
     .locator("tr.clickable-row")
     .filter({ hasText: "Refrigerator temperature" })

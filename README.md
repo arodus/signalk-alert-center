@@ -474,8 +474,10 @@ pending sounds; the oldest pending
 delivery, overdue activation count, database/schema health, pending connectivity wake work, switch ownership,
 the last connectivity transition and probe result, and per-service pending count
 plus last success/failure time and failure code. The dashboard exposes the same
-information under **System diagnostics**, while Signal K's compact plugin status
-shows the overall health and active/pending counts.
+information under **System diagnostics** at the bottom of the Alert center. The
+section is collapsed by default so current alerts and delivery work remain the
+primary workflow, while Signal K's compact plugin status shows the overall health
+and active/pending counts.
 
 Health is **healthy** when the schema is current, startup reconciliation has
 completed, connectivity is not faulted, activations are not overdue, and no

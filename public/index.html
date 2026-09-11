@@ -41,14 +41,6 @@
         >
       </section>
 
-      <details class="system-diagnostics">
-        <summary>
-          <span id="health-state" class="health-pill">Checking</span>
-          System diagnostics
-        </summary>
-        <div id="diagnostics-list" class="diagnostics-grid"></div>
-      </details>
-
       <nav class="view-tabs" role="tablist" aria-label="Alert center views">
         <button
           id="alerts-tab"
@@ -194,6 +186,15 @@
           Load more deliveries
         </button>
       </section>
+
+      <details class="system-diagnostics">
+        <summary>
+          <span id="health-state" class="health-pill">Checking</span>
+          System diagnostics
+        </summary>
+        <div id="diagnostics-list" class="diagnostics-grid"></div>
+      </details>
+
       <p id="error" class="error" role="alert" hidden></p>
       <a id="login" class="login button button-primary" href="/login" hidden
         >Sign in to Signal K</a
