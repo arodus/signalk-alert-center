@@ -56,6 +56,94 @@ test("refreshes from the live event stream without a page reload", async ({
   await expect(page.locator("#definition-list")).toContainText(marker);
 });
 
+test("navigates delivery history, opens attempts, and retries one failure", async ({
+  page,
+}) => {
+  let retryCount = 0;
+  const delivery = {
+    id: "delivery-1",
+    alertId: "occurrence-4",
+    transportInstanceId: "Bridge alerts",
+    state: "failed_retryable",
+    attemptCount: 1,
+    lastAttemptAt: "2026-09-10T12:01:00.000Z",
+    nextAttemptAt: "2026-09-10T12:02:00.000Z",
+    lastErrorCode: "DELIVERY_TIMEOUT",
+    lastErrorMessage: "Notification service did not respond",
+    createdAt: "2026-09-10T12:00:00.000Z",
+    updatedAt: "2026-09-10T12:01:00.000Z",
+    alert: {
+      occurrenceId: "occurrence-4",
+      occurrenceNumber: 4,
+      name: "High water",
+      path: "notifications.bilge.highWater",
+      message: "Port bilge water level is high",
+    },
+    service: { id: "Bridge alerts", name: "Bridge alerts", type: "ntfy" },
+  };
+  await page.route(
+    /\/plugins\/signalk-persistent-notifier\/deliveries(?:\/.*)?(?:\?.*)?$/,
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/delivery-1/retry")) {
+        retryCount += 1;
+        return route.fulfill({ json: { status: "scheduled" } });
+      }
+      if (url.pathname.endsWith("/delivery-1/attempts"))
+        return route.fulfill({
+          json: {
+            items: [
+              {
+                id: 1,
+                deliveryId: "delivery-1",
+                attemptNumber: 1,
+                startedAt: "2026-09-10T12:00:30.000Z",
+                finishedAt: "2026-09-10T12:01:00.000Z",
+                outcome: "failed_retryable",
+                errorCode: "DELIVERY_TIMEOUT",
+                errorMessage: "Notification service did not respond",
+              },
+            ],
+          },
+        });
+      if (url.pathname.endsWith("/delivery-1"))
+        return route.fulfill({ json: delivery });
+      return route.fulfill({ json: { items: [delivery] } });
+    },
+  );
+
+  await page.goto("/signalk-persistent-notifier/");
+  await expect(page.locator("#alerts-panel")).toBeVisible();
+  await expect(page.locator("#deliveries-panel")).toBeHidden();
+  await page.getByRole("tab", { name: /Deliveries/ }).click();
+  await expect(page.locator("#alerts-panel")).toBeHidden();
+  await expect(page.locator("#deliveries-panel")).toBeVisible();
+  await page.locator("[data-delivery-id='delivery-1']").click();
+  await expect(page.locator("#delivery-dialog")).toBeVisible();
+  await expect(page.locator("#delivery-dialog-body")).toContainText(
+    "Bridge alerts · ntfy",
+  );
+  await expect(page.locator("#delivery-attempt-list")).toContainText(
+    "Attempt 1 · failed retryable",
+  );
+  await page.getByRole("button", { name: "Retry this delivery" }).click();
+  await expect(page.locator("#delivery-dialog-result")).toContainText(
+    "scheduled for retry",
+  );
+  expect(retryCount).toBe(1);
+});
+
+test("shows an empty Deliveries tab", async ({ page }) => {
+  await page.route(`**${plugin}/deliveries**`, (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
+  await page.goto("/signalk-persistent-notifier/#deliveries");
+  await expect(page.locator("#deliveries-panel")).toBeVisible();
+  await expect(page.locator("#delivery-list")).toContainText(
+    "No deliveries yet",
+  );
+});
+
 test("surfaces authentication failures", async ({ page }) => {
   await page.route(`**${plugin}/**`, async (route) => {
     if (route.request().url().endsWith("/events")) return route.abort();

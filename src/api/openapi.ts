@@ -58,23 +58,53 @@ export function getAlertCenterOpenApi() {
       "/deliveries": {
         get: {
           summary: "List recent delivery intents and their latest outcome",
-          parameters: [
-            {
-              name: "limit",
-              in: "query",
-              description: "Maximum recent deliveries returned",
-              schema: {
-                type: "integer",
-                minimum: 1,
-                maximum: 100,
-                default: 30,
-              },
-            },
-          ],
+          parameters: pageParameters,
           responses: {
-            "200": response("Delivery records", {
-              type: "array",
-              items: { type: "object", additionalProperties: true },
+            "200": response(
+              "Delivery page",
+              page("#/components/schemas/Delivery"),
+            ),
+            ...errors,
+          },
+        },
+      },
+      "/deliveries/{id}": {
+        get: {
+          summary: "Get one delivery with alert and service context",
+          parameters: [idParameter],
+          responses: {
+            "200": response("Delivery detail", {
+              $ref: "#/components/schemas/Delivery",
+            }),
+            ...errors,
+          },
+        },
+      },
+      "/deliveries/{id}/attempts": {
+        get: {
+          summary: "List one delivery's attempt history chronologically",
+          parameters: [idParameter, ...pageParameters],
+          responses: {
+            "200": response(
+              "Delivery attempt page",
+              page("#/components/schemas/DeliveryAttempt"),
+            ),
+            ...errors,
+          },
+        },
+      },
+      "/deliveries/{id}/retry": {
+        post: {
+          summary: "Retry one failed delivery",
+          parameters: [idParameter],
+          responses: {
+            "200": response("Retry scheduled", {
+              type: "object",
+              required: ["status"],
+              properties: { status: { type: "string", enum: ["scheduled"] } },
+            }),
+            "409": response("Delivery is not failed", {
+              $ref: "#/components/schemas/Error",
             }),
             ...errors,
           },
@@ -548,6 +578,67 @@ export function getAlertCenterOpenApi() {
               type: "array",
               items: { type: "object", additionalProperties: true },
             },
+          },
+        },
+        Delivery: {
+          type: "object",
+          required: [
+            "id",
+            "alertId",
+            "transportInstanceId",
+            "state",
+            "attemptCount",
+            "createdAt",
+            "updatedAt",
+            "service",
+          ],
+          properties: {
+            id: { type: "string" },
+            alertId: { type: "string" },
+            transportInstanceId: { type: "string" },
+            state: {
+              type: "string",
+              enum: [
+                "pending",
+                "waiting_connectivity",
+                "sending",
+                "delivered",
+                "failed_retryable",
+                "failed_terminal",
+              ],
+            },
+            attemptCount: { type: "integer", minimum: 0 },
+            nextAttemptAt: { type: "string", format: "date-time" },
+            lastAttemptAt: { type: "string", format: "date-time" },
+            deliveredAt: { type: "string", format: "date-time" },
+            lastErrorCode: { type: "string" },
+            lastErrorMessage: { type: "string" },
+            remoteId: { type: "string" },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+            alert: { type: "object", additionalProperties: true },
+            service: { type: "object", additionalProperties: true },
+          },
+        },
+        DeliveryAttempt: {
+          type: "object",
+          required: [
+            "id",
+            "deliveryId",
+            "attemptNumber",
+            "startedAt",
+            "outcome",
+          ],
+          properties: {
+            id: { type: "integer" },
+            deliveryId: { type: "string" },
+            attemptNumber: { type: "integer", minimum: 1 },
+            startedAt: { type: "string", format: "date-time" },
+            finishedAt: { type: "string", format: "date-time" },
+            outcome: { type: "string" },
+            errorCode: { type: "string" },
+            errorMessage: { type: "string" },
+            remoteId: { type: "string" },
           },
         },
         AudioSound: {

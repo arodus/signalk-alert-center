@@ -33,6 +33,10 @@ export interface EventQuery {
   cursor?: string;
   eventType?: string;
 }
+export interface DeliveryQuery {
+  limit: number;
+  cursor?: string;
+}
 export interface AlertPolicyPatch {
   enabled?: boolean;
   oneTime?: boolean;
@@ -69,6 +73,15 @@ export interface AlertCenterRepository {
     id: string,
     query: EventQuery,
   ): MaybePromise<Page<unknown> | undefined>;
+  listDeliveries(query: DeliveryQuery): MaybePromise<Page<unknown>>;
+  getDelivery(id: string): MaybePromise<unknown | undefined>;
+  listDeliveryAttempts(
+    id: string,
+    query: DeliveryQuery,
+  ): MaybePromise<Page<unknown> | undefined>;
+  retryDelivery(
+    id: string,
+  ): MaybePromise<"scheduled" | "not_retryable" | "not_found">;
   dismissOccurrence(id: string): MaybePromise<ActionResult | false | undefined>;
   acknowledgeOccurrence(
     id: string,
@@ -669,6 +682,59 @@ export function registerAlertCenterRoutes(
       res.json(result);
     }),
   );
+  addRoute(
+    router,
+    "get",
+    "/deliveries",
+    "readonly",
+    wrap(async (req, res) =>
+      res.json(await repo().listDeliveries(pagination(req.query ?? {}))),
+    ),
+  );
+  addRoute(
+    router,
+    "get",
+    "/deliveries/:id",
+    "readonly",
+    wrap(async (req, res) => {
+      const result = await repo().getDelivery(req.params?.id ?? "");
+      if (result === undefined)
+        throw new ApiError(404, "NOT_FOUND", "Delivery was not found");
+      res.json(result);
+    }),
+  );
+  addRoute(
+    router,
+    "get",
+    "/deliveries/:id/attempts",
+    "readonly",
+    wrap(async (req, res) => {
+      const result = await repo().listDeliveryAttempts(req.params?.id ?? "", {
+        ...pagination(req.query ?? {}),
+      });
+      if (result === undefined)
+        throw new ApiError(404, "NOT_FOUND", "Delivery was not found");
+      res.json(result);
+    }),
+  );
+  addRoute(
+    router,
+    "post",
+    "/deliveries/:id/retry",
+    "readwrite",
+    wrap(async (req, res) => {
+      const result = await repo().retryDelivery(req.params?.id ?? "");
+      if (result === "not_found")
+        throw new ApiError(404, "NOT_FOUND", "Delivery was not found");
+      if (result === "not_retryable")
+        throw new ApiError(
+          409,
+          "DELIVERY_NOT_RETRYABLE",
+          "Only failed deliveries can be retried",
+        );
+      res.json({ status: "scheduled" });
+    }),
+  );
   const actions = {
     dismiss: (id: string) => repo().dismissOccurrence(id),
     acknowledge: (id: string) => repo().acknowledgeOccurrence(id),
@@ -733,10 +799,6 @@ export function registerRoutes(
         res.json({ status: action === "remove" ? "removed" : `${action}d` });
       },
     );
-  addRoute(router, "get", "/deliveries", "readonly", (req, res) => {
-    const { limit } = pagination(req.query ?? {});
-    res.json(database()?.listRecentDeliveries(limit) ?? []);
-  });
   addRoute(
     router,
     "post",

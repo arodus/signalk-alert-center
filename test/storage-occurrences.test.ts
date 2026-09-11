@@ -580,9 +580,59 @@ describe("occurrence storage", () => {
     ])!;
 
     expect(db.listRecentDeliveries(1)).toMatchObject([
-      { alertId: pending.id, state: "pending" },
+      {
+        alertId: pending.id,
+        state: "pending",
+        alert: { occurrenceId: pending.id, path: pending.path },
+      },
     ]);
+    const firstPage = db.queryDeliveries(1);
+    expect(firstPage.nextCursor).toBe(firstPage.items[0].id);
+    expect(db.queryDeliveries(1, firstPage.nextCursor).items[0]).toMatchObject({
+      alertId: completed.id,
+      state: "delivered",
+    });
     expect(db.listDeliveries()).toHaveLength(2);
     expect(completed.id).not.toBe(pending.id);
+  });
+
+  it("pages delivery attempts chronologically and retries one failed delivery", () => {
+    const db = database();
+    db.ingest(active({ sourceKey: "retry-one" }), ["ntfy"]);
+    const delivery = db.listDeliveries()[0];
+    expect(delivery.createdAt).toBeInstanceOf(Date);
+    expect(db.getDelivery(delivery.id)?.id).toBe(delivery.id);
+
+    expect(db.claimDelivery(delivery.id)).toBe(true);
+    db.recordDeliveryFailure(
+      delivery.id,
+      "OFFLINE",
+      "No network",
+      true,
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    expect(db.retryDelivery(delivery.id)).toBe("scheduled");
+    expect(db.claimDelivery(delivery.id)).toBe(true);
+    db.recordDeliveryFailure(
+      delivery.id,
+      "DENIED",
+      "Rejected",
+      false,
+      new Date("2026-01-01T00:02:00Z"),
+    );
+
+    const first = db.queryDeliveryAttempts(delivery.id, 1)!;
+    expect(first.items).toMatchObject([
+      { attemptNumber: 1, outcome: "failed_retryable" },
+    ]);
+    expect(first.nextCursor).toBe(String(first.items[0].id));
+    expect(
+      db.queryDeliveryAttempts(delivery.id, 1, first.nextCursor),
+    ).toMatchObject({
+      items: [{ attemptNumber: 2, outcome: "failed_terminal" }],
+    });
+    expect(db.retryDelivery(delivery.id)).toBe("scheduled");
+    expect(db.retryDelivery(delivery.id)).toBe("not_retryable");
+    expect(db.retryDelivery("missing")).toBe("not_found");
   });
 });

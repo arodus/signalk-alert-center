@@ -159,6 +159,18 @@ export interface DeliveryRecord {
   lastErrorCode?: string;
   lastErrorMessage?: string;
   remoteId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  alert?: {
+    occurrenceId: string;
+    occurrenceNumber?: number;
+    definitionId?: string;
+    name: string;
+    path: string;
+    message?: string;
+    severity: Severity;
+    startedAt: Date;
+  };
 }
 
 export interface DeliveryAttemptRecord {
@@ -176,6 +188,16 @@ export interface DeliveryAttemptRecord {
   errorCode?: string;
   errorMessage?: string;
   remoteId?: string;
+}
+
+export interface DeliveryPage {
+  items: DeliveryRecord[];
+  nextCursor?: string;
+}
+
+export interface DeliveryAttemptPage {
+  items: DeliveryAttemptRecord[];
+  nextCursor?: string;
 }
 
 export interface IngestOptions {

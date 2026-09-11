@@ -504,8 +504,8 @@ that permits more work to remain resident.
 plus `state`, `severity`, `dismissed`, `from`, and `to`. Filters can be combined;
 cursor ordering remains stable by occurrence start time and id.
 
-The dashboard is served at `/signalk-persistent-notifier`. One compact table puts
-all known definitions together with active alerts first. Select an alert to open
+The dashboard is served at `/signalk-persistent-notifier`. The default **Alerts**
+tab uses one compact table for all known definitions, with active alerts first. Select an alert to open
 its current information, recent event/audio/notifier timeline, and **Settings**. Acknowledge and
 Silence are available directly in active rows, with completed actions shown disabled.
 Inactive rows use a neutral status badge. Acknowledge and silence apply only
@@ -525,6 +525,14 @@ Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services, local sound, and delivery timing
 are shown in plain language beside each alert. Open the alert and select **Settings**
 to change them.
+
+The separate **Deliveries** tab keeps transport troubleshooting out of the alert
+workflow. Unfinished work appears first, followed by recent completed and terminal
+results. Each row identifies the alert occurrence and notification service, current
+state, attempt count, relevant timestamps, and latest error. Opening a row shows
+the remote delivery ID and cursor-paged chronological attempt history. Failed rows
+can be retried individually; **Retry all failed deliveries** retries every failed
+intent. Delivery pages and attempt pages are bounded to 100 records per request.
 The dashboard receives lightweight server-sent change events and reloads data only
 after alerts, policies, definitions, or deliveries change. Browsers automatically
 reconnect the same-origin stream; while it is unavailable, the UI uses a slow
