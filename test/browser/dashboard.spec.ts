@@ -81,33 +81,36 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
     },
     service: { id: "Bridge alerts", name: "Bridge alerts", type: "ntfy" },
   };
-  await page.route(`**${plugin}/deliveries**`, async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/delivery-1/retry")) {
-      retryCount += 1;
-      return route.fulfill({ json: { status: "scheduled" } });
-    }
-    if (url.pathname.endsWith("/delivery-1/attempts"))
-      return route.fulfill({
-        json: {
-          items: [
-            {
-              id: 1,
-              deliveryId: "delivery-1",
-              attemptNumber: 1,
-              startedAt: "2026-09-10T12:00:30.000Z",
-              finishedAt: "2026-09-10T12:01:00.000Z",
-              outcome: "failed_retryable",
-              errorCode: "DELIVERY_TIMEOUT",
-              errorMessage: "Notification service did not respond",
-            },
-          ],
-        },
-      });
-    if (url.pathname.endsWith("/delivery-1"))
-      return route.fulfill({ json: delivery });
-    return route.fulfill({ json: { items: [delivery] } });
-  });
+  await page.route(
+    /\/plugins\/signalk-persistent-notifier\/deliveries(?:\/.*)?(?:\?.*)?$/,
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/delivery-1/retry")) {
+        retryCount += 1;
+        return route.fulfill({ json: { status: "scheduled" } });
+      }
+      if (url.pathname.endsWith("/delivery-1/attempts"))
+        return route.fulfill({
+          json: {
+            items: [
+              {
+                id: 1,
+                deliveryId: "delivery-1",
+                attemptNumber: 1,
+                startedAt: "2026-09-10T12:00:30.000Z",
+                finishedAt: "2026-09-10T12:01:00.000Z",
+                outcome: "failed_retryable",
+                errorCode: "DELIVERY_TIMEOUT",
+                errorMessage: "Notification service did not respond",
+              },
+            ],
+          },
+        });
+      if (url.pathname.endsWith("/delivery-1"))
+        return route.fulfill({ json: delivery });
+      return route.fulfill({ json: { items: [delivery] } });
+    },
+  );
 
   await page.goto("/signalk-persistent-notifier/");
   await expect(page.locator("#alerts-panel")).toBeVisible();
