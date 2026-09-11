@@ -476,13 +476,68 @@ export const pluginConfigSchema = {
             },
           },
         },
+        sessionStartCommand: {
+          type: "object",
+          title: "Command when audio becomes active",
+          description:
+            "Optional server command run once before the first sound in an audio session. Configure it together with the stop command. Use this for hardware that should stay on across queued or repeating alerts, such as an amplifier.",
+          properties: {
+            executable: {
+              type: "string",
+              maxLength: 512,
+              title: "Start executable",
+              description:
+                "Program available to the Signal K process, for example /usr/local/bin/amplifier-on.",
+            },
+            arguments: {
+              type: "array",
+              maxItems: 32,
+              title: "Start arguments",
+              description:
+                "Optional arguments in order. Add one list item per argument; shell expressions are not evaluated.",
+              items: { type: "string", maxLength: 2048 },
+            },
+          },
+        },
+        sessionStopCommand: {
+          type: "object",
+          title: "Command when audio becomes idle",
+          description:
+            "Optional server command run after the audio queue has stayed idle for the cooldown. Configure it together with the start command. New playback during the cooldown keeps the current session active.",
+          properties: {
+            executable: {
+              type: "string",
+              maxLength: 512,
+              title: "Stop executable",
+              description:
+                "Program available to the Signal K process, for example /usr/local/bin/amplifier-off.",
+            },
+            arguments: {
+              type: "array",
+              maxItems: 32,
+              title: "Stop arguments",
+              description:
+                "Optional arguments in order. Add one list item per argument; shell expressions are not evaluated.",
+              items: { type: "string", maxLength: 2048 },
+            },
+          },
+        },
+        sessionIdleCooldownSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 86400,
+          title: "Audio session idle cooldown (seconds)",
+          description:
+            "How long to keep session-managed hardware active after a sound ends. Another sound during this period cancels the pending stop.",
+          default: 30,
+        },
         commandTimeoutSeconds: {
           type: "integer",
           minimum: 1,
           maximum: 300,
           title: "Command timeout (seconds)",
           description:
-            "Stops a before- or after-play command that does not finish within this time.",
+            "Stops a per-sound or audio-session command that does not finish within this time.",
           default: 10,
         },
         customSounds: {

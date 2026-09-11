@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import {
   AudioPlayer,
   CommandAudioPlayer,
   HookedAudioPlayer,
+  SessionAudioPlayer,
 } from "../src/audio/player";
 import {
   AudioScheduler,
@@ -52,6 +53,8 @@ const schedulerOptions = {
   failureRetrySeconds: 30,
   maxAttempts: 3,
 };
+
+afterEach(() => vi.useRealTimers());
 
 describe("local audio playback", () => {
   it("plays a durable one-shot once and does not replay it after restart", async () => {
@@ -378,6 +381,170 @@ describe("local audio playback", () => {
       code: "BEFORE_COMMAND_FAILED",
     });
     expect(base.play).not.toHaveBeenCalled();
+  });
+
+  it("keeps one audio session active across queued and repeating sounds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+    const events: string[] = [];
+    const base: AudioPlayer = {
+      play: vi.fn(async (sound) => {
+        events.push(`sound:${sound}`);
+        return { backend: "fake" };
+      }),
+    };
+    const player = new SessionAudioPlayer(base, {
+      start: { executable: "session-start" },
+      stop: { executable: "session-stop" },
+      idleCooldownSeconds: 5,
+      timeoutSeconds: 2,
+      runCommand: vi.fn(async (command) => {
+        events.push(command.executable);
+      }),
+    });
+
+    await player.play("warning");
+    await player.play("alarm");
+    expect(events).toEqual(["session-start", "sound:warning", "sound:alarm"]);
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    await player.play("emergency");
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(events).not.toContain("session-stop");
+    expect(player.sessionStatus()).toMatchObject({
+      state: "cooldown",
+      ownedByPlugin: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(events).toEqual([
+      "session-start",
+      "sound:warning",
+      "sound:alarm",
+      "sound:emergency",
+      "session-stop",
+    ]);
+    expect(player.sessionStatus()).toMatchObject({
+      state: "inactive",
+      ownedByPlugin: false,
+    });
+  });
+
+  it("bounds audio-session start failures through the durable retry policy", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-01-01T12:00:00Z");
+    vi.setSystemTime(now);
+    const database = new AlertDatabase();
+    const occurrence = activeOccurrence(database, now);
+    const base: AudioPlayer = {
+      play: vi.fn(async () => ({ backend: "fake" })),
+    };
+    const player = new SessionAudioPlayer(base, {
+      start: { executable: "session-start" },
+      stop: { executable: "session-stop" },
+      idleCooldownSeconds: 5,
+      timeoutSeconds: 2,
+      runCommand: vi.fn(async (command) => {
+        if (command.executable === "session-start")
+          throw new Error("amplifier unavailable");
+      }),
+    });
+    const scheduler = new AudioScheduler(database, player, {
+      ...schedulerOptions,
+      maxAttempts: 2,
+    });
+    scheduler.queue(occurrence, policy(), 0, now);
+
+    await scheduler.runOnce(now);
+    expect(database.getAudioPlaybackForAlert(occurrence.id)).toMatchObject({
+      state: "failed_retryable",
+      attemptCount: 1,
+      lastErrorCode: "SESSION_START_FAILED",
+    });
+    vi.setSystemTime(new Date("2026-01-01T12:00:30Z"));
+    await scheduler.runOnce(new Date());
+    expect(database.getAudioPlaybackForAlert(occurrence.id)).toMatchObject({
+      state: "failed_terminal",
+      attemptCount: 2,
+      lastErrorCode: "SESSION_START_FAILED",
+    });
+    expect(base.play).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  it("logs a stop failure without replaying and retries owned cleanup on shutdown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+    const commandError = vi.fn();
+    const base: AudioPlayer = {
+      play: vi.fn(async () => ({ backend: "fake" })),
+    };
+    const runCommand = vi.fn(async (command) => {
+      if (command.executable === "session-stop")
+        throw new Error("amplifier did not turn off");
+    });
+    const player = new SessionAudioPlayer(base, {
+      start: { executable: "session-start" },
+      stop: { executable: "session-stop" },
+      idleCooldownSeconds: 5,
+      timeoutSeconds: 2,
+      runCommand,
+      onCommandError: commandError,
+    });
+
+    await player.play("alarm");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(player.sessionStatus()).toMatchObject({
+      state: "stop_failed",
+      ownedByPlugin: true,
+      lastError: expect.stringContaining("amplifier did not turn off"),
+    });
+    expect(base.play).toHaveBeenCalledTimes(1);
+
+    await player.stop();
+    expect(base.play).toHaveBeenCalledTimes(1);
+    expect(commandError).toHaveBeenCalledTimes(2);
+    expect(
+      runCommand.mock.calls.map(([command]) => command.executable),
+    ).toEqual(["session-start", "session-stop", "session-stop"]);
+  });
+
+  it("stops an owned session on shutdown but does not stop on fresh startup", async () => {
+    const events: string[] = [];
+    const runCommand = vi.fn(async (command) => {
+      events.push(command.executable);
+    });
+    const fresh = new SessionAudioPlayer(
+      { play: vi.fn(async () => ({ backend: "fake" })) },
+      {
+        start: { executable: "session-start" },
+        stop: { executable: "session-stop" },
+        idleCooldownSeconds: 30,
+        timeoutSeconds: 2,
+        runCommand,
+      },
+    );
+    await fresh.stop();
+    expect(events).toEqual([]);
+
+    const active = new SessionAudioPlayer(
+      {
+        play: vi.fn(async () => {
+          events.push("sound");
+          return { backend: "fake" };
+        }),
+      },
+      {
+        start: { executable: "session-start" },
+        stop: { executable: "session-stop" },
+        idleCooldownSeconds: 30,
+        timeoutSeconds: 2,
+        runCommand,
+      },
+    );
+    await active.play("alarm");
+    await active.stop();
+    expect(events).toEqual(["session-start", "sound", "session-stop"]);
   });
 
   it("calculates the end of overnight quiet hours in local time", () => {

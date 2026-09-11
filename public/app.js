@@ -146,7 +146,7 @@ function renderDiagnostics(status) {
     ],
     [
       "Local audio",
-      `${audio.enabled ? "Enabled" : "Disabled"} · ${audio.running ? "playing" : "idle"} · ${audio.pending ?? 0} pending · last played ${formatDate(audio.lastPlayedAt)}${audio.lastError ? ` · ${audio.lastError}` : ""}`,
+      `${audio.enabled ? "Enabled" : "Disabled"} · ${audio.running ? "playing" : "idle"} · ${audio.pending ?? 0} pending · last played ${formatDate(audio.lastPlayedAt)}${audio.session ? ` · session ${String(audio.session.state).replaceAll("_", " ")}${audio.session.ownedByPlugin ? " (plugin-owned)" : ""}${audio.session.stopScheduledAt ? ` until ${formatDate(audio.session.stopScheduledAt)}` : ""}` : ""}${audio.lastError ? ` · ${audio.lastError}` : ""}${audio.session?.lastError && audio.session.lastError !== audio.lastError ? ` · ${audio.session.lastError}` : ""}`,
     ],
     [
       "Pending work",
