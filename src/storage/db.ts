@@ -693,10 +693,18 @@ export class AlertDatabase {
       }
       for (const alertId of affectedAlerts) {
         const occurrence = this.db
-          .prepare("SELECT current_state FROM alert_occurrences WHERE id=?")
+          .prepare(
+            "SELECT current_state, acknowledged_at FROM alert_occurrences WHERE id=?",
+          )
           .get(alertId) as Row | undefined;
+        if (occurrence?.acknowledged_at)
+          this.createPagerDutyActionDeliveryIntents(
+            alertId,
+            "acknowledge",
+            now,
+          );
         if (occurrence?.current_state === "cleared")
-          this.createResolveDeliveryIntents(alertId, now);
+          this.createPagerDutyActionDeliveryIntents(alertId, "resolve", now);
       }
       this.db.exec("COMMIT");
     } catch (error) {
@@ -844,7 +852,17 @@ export class AlertDatabase {
         if (suppression) this.addEvent(id, "suppressed_before_activation", now);
         if (clearing) this.addEvent(id, "cleared", now, alert.sourcePayload);
 
-        if (clearing) this.createResolveDeliveryIntents(id, now);
+        if (alert.acknowledged && !active.acknowledged_at) {
+          this.db
+            .prepare(
+              "UPDATE alert_occurrences SET acknowledged_at=?, updated_at=? WHERE id=?",
+            )
+            .run(timestamp, timestamp, id);
+          this.addEvent(id, "acknowledged", now);
+          this.createPagerDutyActionDeliveryIntents(id, "acknowledge", now);
+        }
+        if (clearing)
+          this.createPagerDutyActionDeliveryIntents(id, "resolve", now);
 
         if (!clearing) {
           const qualifies =
@@ -974,6 +992,14 @@ export class AlertDatabase {
           now,
           alert.sourcePayload,
         );
+        if (alert.acknowledged) {
+          this.db
+            .prepare(
+              "UPDATE alert_occurrences SET acknowledged_at=?, updated_at=? WHERE id=?",
+            )
+            .run(timestamp, timestamp, id);
+          this.addEvent(id, "acknowledged", now);
+        }
         for (const transportId of [...new Set(transportIds)]) {
           this.db
             .prepare(
@@ -1067,7 +1093,11 @@ export class AlertDatabase {
     }
   }
 
-  private createResolveDeliveryIntents(alertId: string, now: Date): void {
+  private createPagerDutyActionDeliveryIntents(
+    alertId: string,
+    operation: "acknowledge" | "resolve",
+    now: Date,
+  ): void {
     const timestamp = now.toISOString();
     const rows = this.db
       .prepare(
@@ -1085,13 +1115,14 @@ export class AlertDatabase {
       `INSERT OR IGNORE INTO deliveries
         (id, alert_id, transport_instance_id, operation, state,
          attempt_count, created_at, updated_at)
-       VALUES (?, ?, ?, 'resolve', 'pending', 0, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)`,
     );
     for (const row of rows)
       insert.run(
         randomUUID(),
         alertId,
         String(row.transport_instance_id),
+        operation,
         timestamp,
         timestamp,
       );
@@ -1314,6 +1345,7 @@ export class AlertDatabase {
 
   acknowledgeAlert(id: string, now = new Date()): void {
     this.markOccurrence(id, "acknowledged_at", "acknowledged", now);
+    this.createPagerDutyActionDeliveryIntents(id, "acknowledge", now);
   }
 
   silenceAlert(id: string, now = new Date()): void {
@@ -1958,7 +1990,7 @@ export class AlertDatabase {
       const row = this.db
         .prepare(
           `SELECT d.attempt_count, d.alert_id, d.operation,
-                  o.current_state
+                  o.current_state, o.acknowledged_at
            FROM deliveries d
            JOIN alert_occurrences o ON o.id=d.alert_id
            WHERE d.id=?`,
@@ -1994,12 +2026,20 @@ export class AlertDatabase {
           id,
           Number(row.attempt_count),
         );
-      if (
-        outcome === "delivered" &&
-        row.operation === "trigger" &&
-        row.current_state === "cleared"
-      )
-        this.createResolveDeliveryIntents(String(row.alert_id), now);
+      if (outcome === "delivered" && row.operation === "trigger") {
+        if (row.acknowledged_at)
+          this.createPagerDutyActionDeliveryIntents(
+            String(row.alert_id),
+            "acknowledge",
+            now,
+          );
+        if (row.current_state === "cleared")
+          this.createPagerDutyActionDeliveryIntents(
+            String(row.alert_id),
+            "resolve",
+            now,
+          );
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

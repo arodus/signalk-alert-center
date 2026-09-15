@@ -651,7 +651,7 @@ export function getAlertCenterOpenApi() {
             transportInstanceId: { type: "string" },
             operation: {
               type: "string",
-              enum: ["notify", "trigger", "resolve"],
+              enum: ["notify", "trigger", "acknowledge", "resolve"],
             },
             state: {
               type: "string",

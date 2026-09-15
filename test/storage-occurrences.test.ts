@@ -403,6 +403,51 @@ describe("occurrence storage", () => {
     ]);
   });
 
+  it("creates one PagerDuty acknowledgement after an accepted trigger", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const acknowledgedAt = new Date("2026-01-01T00:01:00Z");
+    const occurrence = db.ingest(active(), ["pagerduty"], raisedAt, {
+      resolvingNotifierIds: ["pagerduty"],
+    })!;
+    const trigger = db.listDeliveries()[0];
+    expect(db.claimDelivery(trigger.id, raisedAt)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "pd-dedup", raisedAt);
+
+    db.ingest(active({ acknowledged: true }), ["pagerduty"], acknowledgedAt, {
+      resolvingNotifierIds: ["pagerduty"],
+    });
+    db.ingest(active({ acknowledged: true }), ["pagerduty"], acknowledgedAt, {
+      resolvingNotifierIds: ["pagerduty"],
+    });
+
+    expect(db.getAlert(occurrence.id).acknowledgedAt).toEqual(acknowledgedAt);
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+      { operation: "acknowledge", state: "pending", attemptCount: 0 },
+    ]);
+  });
+
+  it("defers PagerDuty acknowledgement until its trigger is accepted", () => {
+    const db = database();
+    const occurrence = db.ingest(
+      active({ acknowledged: true }),
+      ["pagerduty"],
+      new Date("2026-01-01T00:00:00Z"),
+      { resolvingNotifierIds: ["pagerduty"] },
+    )!;
+    const trigger = db.listDeliveries()[0];
+    expect(db.listDeliveriesForAlert(occurrence.id)).toHaveLength(1);
+
+    expect(db.claimDelivery(trigger.id)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "pd-dedup");
+
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+      { operation: "acknowledge", state: "pending" },
+    ]);
+  });
+
   it("defers PagerDuty resolve until a trigger is accepted", () => {
     const db = database();
     const raisedAt = new Date("2026-01-01T00:00:00Z");

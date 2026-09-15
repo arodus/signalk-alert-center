@@ -1102,6 +1102,7 @@ export class PersistentNotifierRuntime {
         if (occurrence.currentState !== "active") return "inactive";
         const upstream = await this.upstreamAction(occurrence, "acknowledge");
         this.db().acknowledgeAlert(id);
+        this.requestDeliveryRun();
         this.audioScheduler?.cancel(id, "acknowledge");
         this.scheduleNextAudio();
         this.db().recordOccurrenceEvent(

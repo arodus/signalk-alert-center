@@ -40,6 +40,7 @@ describe("PagerDutyTransport", () => {
 
   it.each([
     ["trigger", "trigger"],
+    ["acknowledge", "acknowledge"],
     ["resolve", "resolve"],
   ] as const)("sends a %s delivery as %s", async (operation, eventAction) => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));

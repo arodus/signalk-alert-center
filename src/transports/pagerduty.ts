@@ -20,7 +20,12 @@ export class PagerDutyTransport implements NotificationTransport {
   ): Promise<TransportResult> {
     const payload = {
       routing_key: this.routingKey,
-      event_action: delivery.operation === "resolve" ? "resolve" : "trigger",
+      event_action:
+        delivery.operation === "resolve"
+          ? "resolve"
+          : delivery.operation === "acknowledge"
+            ? "acknowledge"
+            : "trigger",
       dedup_key: `signalk:${alert.sourceKey}`,
       payload: {
         summary: context.rendered.body,

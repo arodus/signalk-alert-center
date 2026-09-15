@@ -66,4 +66,13 @@ describe("normalizeNotification", () => {
     expect(alert.state).toBe("cleared");
     expect(alert.severity).toBe("normal");
   });
+
+  it("retains Signal K acknowledgement status", () => {
+    const alert = normalizeNotification("notifications.navigation.gnss", {
+      state: "alarm",
+      status: { acknowledged: true },
+    });
+
+    expect(alert.acknowledged).toBe(true);
+  });
 });
