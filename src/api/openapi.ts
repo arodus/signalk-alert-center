@@ -638,6 +638,7 @@ export function getAlertCenterOpenApi() {
             "id",
             "alertId",
             "transportInstanceId",
+            "operation",
             "state",
             "attemptCount",
             "createdAt",
@@ -648,6 +649,10 @@ export function getAlertCenterOpenApi() {
             id: { type: "string" },
             alertId: { type: "string" },
             transportInstanceId: { type: "string" },
+            operation: {
+              type: "string",
+              enum: ["notify", "trigger", "acknowledge", "resolve"],
+            },
             state: {
               type: "string",
               enum: [

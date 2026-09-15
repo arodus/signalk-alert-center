@@ -169,10 +169,14 @@ export type DeliveryState =
   | "failed_retryable"
   | "failed_terminal";
 
+export type DeliveryOperation =
+  "notify" | "trigger" | "acknowledge" | "resolve";
+
 export interface DeliveryRecord {
   id: string;
   alertId: string;
   transportInstanceId: string;
+  operation: DeliveryOperation;
   state: DeliveryState;
   attemptCount: number;
   nextAttemptAt?: Date;
@@ -230,6 +234,8 @@ export interface IngestOptions {
   oneTime?: boolean;
   rearmAfterSeconds?: number;
   notifierMinimumSeverities?: Record<string, Severity>;
+  /** Notifiers, such as PagerDuty, that require a trigger followed by resolve. */
+  resolvingNotifierIds?: string[];
 }
 
 export interface OccurrenceQuery {
@@ -260,6 +266,7 @@ export interface NormalizedAlert {
   message?: string;
   sourcePayload?: unknown;
   notificationId?: string;
+  acknowledged?: boolean;
   sourceTimestamp?: Date;
 }
 

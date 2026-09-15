@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 5;
+export const currentSchemaVersion = 6;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -82,6 +82,71 @@ SET override_fields_json = '[' ||
   '"notifierIds"' ||
   CASE WHEN audio_policy_json IS NOT NULL THEN ',"audio.enabled","audio.sound","audio.minimumSeverity","audio.mode","audio.repeatIntervalSeconds","audio.stopOn.clear","audio.stopOn.acknowledge","audio.stopOn.silence","audio.stopOn.dismiss"' ELSE '' END ||
   ']';
+`,
+  },
+  {
+    version: 6,
+    sql: `
+ALTER TABLE occurrence_notifiers
+  ADD COLUMN supports_resolution INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE deliveries_v6 (
+  id TEXT PRIMARY KEY,
+  alert_id TEXT NOT NULL REFERENCES alert_occurrences(id),
+  transport_instance_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  state TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_attempt_at TEXT,
+  delivered_at TEXT,
+  last_error_code TEXT,
+  last_error_message TEXT,
+  remote_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(alert_id, transport_instance_id, operation)
+);
+INSERT INTO deliveries_v6
+  (id, alert_id, transport_instance_id, operation, state, attempt_count,
+   next_attempt_at, last_attempt_at, delivered_at, last_error_code,
+   last_error_message, remote_id, created_at, updated_at)
+SELECT id, alert_id, transport_instance_id, 'notify', state, attempt_count,
+       next_attempt_at, last_attempt_at, delivered_at, last_error_code,
+       last_error_message, remote_id, created_at, updated_at
+FROM deliveries;
+
+CREATE TABLE delivery_attempts_v6 (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  delivery_id TEXT NOT NULL REFERENCES deliveries_v6(id) ON DELETE CASCADE,
+  attempt_number INTEGER NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  outcome TEXT NOT NULL,
+  error_code TEXT,
+  error_message TEXT,
+  remote_id TEXT,
+  UNIQUE(delivery_id, attempt_number)
+);
+INSERT INTO delivery_attempts_v6
+  (id, delivery_id, attempt_number, started_at, finished_at, outcome,
+   error_code, error_message, remote_id)
+SELECT id, delivery_id, attempt_number, started_at, finished_at, outcome,
+       error_code, error_message, remote_id
+FROM delivery_attempts;
+
+DROP TABLE delivery_attempts;
+DROP TABLE deliveries;
+ALTER TABLE deliveries_v6 RENAME TO deliveries;
+ALTER TABLE delivery_attempts_v6 RENAME TO delivery_attempts;
+
+CREATE INDEX deliveries_due_idx ON deliveries(state, next_attempt_at);
+CREATE INDEX deliveries_service_state_idx
+  ON deliveries(transport_instance_id, state, next_attempt_at);
+CREATE INDEX deliveries_service_success_idx
+  ON deliveries(transport_instance_id, delivered_at DESC);
+CREATE INDEX delivery_attempts_finished_idx
+  ON delivery_attempts(finished_at DESC, id DESC);
 `,
   },
 ];

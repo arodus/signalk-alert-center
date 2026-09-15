@@ -56,4 +56,23 @@ describe("normalizeNotification", () => {
       "2026-09-07T00:00:00.000Z",
     );
   });
+
+  it("treats Signal K normal as a clear", () => {
+    const alert = normalizeNotification("notifications.navigation.gnss", {
+      state: "normal",
+      message: "Position available",
+    });
+
+    expect(alert.state).toBe("cleared");
+    expect(alert.severity).toBe("normal");
+  });
+
+  it("retains Signal K acknowledgement status", () => {
+    const alert = normalizeNotification("notifications.navigation.gnss", {
+      state: "alarm",
+      status: { acknowledged: true },
+    });
+
+    expect(alert.acknowledged).toBe(true);
+  });
 });

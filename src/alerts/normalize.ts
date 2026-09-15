@@ -49,6 +49,10 @@ export function normalizeNotification(
         ? record.description
         : undefined;
   const notificationId = typeof record.id === "string" ? record.id : undefined;
+  const status =
+    record.status && typeof record.status === "object"
+      ? (record.status as Record<string, unknown>)
+      : undefined;
   return {
     // Multiple sources can legitimately raise the same path independently
     // (e.g. two GPS units both losing signal); coalesce per source instead
@@ -61,6 +65,7 @@ export function normalizeNotification(
     message,
     sourcePayload: value,
     notificationId,
+    acknowledged: status?.acknowledged === true,
     sourceTimestamp,
   };
 }

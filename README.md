@@ -13,6 +13,11 @@ Signal K `meta.zones` and incoming notification paths, including definitions tha
 have never fired. Every raise/clear cycle
 is stored as a distinct occurrence, while duplicate updates within the cycle are
 coalesced. Clicking an occurrence opens its durable event and notifier history.
+PagerDuty trigger, acknowledge, and resolve operations are stored separately.
+A Signal K acknowledgement is forwarded after PagerDuty accepts the matching
+trigger. A Signal K `normal`, `nominal`, `cleared`, or null transition queues a resolve only after
+PagerDuty has accepted the matching occurrence trigger; all three operations'
+retries and attempt histories remain independent.
 
 One-time behavior is snapshotted when an occurrence starts. The occurrence remains
 visible until **Dismiss** is selected; dismissal is soft, so its history
@@ -49,6 +54,7 @@ following boundaries explicit:
 | One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                                                                                                       |
 | Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                |
 | Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                            |
+| PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                   |
 | Local audio     | A durable serial queue invokes an allow-listed player without a shell. Optional administrator-configured pre/post executables also receive literal argument arrays. Built-in sounds, outcomes, repeats, and cancellation are recorded per occurrence.             |
 | API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                           |
 
