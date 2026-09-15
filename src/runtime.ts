@@ -709,6 +709,9 @@ export class PersistentNotifierRuntime {
             configuredNotifiers.get(id)?.minSeverity ?? "normal",
           ]),
         ),
+        resolvingNotifierIds: notifierIds.filter(
+          (id) => configuredNotifiers.get(id)?.type === "pagerduty",
+        ),
       },
     );
     if (!occurrence) return undefined;
@@ -1152,6 +1155,14 @@ export class PersistentNotifierRuntime {
     );
     this.config = options;
     this.database = new AlertDatabase(this.databasePath(options));
+    this.database.configureResolvingNotifiers(
+      (options.notifiers ?? [])
+        .filter(
+          (notifier) =>
+            notifier.enabled !== false && notifier.type === "pagerduty",
+        )
+        .map((notifier) => notifier.name),
+    );
     this.policy = new AlertPolicyResolver(this.database, options);
     this.reconcilingStartup = true;
     this.reconciliationState = { state: "running", startedAt: new Date() };

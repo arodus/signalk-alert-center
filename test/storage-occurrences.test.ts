@@ -49,7 +49,7 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(5);
+    expect(migrated.schemaVersion()).toBe(6);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -136,6 +136,92 @@ describe("occurrence storage", () => {
     });
   });
 
+  it("preserves deliveries and attempts through the operation migration", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-v6-migration-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(schema);
+    legacy
+      .prepare(
+        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
+      )
+      .run("2026-01-01T00:00:00.000Z");
+    for (const migration of migrations.filter((item) => item.version <= 5)) {
+      legacy.exec(migration.sql);
+      legacy
+        .prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+        )
+        .run(migration.version, "2026-01-01T00:00:00.000Z");
+    }
+    legacy
+      .prepare(
+        `INSERT INTO alert_definitions
+          (id, source_type, path_pattern, name, created_at, updated_at)
+         VALUES ('anchor', 'recognized', ?, 'Anchor', ?, ?)`,
+      )
+      .run(
+        "notifications.navigation.anchor",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+    legacy
+      .prepare(
+        `INSERT INTO alert_occurrences
+          (id, definition_id, occurrence_number, source_key, path, started_at,
+           received_at, last_seen_at, current_state, current_severity,
+           max_severity, one_time, minimum_severity, activation_delay_seconds,
+           connectivity_json, activation_state, created_at, updated_at)
+         VALUES ('occurrence', 'anchor', 1, ?, ?, ?, ?, ?, 'active', 'alarm',
+                 'alarm', 0, 'normal', 0, '{"mode":"queue"}', 'eligible', ?, ?)`,
+      )
+      .run(
+        "notifications.navigation.anchor",
+        "notifications.navigation.anchor",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+    legacy
+      .prepare(
+        `INSERT INTO deliveries
+          (id, alert_id, transport_instance_id, state, attempt_count,
+           last_attempt_at, delivered_at, remote_id, created_at, updated_at)
+         VALUES ('delivery', 'occurrence', 'pagerduty', 'delivered', 1,
+                 ?, ?, 'remote', ?, ?)`,
+      )
+      .run(
+        "2026-01-01T00:00:01.000Z",
+        "2026-01-01T00:00:02.000Z",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:02.000Z",
+      );
+    legacy
+      .prepare(
+        `INSERT INTO delivery_attempts
+          (delivery_id, attempt_number, started_at, finished_at, outcome,
+           remote_id)
+         VALUES ('delivery', 1, ?, ?, 'delivered', 'remote')`,
+      )
+      .run("2026-01-01T00:00:01.000Z", "2026-01-01T00:00:02.000Z");
+    legacy.close();
+
+    const migrated = new AlertDatabase(filename);
+    databases.push(migrated);
+    expect(migrated.getDelivery("delivery")).toMatchObject({
+      operation: "notify",
+      state: "delivered",
+      remoteId: "remote",
+    });
+    expect(migrated.listDeliveryAttempts("delivery")).toMatchObject([
+      { attemptNumber: 1, outcome: "delivered", remoteId: "remote" },
+    ]);
+    expect(migrated.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
   it("reports a schema health fault without throwing from status", () => {
     const db = database();
     db.db.exec("DELETE FROM schema_migrations");
@@ -143,7 +229,7 @@ describe("occurrence storage", () => {
     expect(db.operationalStatus()).toMatchObject({
       healthy: false,
       schemaVersion: 0,
-      expectedSchemaVersion: 5,
+      expectedSchemaVersion: 6,
     });
   });
 
@@ -216,7 +302,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(5);
+    expect(db.schemaVersion()).toBe(6);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
@@ -283,6 +369,176 @@ describe("occurrence storage", () => {
       [],
     );
     expect(db.listDeliveries()).toEqual([]);
+  });
+
+  it("creates a PagerDuty resolve after an accepted trigger and only once", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const clearedAt = new Date("2026-01-01T00:01:00Z");
+    const occurrence = db.ingest(active(), ["pagerduty"], raisedAt, {
+      resolvingNotifierIds: ["pagerduty"],
+    })!;
+    const trigger = db.listDeliveries()[0];
+
+    expect(trigger.operation).toBe("trigger");
+    expect(db.claimDelivery(trigger.id, raisedAt)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "pd-dedup", raisedAt);
+
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["pagerduty"],
+      clearedAt,
+      { resolvingNotifierIds: ["pagerduty"] },
+    );
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["pagerduty"],
+      new Date("2026-01-01T00:02:00Z"),
+      { resolvingNotifierIds: ["pagerduty"] },
+    );
+
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+      { operation: "resolve", state: "pending", attemptCount: 0 },
+    ]);
+  });
+
+  it("defers PagerDuty resolve until a trigger is accepted", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const occurrence = db.ingest(active(), ["pagerduty"], raisedAt, {
+      resolvingNotifierIds: ["pagerduty"],
+    })!;
+    const trigger = db.listDeliveries()[0];
+
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["pagerduty"],
+      new Date("2026-01-01T00:01:00Z"),
+      { resolvingNotifierIds: ["pagerduty"] },
+    );
+    expect(db.listDeliveriesForAlert(occurrence.id)).toHaveLength(1);
+
+    expect(db.claimDelivery(trigger.id, new Date("2026-01-01T00:02:00Z"))).toBe(
+      true,
+    );
+    db.recordDeliverySuccess(
+      trigger.id,
+      "pd-dedup",
+      new Date("2026-01-01T00:02:01Z"),
+    );
+
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+      { operation: "resolve", state: "pending" },
+    ]);
+  });
+
+  it("does not resolve PagerDuty when its trigger was not accepted", () => {
+    const db = database();
+    const occurrence = db.ingest(active(), ["pagerduty"], undefined, {
+      resolvingNotifierIds: ["pagerduty"],
+    })!;
+    const trigger = db.listDeliveries()[0];
+    expect(db.claimDelivery(trigger.id)).toBe(true);
+    db.recordDeliveryFailure(trigger.id, "HTTP_400", "Rejected", false);
+
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["pagerduty"],
+      new Date(),
+      { resolvingNotifierIds: ["pagerduty"] },
+    );
+
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "failed_terminal" },
+    ]);
+  });
+
+  it("retries PagerDuty resolve independently from its delivered trigger", () => {
+    const db = database();
+    const occurrence = db.ingest(active(), ["pagerduty"], undefined, {
+      resolvingNotifierIds: ["pagerduty"],
+    })!;
+    const trigger = db.listDeliveries()[0];
+    expect(db.claimDelivery(trigger.id)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "pd-dedup");
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["pagerduty"],
+      new Date(),
+      { resolvingNotifierIds: ["pagerduty"] },
+    );
+    const resolve = db
+      .listDeliveriesForAlert(occurrence.id)
+      .find((item) => item.operation === "resolve")!;
+
+    expect(db.claimDelivery(resolve.id)).toBe(true);
+    db.recordDeliveryFailure(
+      resolve.id,
+      "HTTP_503",
+      "Unavailable",
+      true,
+      new Date("2026-01-01T00:10:00Z"),
+    );
+
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered", attemptCount: 1 },
+      {
+        operation: "resolve",
+        state: "failed_retryable",
+        attemptCount: 1,
+        lastErrorCode: "HTTP_503",
+      },
+    ]);
+  });
+
+  it("recovers a pending PagerDuty resolve after restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-pagerduty-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const first = new AlertDatabase(filename);
+    const occurrence = first.ingest(active(), ["pagerduty"], undefined, {
+      resolvingNotifierIds: ["pagerduty"],
+    })!;
+    const trigger = first.listDeliveries()[0];
+    expect(first.claimDelivery(trigger.id)).toBe(true);
+    first.recordDeliverySuccess(trigger.id, "pd-dedup");
+    first.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["pagerduty"],
+      new Date(),
+      { resolvingNotifierIds: ["pagerduty"] },
+    );
+    first.close();
+
+    const restarted = new AlertDatabase(filename);
+    databases.push(restarted);
+    expect(restarted.listDueDeliveries()).toMatchObject([
+      {
+        alertId: occurrence.id,
+        transportInstanceId: "pagerduty",
+        operation: "resolve",
+        state: "pending",
+      },
+    ]);
+  });
+
+  it("reconciles existing deliveries when a notifier supports resolution", () => {
+    const db = database();
+    const occurrence = db.ingest(active(), ["pagerduty"])!;
+    const legacyDelivery = db.listDeliveries()[0];
+    expect(legacyDelivery.operation).toBe("notify");
+    expect(db.claimDelivery(legacyDelivery.id)).toBe(true);
+    db.recordDeliverySuccess(legacyDelivery.id, "pd-dedup");
+    db.ingest(active({ state: "cleared", severity: "normal" }), ["pagerduty"]);
+
+    db.configureResolvingNotifiers(["pagerduty"]);
+
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+      { operation: "resolve", state: "pending" },
+    ]);
   });
 
   it("starts the delay when an occurrence rises above its snapshotted threshold", () => {

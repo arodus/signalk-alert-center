@@ -31,8 +31,11 @@ const delivery: DeliveryRecord = {
   id: "integration-delivery",
   alertId: alert.id,
   transportInstanceId: "integration",
+  operation: "notify",
   state: "sending",
   attemptCount: 1,
+  createdAt: alert.firstSeenAt,
+  updatedAt: alert.firstSeenAt,
 };
 const context = {
   rendered: {

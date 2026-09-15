@@ -496,7 +496,7 @@ Use Events API.
 Generate a stable dedup key such as:
 
 ```text
-signalk:<boat/plugin namespace>:<sourceKey>
+signalk:<sourceKey>
 ```
 
 Behavior:
@@ -504,6 +504,11 @@ Behavior:
 - active alarm -> `trigger`;
 - subsequent active update -> trigger/update same dedup key;
 - clear -> `resolve` if a remote incident was previously triggered.
+
+Persist trigger and resolve as separate delivery operations. A clear that arrives
+before the trigger succeeds leaves the trigger pending; accepting that trigger
+then creates the resolve operation transactionally. Repeated clear updates must
+not duplicate resolve work.
 
 Map severity carefully.
 

@@ -61,6 +61,7 @@ const deliveryRecord = (row: Row): DeliveryRecord => ({
   id: String(row.id),
   alertId: String(row.alert_id),
   transportInstanceId: String(row.transport_instance_id),
+  operation: row.operation as DeliveryRecord["operation"],
   state: row.state as DeliveryRecord["state"],
   attemptCount: Number(row.attempt_count),
   nextAttemptAt: date(row.next_attempt_at),
@@ -660,6 +661,50 @@ export class AlertDatabase {
     }
   }
 
+  /**
+   * Reconciles notifier capabilities after configuration and schema upgrades.
+   * Existing operation rows predate the capability snapshot, so PagerDuty
+   * deliveries must be identified by their configured instance names.
+   */
+  configureResolvingNotifiers(transportIds: string[], now = new Date()): void {
+    if (!transportIds.length) return;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const affectedAlerts = new Set<string>();
+      const select = this.db.prepare(
+        `SELECT alert_id FROM occurrence_notifiers
+         WHERE transport_instance_id=?`,
+      );
+      for (const transportId of new Set(transportIds)) {
+        for (const row of select.all(transportId) as Row[])
+          affectedAlerts.add(String(row.alert_id));
+        this.db
+          .prepare(
+            `UPDATE occurrence_notifiers SET supports_resolution=1
+             WHERE transport_instance_id=?`,
+          )
+          .run(transportId);
+        this.db
+          .prepare(
+            `UPDATE deliveries SET operation='trigger'
+             WHERE transport_instance_id=? AND operation='notify'`,
+          )
+          .run(transportId);
+      }
+      for (const alertId of affectedAlerts) {
+        const occurrence = this.db
+          .prepare("SELECT current_state FROM alert_occurrences WHERE id=?")
+          .get(alertId) as Row | undefined;
+        if (occurrence?.current_state === "cleared")
+          this.createResolveDeliveryIntents(alertId, now);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   private eligibleNotifierCount(
     alertId: string,
     severity: AlertRecord["currentSeverity"],
@@ -747,6 +792,7 @@ export class AlertDatabase {
       let id: string;
       if (active) {
         id = String(active.id);
+        this.enableResolutionForNotifiers(id, options.resolvingNotifierIds);
         const previousSeverity = String(active.current_severity);
         const previousMessage = active.message
           ? String(active.message)
@@ -797,6 +843,8 @@ export class AlertDatabase {
         }
         if (suppression) this.addEvent(id, "suppressed_before_activation", now);
         if (clearing) this.addEvent(id, "cleared", now, alert.sourcePayload);
+
+        if (clearing) this.createResolveDeliveryIntents(id, now);
 
         if (!clearing) {
           const qualifies =
@@ -929,9 +977,17 @@ export class AlertDatabase {
         for (const transportId of [...new Set(transportIds)]) {
           this.db
             .prepare(
-              "INSERT INTO occurrence_notifiers(alert_id, transport_instance_id) VALUES (?, ?)",
+              `INSERT INTO occurrence_notifiers
+                (alert_id, transport_instance_id, supports_resolution)
+               VALUES (?, ?, ?)`,
             )
-            .run(id, transportId);
+            .run(
+              id,
+              transportId,
+              Number(
+                options.resolvingNotifierIds?.includes(transportId) ?? false,
+              ),
+            );
           this.db
             .prepare(
               "INSERT INTO occurrence_notifier_thresholds(alert_id, transport_instance_id, minimum_severity) VALUES (?, ?, ?)",
@@ -958,7 +1014,8 @@ export class AlertDatabase {
     const alert = this.getAlert(alertId);
     const rows = this.db
       .prepare(
-        `SELECT n.transport_instance_id, COALESCE(t.minimum_severity, 'normal') AS minimum_severity
+        `SELECT n.transport_instance_id, n.supports_resolution,
+                COALESCE(t.minimum_severity, 'normal') AS minimum_severity
          FROM occurrence_notifiers n
          LEFT JOIN occurrence_notifier_thresholds t
            ON t.alert_id=n.alert_id AND t.transport_instance_id=n.transport_instance_id
@@ -976,17 +1033,68 @@ export class AlertDatabase {
       this.db
         .prepare(
           `INSERT OR IGNORE INTO deliveries
-            (id, alert_id, transport_instance_id, state, attempt_count, created_at, updated_at)
-           VALUES (?, ?, ?, 'pending', 0, ?, ?)`,
+            (id, alert_id, transport_instance_id, operation, state,
+             attempt_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)`,
         )
         .run(
           randomUUID(),
           alertId,
           String(row.transport_instance_id),
+          Number(row.supports_resolution) ? "trigger" : "notify",
           timestamp,
           timestamp,
         );
     }
+  }
+
+  private enableResolutionForNotifiers(
+    alertId: string,
+    transportIds: string[] | undefined,
+  ): void {
+    if (!transportIds?.length) return;
+    const enable = this.db.prepare(
+      `UPDATE occurrence_notifiers SET supports_resolution=1
+       WHERE alert_id=? AND transport_instance_id=?`,
+    );
+    const markTrigger = this.db.prepare(
+      `UPDATE deliveries SET operation='trigger'
+       WHERE alert_id=? AND transport_instance_id=? AND operation='notify'`,
+    );
+    for (const transportId of new Set(transportIds)) {
+      enable.run(alertId, transportId);
+      markTrigger.run(alertId, transportId);
+    }
+  }
+
+  private createResolveDeliveryIntents(alertId: string, now: Date): void {
+    const timestamp = now.toISOString();
+    const rows = this.db
+      .prepare(
+        `SELECT n.transport_instance_id
+         FROM occurrence_notifiers n
+         JOIN deliveries trigger_delivery
+           ON trigger_delivery.alert_id=n.alert_id
+          AND trigger_delivery.transport_instance_id=n.transport_instance_id
+          AND trigger_delivery.operation='trigger'
+          AND trigger_delivery.state='delivered'
+         WHERE n.alert_id=? AND n.supports_resolution=1`,
+      )
+      .all(alertId) as Row[];
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO deliveries
+        (id, alert_id, transport_instance_id, operation, state,
+         attempt_count, created_at, updated_at)
+       VALUES (?, ?, ?, 'resolve', 'pending', 0, ?, ?)`,
+    );
+    for (const row of rows)
+      insert.run(
+        randomUUID(),
+        alertId,
+        String(row.transport_instance_id),
+        timestamp,
+        timestamp,
+      );
   }
 
   processDueActivations(now = new Date()): AlertRecord[] {
@@ -1848,7 +1956,13 @@ export class AlertDatabase {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db
-        .prepare("SELECT attempt_count FROM deliveries WHERE id=?")
+        .prepare(
+          `SELECT d.attempt_count, d.alert_id, d.operation,
+                  o.current_state
+           FROM deliveries d
+           JOIN alert_occurrences o ON o.id=d.alert_id
+           WHERE d.id=?`,
+        )
         .get(id) as Row | undefined;
       if (!row) throw new Error(`Unknown delivery intent: ${id}`);
       this.db
@@ -1880,6 +1994,12 @@ export class AlertDatabase {
           id,
           Number(row.attempt_count),
         );
+      if (
+        outcome === "delivered" &&
+        row.operation === "trigger" &&
+        row.current_state === "cleared"
+      )
+        this.createResolveDeliveryIntents(String(row.alert_id), now);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
