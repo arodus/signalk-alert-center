@@ -13,20 +13,9 @@ import {
   AlertDefinitionRecord,
   AlertPolicyField,
   AlertRecord,
-  alertPolicyFields,
-  audioSounds,
-  CustomAudioSound,
   DeliveryRecord,
 } from "./alerts/types";
 import { listConfiguredZones } from "./alerts/zones";
-import {
-  AudioCommand,
-  AudioPlayer,
-  CommandAudioPlayer,
-  HookedAudioPlayer,
-  SessionAudioPlayer,
-} from "./audio/player";
-import { AudioScheduler } from "./audio/scheduler";
 import {
   ActionResult,
   AlertCenterChange,
@@ -75,13 +64,11 @@ interface DefinitionView extends AlertDefinitionRecord {
 export class PersistentNotifierRuntime {
   private database?: AlertDatabase;
   private scheduler?: DeliveryScheduler;
-  private audioScheduler?: AudioScheduler;
   private connectivity?: ConnectivityManager;
   private policy?: AlertPolicyResolver;
   private unsubscribe?: () => void;
   private activationTimer?: ReturnType<typeof setTimeout>;
   private deliveryTimer?: ReturnType<typeof setTimeout>;
-  private audioTimer?: ReturnType<typeof setTimeout>;
   private zoneRefreshTimer?: ReturnType<typeof setInterval>;
   private retentionTimer?: ReturnType<typeof setInterval>;
   private reconcilingStartup = false;
@@ -91,11 +78,8 @@ export class PersistentNotifierRuntime {
   private ingestionImmediate?: ReturnType<typeof setImmediate>;
   private startupImmediate?: ReturnType<typeof setImmediate>;
   private deliveryImmediate?: ReturnType<typeof setImmediate>;
-  private audioImmediate?: ReturnType<typeof setImmediate>;
   private deliveryRun?: Promise<void>;
-  private audioRun?: Promise<void>;
   private deliveryRerunRequested = false;
-  private audioRerunRequested = false;
   private runtimeGeneration = 0;
   private stopping = false;
   private startCount = 0;
@@ -122,12 +106,7 @@ export class PersistentNotifierRuntime {
     error?: string;
   } = { state: "idle" };
 
-  constructor(
-    private readonly app: ServerAPI,
-    private readonly audioPlayerFactory?: (
-      options: PluginConfig,
-    ) => AudioPlayer,
-  ) {}
+  constructor(private readonly app: ServerAPI) {}
 
   private db(): AlertDatabase {
     if (!this.database) throw new Error("Plugin is not started");
@@ -157,78 +136,6 @@ export class PersistentNotifierRuntime {
     }
   }
 
-  async testAudio(options: PluginConfig): Promise<void> {
-    validateConfig(options);
-    const player = this.createAudioPlayer(options);
-    try {
-      const result = await player.play("chime");
-      this.debug(`Local audio test succeeded: backend=${result.backend}`);
-    } catch (error) {
-      this.app.error(
-        `[persistent-notifier] Local audio test failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    } finally {
-      await player.stop?.();
-    }
-  }
-
-  private createAudioPlayer(options: PluginConfig): AudioPlayer {
-    let player = this.audioPlayerFactory
-      ? this.audioPlayerFactory(options)
-      : new CommandAudioPlayer({
-          backend: options.audio?.backend ?? "auto",
-          outputDevice: options.audio?.outputDevice?.trim() || undefined,
-          masterVolume: options.audio?.masterVolume ?? 80,
-          timeoutSeconds: options.audio?.playbackTimeoutSeconds ?? 30,
-          assetDirectory: path.join(
-            this.app.getDataDirPath(),
-            "persistent-notifier-audio",
-          ),
-          customSounds: new Map(
-            (options.audio?.customSounds ?? []).map((sound) => [
-              `custom:${sound.name}` as CustomAudioSound,
-              path.isAbsolute(sound.filePath)
-                ? sound.filePath
-                : path.join(this.app.getDataDirPath(), sound.filePath),
-            ]),
-          ),
-        });
-    const before = configuredAudioCommand(options.audio?.beforePlaybackCommand);
-    const after = configuredAudioCommand(options.audio?.afterPlaybackCommand);
-    if (before || after)
-      player = new HookedAudioPlayer(player, {
-        before,
-        after,
-        timeoutSeconds: options.audio?.commandTimeoutSeconds ?? 10,
-        onCommandError: (_stage, message) =>
-          this.app.error(`[persistent-notifier] ${message}`),
-      });
-    const sessionStart = configuredAudioCommand(
-      options.audio?.sessionStartCommand,
-    );
-    const sessionStop = configuredAudioCommand(
-      options.audio?.sessionStopCommand,
-    );
-    if (sessionStart && sessionStop)
-      player = new SessionAudioPlayer(player, {
-        start: sessionStart,
-        stop: sessionStop,
-        idleCooldownSeconds: options.audio?.sessionIdleCooldownSeconds ?? 30,
-        timeoutSeconds: options.audio?.commandTimeoutSeconds ?? 10,
-        onCommandError: (stage, message) =>
-          this.app.error(
-            `[persistent-notifier] Audio session ${stage} failed: ${message}`,
-          ),
-        onStateChange: (status) => {
-          this.debug(
-            `Audio session: state=${status.state}, ownedByPlugin=${status.ownedByPlugin}`,
-          );
-          this.emitChange("audio-session");
-        },
-      });
-    return player;
-  }
-
   status() {
     const alertStats = this.database?.alertStats();
     const database = this.database?.operationalStatus();
@@ -238,7 +145,6 @@ export class PersistentNotifierRuntime {
       activeRequests: 0,
       lastError: undefined,
     };
-    const audio = this.audioScheduler?.status() ?? { running: false };
     const services = (this.config.notifiers ?? []).map((notifier) => {
       const service = database?.services.find(
         (item) => item.id === notifier.name,
@@ -271,10 +177,6 @@ export class PersistentNotifierRuntime {
         : undefined,
       scheduler.lastError
         ? `Delivery scheduler failed: ${scheduler.lastError}`
-        : undefined,
-      audio.lastError ? `Local audio failed: ${audio.lastError}` : undefined,
-      audio.session?.lastError && audio.session.lastError !== audio.lastError
-        ? `Local audio session failed: ${audio.session.lastError}`
         : undefined,
       ingestion.rejected > 0
         ? `${ingestion.rejected} notification update(s) rejected at the ingestion queue limit`
@@ -316,11 +218,6 @@ export class PersistentNotifierRuntime {
           this.config.ingestion?.batchSize ?? DEFAULT_INGESTION_BATCH_SIZE,
         reconcilingStartup: this.reconcilingStartup,
         workerScheduled: Boolean(this.ingestionImmediate),
-      },
-      audio: {
-        enabled: this.config.audio?.enabled ?? false,
-        pending: this.database?.pendingAudioPlaybackCount() ?? 0,
-        ...audio,
       },
       connectivity: this.connectivity
         ? {
@@ -368,7 +265,7 @@ export class PersistentNotifierRuntime {
 
   statusMessage(): string {
     const current = this.status();
-    return `${current.health.state}: ${current.alerts.active} active, ${current.alerts.pendingDelivery} deliveries pending, ${current.audio.pending} sounds pending`;
+    return `${current.health.state}: ${current.alerts.active} active, ${current.alerts.pendingDelivery} deliveries pending`;
   }
 
   private debug(message: string): void {
@@ -429,21 +326,6 @@ export class PersistentNotifierRuntime {
     if (summary?.processed) this.emitChange("deliveries");
   }
 
-  private async runAudioScheduler(): Promise<void> {
-    if (!this.audioScheduler || !this.database) return;
-    const before = this.database.pendingAudioPlaybackCount();
-    const previous = this.audioScheduler.status();
-    await this.audioScheduler?.runOnce();
-    this.scheduleNextAudio();
-    const current = this.audioScheduler.status();
-    if (
-      before !== this.database.pendingAudioPlaybackCount() ||
-      previous.lastPlayedAt !== current.lastPlayedAt ||
-      previous.lastError !== current.lastError
-    )
-      this.emitChange("audio");
-  }
-
   private requestDeliveryRun(): void {
     if (this.stopping) return;
     if (this.deliveryRun) {
@@ -469,49 +351,6 @@ export class PersistentNotifierRuntime {
           }
         });
     });
-  }
-
-  private requestAudioRun(): void {
-    if (this.stopping) return;
-    if (this.audioRun) {
-      this.audioRerunRequested = true;
-      return;
-    }
-    if (this.audioImmediate || !this.audioScheduler || !this.database) return;
-    const generation = this.runtimeGeneration;
-    this.audioImmediate = setImmediate(() => {
-      this.audioImmediate = undefined;
-      if (generation !== this.runtimeGeneration || !this.database) return;
-      const running = this.runAudioScheduler();
-      this.audioRun = running;
-      void running
-        .catch((error: unknown) =>
-          this.reportAsyncError("Local audio scheduler failed", error),
-        )
-        .finally(() => {
-          if (this.audioRun === running) this.audioRun = undefined;
-          if (this.audioRerunRequested) {
-            this.audioRerunRequested = false;
-            this.requestAudioRun();
-          }
-        });
-    });
-  }
-
-  private scheduleNextAudio(): void {
-    if (this.audioTimer) clearTimeout(this.audioTimer);
-    this.audioTimer = undefined;
-    if (this.stopping) return;
-    const dueAt = this.database?.nextAudioPlaybackDueAt();
-    if (!dueAt || !this.audioScheduler) return;
-    const delay = Math.min(
-      MAX_TIMER_DELAY,
-      Math.max(0, dueAt.getTime() - Date.now()),
-    );
-    this.audioTimer = setTimeout(() => {
-      this.audioTimer = undefined;
-      this.requestAudioRun();
-    }, delay);
   }
 
   private scheduleNextDelivery(): void {
@@ -612,7 +451,6 @@ export class PersistentNotifierRuntime {
     this.scheduleNextWake();
     this.scheduleNextActivation();
     this.requestDeliveryRun();
-    this.requestAudioRun();
     this.emitChange("alerts");
   }
 
@@ -715,15 +553,6 @@ export class PersistentNotifierRuntime {
       },
     );
     if (!occurrence) return undefined;
-    if (occurrence.currentState === "cleared")
-      this.audioScheduler?.cancel(occurrence.id, "clear", receivedAt);
-    else
-      this.audioScheduler?.queue(
-        occurrence,
-        policy.audio,
-        policy.activationDelaySeconds,
-        receivedAt,
-      );
     this.applyConnectivityPolicy(occurrence, receivedAt, schedule);
     if (schedule) this.afterIngestionBatch();
     return occurrence;
@@ -752,7 +581,6 @@ export class PersistentNotifierRuntime {
       this.scheduleNextWake();
       this.scheduleNextActivation();
       this.requestDeliveryRun();
-      this.requestAudioRun();
     }
     this.scheduleIngestionDrain();
     this.runRetention();
@@ -805,7 +633,6 @@ export class PersistentNotifierRuntime {
             ? { attempts: this.db().listDeliveryAttempts(delivery.id) }
             : {}),
         })),
-      audioPlayback: this.db().getAudioPlaybackForAlert(occurrence.id),
     };
   }
 
@@ -978,10 +805,6 @@ export class PersistentNotifierRuntime {
         if (patch.connectivity !== undefined)
           changedFields.push("connectivity");
         if (patch.notifierIds !== undefined) changedFields.push("notifierIds");
-        if (patch.audio !== undefined)
-          changedFields.push(
-            ...alertPolicyFields.filter((field) => field.startsWith("audio.")),
-          );
         const overrideFields = patch.overrideFields
           ? [...patch.overrideFields]
           : [...new Set([...previousOverrides, ...changedFields])];
@@ -1008,7 +831,6 @@ export class PersistentNotifierRuntime {
               : (patch.rearmAfterSeconds ?? current.policy.rearmAfterSeconds),
           connectivity: patch.connectivity ?? current.policy.connectivity,
           notifierIds: patch.notifierIds ?? current.policy.notifierIds,
-          audio: patch.audio ?? current.policy.audio,
           overrideFields,
         });
         const updated = this.getDefinition(id);
@@ -1031,7 +853,6 @@ export class PersistentNotifierRuntime {
           this.scheduleNextWake();
           this.scheduleNextActivation();
           this.scheduleNextDelivery();
-          this.scheduleNextAudio();
           this.debug(`Removed stored alert: definitionId=${id}`);
           this.emitChange("definition");
         }
@@ -1097,8 +918,6 @@ export class PersistentNotifierRuntime {
         const upstream = await this.upstreamAction(occurrence, "acknowledge");
         this.db().acknowledgeAlert(id);
         this.requestDeliveryRun();
-        this.audioScheduler?.cancel(id, "acknowledge");
-        this.scheduleNextAudio();
         this.db().recordOccurrenceEvent(
           id,
           `upstream_acknowledge_${upstream.upstream}`,
@@ -1118,8 +937,6 @@ export class PersistentNotifierRuntime {
         if (occurrence.currentState !== "active") return "inactive";
         const upstream = await this.upstreamAction(occurrence, "silence");
         this.db().silenceAlert(id);
-        this.audioScheduler?.cancel(id, "silence");
-        this.scheduleNextAudio();
         this.db().recordOccurrenceEvent(
           id,
           `upstream_silence_${upstream.upstream}`,
@@ -1204,22 +1021,6 @@ export class PersistentNotifierRuntime {
         requestTimeoutSeconds: options.delivery?.requestTimeoutSeconds ?? 15,
       },
     );
-    if (options.audio?.enabled)
-      this.audioScheduler = new AudioScheduler(
-        this.database,
-        this.createAudioPlayer(options),
-        {
-          queueLimit: options.audio.queueLimit ?? 25,
-          failureRetrySeconds: options.audio.failureRetrySeconds ?? 30,
-          maxAttempts: options.audio.maxAttempts ?? 3,
-          quietHours: options.audio.quietHours,
-          onError: (message) =>
-            this.app.error(
-              `[persistent-notifier] Local audio playback failed: ${message}`,
-            ),
-        },
-      );
-
     const switchConfig = options.connectivity?.switch;
     if (options.connectivity?.enabled && switchConfig)
       this.connectivity = new ConnectivityManager(
@@ -1250,7 +1051,6 @@ export class PersistentNotifierRuntime {
     this.scheduleNextWake();
     this.database.processDueActivations();
     this.scheduleNextActivation();
-    this.scheduleNextAudio();
 
     const handler = (delta: unknown): void => {
       if (generation !== this.runtimeGeneration || this.stopping) return;
@@ -1322,9 +1122,7 @@ export class PersistentNotifierRuntime {
         ),
       );
     this.app.setPluginStatus(this.statusMessage());
-    this.debug(
-      `Started and subscribed to Signal K notifications; localAudio=${options.audio?.enabled === true}`,
-    );
+    this.debug("Started and subscribed to Signal K notifications");
   }
 
   registerWithRouter(router: PluginRouter): void {
@@ -1354,23 +1152,6 @@ export class PersistentNotifierRuntime {
             enabled: true,
             minimumSeverity: notifier.minSeverity ?? "normal",
           })),
-      listAudioSounds: () => [
-        {
-          id: "severity",
-          name: "Match alert severity",
-          type: "automatic",
-        },
-        ...audioSounds.map((sound) => ({
-          id: sound,
-          name: sound[0].toUpperCase() + sound.slice(1),
-          type: "built-in",
-        })),
-        ...(this.config.audio?.customSounds ?? []).map((sound) => ({
-          id: `custom:${sound.name}`,
-          name: sound.name,
-          type: "custom",
-        })),
-      ],
       subscribeChanges: (listener) => this.subscribeChanges(listener),
     });
   }
@@ -1387,47 +1168,29 @@ export class PersistentNotifierRuntime {
     if (this.startupImmediate) clearImmediate(this.startupImmediate);
     if (this.ingestionImmediate) clearImmediate(this.ingestionImmediate);
     if (this.deliveryImmediate) clearImmediate(this.deliveryImmediate);
-    if (this.audioImmediate) clearImmediate(this.audioImmediate);
     this.startupImmediate = undefined;
     this.ingestionImmediate = undefined;
     this.deliveryImmediate = undefined;
-    this.audioImmediate = undefined;
     this.deliveryRerunRequested = false;
-    this.audioRerunRequested = false;
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
-    if (this.audioTimer) clearTimeout(this.audioTimer);
     if (this.zoneRefreshTimer) clearInterval(this.zoneRefreshTimer);
     if (this.retentionTimer) clearInterval(this.retentionTimer);
     await this.scheduler?.stop();
-    await this.audioScheduler?.stop();
     await this.deliveryRun;
-    await this.audioRun;
     this.connectivity?.stop();
     this.database?.close();
     this.database = undefined;
     this.changeListeners.clear();
     this.scheduler = undefined;
-    this.audioScheduler = undefined;
     this.deliveryRun = undefined;
-    this.audioRun = undefined;
     this.connectivity = undefined;
     this.policy = undefined;
     this.transports.clear();
     this.activationTimer = undefined;
     this.deliveryTimer = undefined;
-    this.audioTimer = undefined;
     this.zoneRefreshTimer = undefined;
     this.retentionTimer = undefined;
     this.debug("Stopped");
   }
-}
-
-function configuredAudioCommand(
-  command: Partial<AudioCommand> | undefined,
-): AudioCommand | undefined {
-  return typeof command?.executable === "string" &&
-    command.executable.trim() !== ""
-    ? { executable: command.executable, arguments: command.arguments }
-    : undefined;
 }

@@ -16,13 +16,6 @@ describe("AlertPolicyResolver", () => {
         },
       ],
       defaults: { minSeverity: "warn", notifiers: ["primary"] },
-      audio: {
-        defaults: {
-          enabled: true,
-          minimumSeverity: "alert",
-          mode: "once",
-        },
-      },
     };
     const resolver = new AlertPolicyResolver(database, config);
     resolver.seedDefinitions([]);
@@ -35,42 +28,17 @@ describe("AlertPolicyResolver", () => {
     ).toMatchObject({
       minimumSeverity: "warn",
       notifierIds: ["primary"],
-      audio: { enabled: true, sound: "severity", minimumSeverity: "alert" },
       provenance: "default",
     });
     database.setPolicy(pathDefinitionId("notifications.navigation.anchor"), {
       enabled: false,
       notifierIds: [],
-      audio: {
-        enabled: true,
-        sound: "alarm",
-        minimumSeverity: "alarm",
-        mode: "repeat",
-        repeatIntervalSeconds: 30,
-        stopOn: {
-          clear: true,
-          acknowledge: true,
-          silence: true,
-        },
-      },
-      overrideFields: [
-        "enabled",
-        "notifierIds",
-        "audio.enabled",
-        "audio.sound",
-        "audio.minimumSeverity",
-        "audio.mode",
-        "audio.repeatIntervalSeconds",
-        "audio.stopOn.clear",
-        "audio.stopOn.acknowledge",
-        "audio.stopOn.silence",
-      ],
+      overrideFields: ["enabled", "notifierIds"],
     });
     expect(
       resolver.forPath("notifications.navigation.anchor", "alarm"),
     ).toMatchObject({
       enabled: false,
-      audio: { sound: "alarm", mode: "repeat" },
       provenance: "partial",
     });
     expect(database.listDefinitions()).toHaveLength(1);
@@ -85,9 +53,6 @@ describe("AlertPolicyResolver", () => {
         activationDelaySeconds: 5,
         notifiers: ["primary"],
       },
-      audio: {
-        defaults: { enabled: true, sound: "severity", mode: "once" },
-      },
     };
     const path = "notifications.environment.inside.refrigerator.temperature";
     const definitionId = pathDefinitionId(path);
@@ -97,27 +62,14 @@ describe("AlertPolicyResolver", () => {
     database.setPolicy(definitionId, {
       minimumSeverity: "alert",
       notifierIds: [],
-      audio: {
-        enabled: true,
-        sound: "alarm",
-        minimumSeverity: "warn",
-        mode: "once",
-        repeatIntervalSeconds: 60,
-        stopOn: {
-          clear: true,
-          acknowledge: true,
-          silence: true,
-        },
-      },
-      overrideFields: ["minimumSeverity", "notifierIds", "audio.sound"],
+      overrideFields: ["minimumSeverity", "notifierIds"],
     });
     expect(resolver.forPath(path)).toMatchObject({
       minimumSeverity: "alert",
       activationDelaySeconds: 5,
       notifierIds: [],
-      audio: { sound: "alarm", mode: "once" },
       provenance: "partial",
-      overriddenFields: ["minimumSeverity", "notifierIds", "audio.sound"],
+      overriddenFields: ["minimumSeverity", "notifierIds"],
     });
 
     config.defaults = {
@@ -125,14 +77,10 @@ describe("AlertPolicyResolver", () => {
       activationDelaySeconds: 45,
       notifiers: ["secondary"],
     };
-    config.audio = {
-      defaults: { enabled: true, sound: "warning", mode: "repeat" },
-    };
     expect(resolver.forPath(path)).toMatchObject({
       minimumSeverity: "alert",
       activationDelaySeconds: 45,
       notifierIds: [],
-      audio: { sound: "alarm", mode: "repeat" },
       defaults: {
         minimumSeverity: "emergency",
         activationDelaySeconds: 45,

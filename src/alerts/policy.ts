@@ -1,7 +1,6 @@
 import { PluginConfig } from "../config";
 import { AlertDatabase } from "../storage/db";
 import {
-  AlertAudioPolicy,
   AlertDefinitionRecord,
   alertPolicyFields,
   AlertPolicyField,
@@ -19,7 +18,6 @@ export interface PolicyValues {
   rearmAfterSeconds?: number;
   connectivity: ConnectivityMode;
   notifierIds: string[];
-  audio: AlertAudioPolicy;
 }
 
 export interface EffectivePolicy extends PolicyValues {
@@ -38,7 +36,6 @@ export class AlertPolicyResolver {
   ) {}
 
   private defaults(): PolicyValues {
-    const audio = this.config.audio?.defaults;
     return {
       enabled: this.config.defaults?.enabled ?? true,
       oneTime: this.config.defaults?.oneTime ?? false,
@@ -47,18 +44,6 @@ export class AlertPolicyResolver {
       rearmAfterSeconds: this.config.defaults?.rearmAfterSeconds,
       connectivity: this.config.defaults?.connectivity ?? { mode: "queue" },
       notifierIds: [...(this.config.defaults?.notifiers ?? [])],
-      audio: {
-        enabled: audio?.enabled ?? false,
-        sound: audio?.sound ?? "severity",
-        minimumSeverity: audio?.minimumSeverity ?? "warn",
-        mode: audio?.mode ?? "once",
-        repeatIntervalSeconds: audio?.repeatIntervalSeconds ?? 60,
-        stopOn: {
-          clear: audio?.stopOn?.clear ?? true,
-          acknowledge: audio?.stopOn?.acknowledge ?? true,
-          silence: audio?.stopOn?.silence ?? true,
-        },
-      },
     };
   }
 
@@ -67,15 +52,10 @@ export class AlertPolicyResolver {
     stored: AlertPolicyRecord | undefined,
   ): EffectivePolicy {
     const fields = new Set(stored?.overrideFields ?? []);
-    const audio = {
-      ...base.audio,
-      stopOn: { ...base.audio.stopOn },
-    };
     const effective: PolicyValues = {
       ...base,
       connectivity: { ...base.connectivity },
       notifierIds: [...base.notifierIds],
-      audio,
     };
     if (stored) {
       if (fields.has("enabled") && stored.enabled !== undefined)
@@ -96,21 +76,6 @@ export class AlertPolicyResolver {
       // The mask distinguishes an explicit empty list from inheritance.
       if (fields.has("notifierIds"))
         effective.notifierIds = [...stored.notifierIds];
-      if (stored.audio) {
-        if (fields.has("audio.enabled")) audio.enabled = stored.audio.enabled;
-        if (fields.has("audio.sound")) audio.sound = stored.audio.sound;
-        if (fields.has("audio.minimumSeverity"))
-          audio.minimumSeverity = stored.audio.minimumSeverity;
-        if (fields.has("audio.mode")) audio.mode = stored.audio.mode;
-        if (fields.has("audio.repeatIntervalSeconds"))
-          audio.repeatIntervalSeconds = stored.audio.repeatIntervalSeconds;
-        if (fields.has("audio.stopOn.clear"))
-          audio.stopOn.clear = stored.audio.stopOn.clear;
-        if (fields.has("audio.stopOn.acknowledge"))
-          audio.stopOn.acknowledge = stored.audio.stopOn.acknowledge;
-        if (fields.has("audio.stopOn.silence"))
-          audio.stopOn.silence = stored.audio.stopOn.silence;
-      }
     }
     const overriddenFields = [...fields];
     return {
@@ -126,7 +91,6 @@ export class AlertPolicyResolver {
         ...base,
         connectivity: { ...base.connectivity },
         notifierIds: [...base.notifierIds],
-        audio: { ...base.audio, stopOn: { ...base.audio.stopOn } },
       },
     };
   }

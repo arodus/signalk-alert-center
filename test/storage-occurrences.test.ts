@@ -49,7 +49,7 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(7);
+    expect(migrated.schemaVersion()).toBe(8);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -77,7 +77,14 @@ describe("occurrence storage", () => {
         .prepare("PRAGMA table_info(alert_policies)")
         .all()
         .map((column) => (column as { name: string }).name),
-    ).toContain("audio_policy_json");
+    ).not.toContain("audio_policy_json");
+    expect(
+      migrated.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'audio_%'",
+        )
+        .all(),
+    ).toEqual([]);
   });
 
   it("preserves version-four stored values as explicit overrides", () => {
@@ -136,7 +143,7 @@ describe("occurrence storage", () => {
     });
   });
 
-  it("preserves deliveries and attempts through the operation migration", () => {
+  it("preserves deliveries while removing obsolete playback data", () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-v6-migration-"));
     directories.push(directory);
     const filename = join(directory, "alerts.sqlite");
@@ -282,16 +289,13 @@ describe("occurrence storage", () => {
       migrated.listAlertEvents("occurrence").map((event) => event.eventType),
     ).toEqual(["raised"]);
     expect(migrated.getPolicy("anchor")?.overrideFields).toEqual([]);
-    expect(migrated.getPolicy("anchor")?.audio?.stopOn).toEqual({
-      clear: true,
-      acknowledge: true,
-      silence: true,
-    });
-    expect(migrated.getAudioPlaybackForAlert("occurrence")?.stopOn).toEqual({
-      clear: true,
-      acknowledge: true,
-      silence: true,
-    });
+    expect(
+      migrated.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'audio_%'",
+        )
+        .all(),
+    ).toEqual([]);
     expect(
       migrated.db
         .prepare("PRAGMA table_info(alert_occurrences)")
@@ -308,7 +312,7 @@ describe("occurrence storage", () => {
     expect(db.operationalStatus()).toMatchObject({
       healthy: false,
       schemaVersion: 0,
-      expectedSchemaVersion: 7,
+      expectedSchemaVersion: 8,
     });
   });
 
@@ -353,18 +357,6 @@ describe("occurrence storage", () => {
     const db = database();
     const occurrence = db.ingest(active(), ["ntfy"])!;
     db.setWakeDue(occurrence.id, new Date("2026-01-01T00:10:00Z"));
-    db.ensureAudioPlayback(occurrence.id, {
-      enabled: true,
-      sound: "warning",
-      minimumSeverity: "warn",
-      mode: "once",
-      repeatIntervalSeconds: 60,
-      stopOn: {
-        clear: true,
-        acknowledge: true,
-        silence: true,
-      },
-    });
     db.setPolicy(occurrence.definitionId, {
       enabled: true,
       oneTime: false,
@@ -377,12 +369,11 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(7);
+    expect(db.schemaVersion()).toBe(8);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
     expect(db.listWakeRequests()).toEqual([]);
-    expect(db.pendingAudioPlaybackCount()).toBe(0);
     expect(db.ingest(active(), [])).toMatchObject({ occurrenceNumber: 1 });
   });
 
@@ -893,27 +884,9 @@ describe("occurrence storage", () => {
     db.setPolicy(definitionId, {
       enabled: true,
       notifierIds: ["ntfy"],
-      audio: {
-        enabled: true,
-        sound: "warning",
-        minimumSeverity: "warn",
-        mode: "once",
-        repeatIntervalSeconds: 60,
-        stopOn: { clear: true, acknowledge: true, silence: true },
-      },
-      overrideFields: ["enabled", "notifierIds", "audio.enabled"],
+      overrideFields: ["enabled", "notifierIds"],
     });
     db.setWakeDue(occurrence.id, new Date("2026-01-01T00:10:00Z"));
-    const playback = db.ensureAudioPlayback(occurrence.id, {
-      enabled: true,
-      sound: "warning",
-      minimumSeverity: "warn",
-      mode: "once",
-      repeatIntervalSeconds: 60,
-      stopOn: { clear: true, acknowledge: true, silence: true },
-    });
-    expect(db.claimAudioPlayback(playback.id)).toBe(true);
-    db.recordAudioSuccess(playback.id, undefined, "test", "warning");
     const delivery = db.listDeliveries()[0];
     expect(db.claimDelivery(delivery.id)).toBe(true);
     db.recordDeliverySuccess(delivery.id, "remote-id");
@@ -935,8 +908,6 @@ describe("occurrence storage", () => {
       "alert_policy_notifiers",
       "occurrence_notifiers",
       "occurrence_notifier_thresholds",
-      "audio_playbacks",
-      "audio_attempts",
       "deliveries",
       "delivery_attempts",
     ]) {
@@ -1012,33 +983,6 @@ describe("occurrence storage", () => {
       [],
       clear,
     );
-    const pendingAudio = db.ingest(
-      active({ sourceKey: "pending-audio" }),
-      [],
-      old,
-    )!;
-    db.ensureAudioPlayback(pendingAudio.id, {
-      enabled: true,
-      sound: "warning",
-      minimumSeverity: "warn",
-      mode: "once",
-      repeatIntervalSeconds: 60,
-      stopOn: {
-        clear: false,
-        acknowledge: true,
-        silence: true,
-      },
-    });
-    db.ingest(
-      active({
-        sourceKey: "pending-audio",
-        state: "cleared",
-        severity: "normal",
-      }),
-      [],
-      clear,
-    );
-
     expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(1);
     expect(db.pruneOccurrences(cutoff, 10)).toEqual([removable.id]);
     expect(
@@ -1046,8 +990,8 @@ describe("occurrence storage", () => {
         .listOccurrences()
         .map((item) => item.id)
         .sort(),
-    ).toEqual([activeOccurrence.id, pending.id, pendingAudio.id].sort());
-    expect(db.listDefinitions()).toHaveLength(4);
+    ).toEqual([activeOccurrence.id, pending.id].sort());
+    expect(db.listDefinitions()).toHaveLength(3);
     expect(db.listDeliveries()).toHaveLength(1);
     expect(db.retentionStatus(cutoff).eligibleOccurrences).toBe(0);
   });

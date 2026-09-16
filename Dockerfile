@@ -12,13 +12,6 @@ COPY README.md ./README.md
 RUN npm run build && npm prune --omit=dev
 
 FROM ${SIGNALK_SERVER_IMAGE} AS runtime
-# ALSA is the smallest dependable server-side player for Linux hosts. The
-# device itself is opt-in and is never required by CI or non-audio deployments.
-USER root
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends alsa-utils \
-  && rm -rf /var/lib/apt/lists/*
-USER node
 # Baked outside /home/node/.signalk: that path is normally bind-mounted for
 # persistence, which would otherwise shadow a plugin copied directly into it.
 # The entrypoint installs it into the mounted volume on first run instead.

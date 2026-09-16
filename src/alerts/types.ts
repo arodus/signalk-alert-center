@@ -7,35 +7,6 @@ export const severities = [
 ] as const;
 export type Severity = (typeof severities)[number];
 
-export const audioSounds = ["chime", "warning", "alarm", "emergency"] as const;
-export type AudioSound = (typeof audioSounds)[number];
-export const audioSoundSelections = ["severity", ...audioSounds] as const;
-export type CustomAudioSound = `custom:${string}`;
-export type PlayableAudioSound = AudioSound | CustomAudioSound;
-export type AudioSoundSelection =
-  (typeof audioSoundSelections)[number] | CustomAudioSound;
-
-export const isBuiltInAudioSoundSelection = (
-  value: unknown,
-): value is (typeof audioSoundSelections)[number] =>
-  audioSoundSelections.includes(value as (typeof audioSoundSelections)[number]);
-export type AudioPlaybackMode = "once" | "repeat";
-
-export interface AudioStopPolicy {
-  clear: boolean;
-  acknowledge: boolean;
-  silence: boolean;
-}
-
-export interface AlertAudioPolicy {
-  enabled: boolean;
-  sound: AudioSoundSelection;
-  minimumSeverity: Severity;
-  mode: AudioPlaybackMode;
-  repeatIntervalSeconds: number;
-  stopOn: AudioStopPolicy;
-}
-
 export type AlertState = "active" | "cleared";
 export type ConnectivityMode =
   | { mode: "queue" }
@@ -105,7 +76,6 @@ export interface AlertPolicyRecord {
   activationDelaySeconds?: number;
   rearmAfterSeconds?: number;
   notifierIds: string[];
-  audio?: AlertAudioPolicy;
   overrideFields: AlertPolicyField[];
   updatedAt: Date;
 }
@@ -118,44 +88,9 @@ export const alertPolicyFields = [
   "rearmAfterSeconds",
   "connectivity",
   "notifierIds",
-  "audio.enabled",
-  "audio.sound",
-  "audio.minimumSeverity",
-  "audio.mode",
-  "audio.repeatIntervalSeconds",
-  "audio.stopOn.clear",
-  "audio.stopOn.acknowledge",
-  "audio.stopOn.silence",
 ] as const;
 
 export type AlertPolicyField = (typeof alertPolicyFields)[number];
-
-export type AudioPlaybackState =
-  | "queued"
-  | "waiting_severity"
-  | "playing"
-  | "completed"
-  | "cancelled"
-  | "failed_retryable"
-  | "failed_terminal";
-
-export interface AudioPlaybackRecord {
-  id: string;
-  alertId: string;
-  state: AudioPlaybackState;
-  sound: AudioSoundSelection;
-  minimumSeverity: Severity;
-  mode: AudioPlaybackMode;
-  repeatIntervalSeconds: number;
-  stopOn: AudioStopPolicy;
-  attemptCount: number;
-  playCount: number;
-  nextPlayAt?: Date;
-  lastStartedAt?: Date;
-  lastFinishedAt?: Date;
-  lastErrorCode?: string;
-  lastErrorMessage?: string;
-}
 
 export type DeliveryState =
   | "pending"
