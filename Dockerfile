@@ -8,14 +8,15 @@ COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci
 COPY src ./src
 COPY public ./public
-COPY README.md ./README.md
+COPY scripts ./scripts
+COPY README.md LICENSE ./
 RUN npm run build && npm prune --omit=dev
 
 FROM ${SIGNALK_SERVER_IMAGE} AS runtime
 # Baked outside /home/node/.signalk: that path is normally bind-mounted for
 # persistence, which would otherwise shadow a plugin copied directly into it.
 # The entrypoint installs it into the mounted volume on first run instead.
-COPY --from=build --chown=node:node /build/package.json /build/README.md /opt/signalk-persistent-notifier/
+COPY --from=build --chown=node:node /build/package.json /build/README.md /build/LICENSE /opt/signalk-persistent-notifier/
 COPY --from=build --chown=node:node /build/dist /opt/signalk-persistent-notifier/dist
 COPY --from=build --chown=node:node /build/public /opt/signalk-persistent-notifier/public
 COPY --from=build --chown=node:node /build/node_modules /opt/signalk-persistent-notifier/node_modules

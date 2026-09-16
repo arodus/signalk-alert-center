@@ -2,25 +2,41 @@
   "name": "signalk-persistent-notifier",
   "version": "0.1.0",
   "description": "Durable offline-first Signal K alert delivery plugin",
+  "author": "Sebastian Karasek",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arodus/signalk-persistent-notifier.git"
+  },
+  "homepage": "https://github.com/arodus/signalk-persistent-notifier#readme",
+  "bugs": {
+    "url": "https://github.com/arodus/signalk-persistent-notifier/issues"
+  },
   "main": "dist/plugin.js",
   "types": "dist/plugin.d.ts",
   "files": [
     "dist",
     "public",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
     "signalk-node-server-plugin",
     "signalk-webapp",
+    "signalk-category-notifications",
     "signalk",
     "notifications"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22.5"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node scripts/clean-dist.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "demo": "docker compose -f docker-compose.live.yml -f docker-compose.demo.yml up --build -d",
     "test": "vitest run",
     "test:integration": "RUN_DOCKER_INTEGRATION=1 vitest run test/integration.test.ts",
@@ -32,7 +48,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "npm run typecheck",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "package:check": "node scripts/verify-package.mjs",
+    "package:smoke": "node scripts/smoke-package.mjs",
+    "release:check": "npm run format:check && npm run typecheck && npm test && npm run build && npm run package:check && npm run package:smoke",
+    "prepack": "npm run build"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
@@ -44,5 +64,6 @@
   },
   "signalKPlugin": {
     "id": "signalk-persistent-notifier"
-  }
+  },
+  "signalk-plugin-enabled-by-default": false
 }
