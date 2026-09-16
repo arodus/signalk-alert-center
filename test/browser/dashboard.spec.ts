@@ -45,6 +45,12 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await expect(page.locator("#detail-drawer")).toHaveClass(/is-open/);
   await page.getByRole("button", { name: "Alert settings" }).click();
   await expect(page.locator("#policy-dialog")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Remove stored alert" }),
+  ).toBeDisabled();
+  await expect(page.locator("#policy-remove-help")).toContainText(
+    "Clear it in Signal K",
+  );
   await expect(page.getByRole("group", { name: "Local sound" })).toBeVisible();
   await expect(page.locator("#audio-sound")).toHaveValue("severity");
   await expect(page.locator("#audio-sound option")).toHaveCount(5);

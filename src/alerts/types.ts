@@ -25,7 +25,6 @@ export interface AudioStopPolicy {
   clear: boolean;
   acknowledge: boolean;
   silence: boolean;
-  dismiss: boolean;
 }
 
 export interface AlertAudioPolicy {
@@ -59,7 +58,6 @@ export interface AlertRecord {
   clearedAt?: Date;
   lastFiredAt?: Date;
   fireCount: number;
-  removedAt?: Date;
   currentState: AlertState;
   currentSeverity: Severity;
   maxSeverity: Severity;
@@ -68,8 +66,7 @@ export interface AlertRecord {
   notificationId?: string;
   acknowledgedAt?: Date;
   silencedAt?: Date;
-  dismissedAt?: Date;
-  /** Policy snapshot: whether this occurrence remains until dismissed. */
+  /** Policy snapshot controlling one-time notification behavior. */
   oneTime: boolean;
   minimumSeverity: Severity;
   activationDelaySeconds: number;
@@ -129,7 +126,6 @@ export const alertPolicyFields = [
   "audio.stopOn.clear",
   "audio.stopOn.acknowledge",
   "audio.stopOn.silence",
-  "audio.stopOn.dismiss",
 ] as const;
 
 export type AlertPolicyField = (typeof alertPolicyFields)[number];
@@ -244,7 +240,6 @@ export interface OccurrenceQuery {
   source?: string;
   state?: AlertState;
   severity?: Severity;
-  dismissed?: boolean;
   from?: Date;
   to?: Date;
   /** Exclusive occurrence id cursor in reverse chronological order. */

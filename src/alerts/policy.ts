@@ -57,7 +57,6 @@ export class AlertPolicyResolver {
           clear: audio?.stopOn?.clear ?? true,
           acknowledge: audio?.stopOn?.acknowledge ?? true,
           silence: audio?.stopOn?.silence ?? true,
-          dismiss: audio?.stopOn?.dismiss ?? true,
         },
       },
     };
@@ -111,8 +110,6 @@ export class AlertPolicyResolver {
           audio.stopOn.acknowledge = stored.audio.stopOn.acknowledge;
         if (fields.has("audio.stopOn.silence"))
           audio.stopOn.silence = stored.audio.stopOn.silence;
-        if (fields.has("audio.stopOn.dismiss"))
-          audio.stopOn.dismiss = stored.audio.stopOn.dismiss;
       }
     }
     const overriddenFields = [...fields];

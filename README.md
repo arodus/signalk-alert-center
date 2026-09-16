@@ -19,16 +19,15 @@ trigger. A Signal K `normal`, `nominal`, `cleared`, or null transition queues a 
 PagerDuty has accepted the matching occurrence trigger; all three operations'
 retries and attempt histories remain independent.
 
-One-time behavior is snapshotted when an occurrence starts. The occurrence remains
-visible until **Dismiss** is selected; dismissal is soft, so its history
-and pending delivery work remain intact. A later raise creates a visible new
-occurrence. Per-definition settings cover enabled state, minimum severity,
+One-time behavior is snapshotted when an occurrence starts. Every occurrence
+remains available in history, and a later raise creates a distinct occurrence.
+Per-definition settings cover enabled state, minimum severity,
 notifiers, local sound, activation delay, repeat intervals, stop behavior, and
 connectivity mode.
 
 Local sound playback runs on the Signal K server and continues with no dashboard
 open. It supports four built-in sounds, play-once or repeat-while-active behavior,
-quiet hours, and configurable stopping on clear, acknowledge, silence, or dismiss.
+quiet hours, and configurable stopping on clear, acknowledge, or silence.
 Text-to-speech remains separate follow-up work.
 
 See the [gap assessment and acceptance scenarios](IMPLEMENTATION_BRIEF.md#product-goal-and-gap-assessment-2026-09-06)
@@ -51,7 +50,7 @@ following boundaries explicit:
 | Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                                        |
 | Ingestion       | An all-source subscription feeds one bounded worker. Equivalent pending updates coalesce, transitions stay ordered, and queue pressure is observable. `$source`, source time, receipt time, and raw values are persisted. Null/normal values clear an occurrence. |
 | Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                                |
-| One-time alerts | Dismissal is occurrence-scoped and does not delete history or suppress the next occurrence.                                                                                                                                                                       |
+| Stored removal  | Removing an inactive stored alert deletes its definition, per-alert settings, occurrences, history, deliveries, and audio work. Signal K can rediscover it using current defaults.                                                                                |
 | Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                |
 | Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                            |
 | PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                   |
@@ -81,18 +80,16 @@ remains an input to definition discovery, but definitions are not grouped by zon
 Each row opens current information and history and has a direct **Settings** action.
 
 The event timeline includes raised, message/severity changes, activation-delay
-expiry or suppression, clear, acknowledge, silence, dismissal, policy actions,
+expiry or suppression, clear, acknowledge, silence, policy actions,
 and every notifier attempt/outcome. History uses cursor-based pagination and filters
-for state, severity, and dismissal.
+for state and severity.
 
-For an occurrence the UI presents a **Dismiss** action. It disappears from the
-active list, remains in history, and
-does not cancel pending notifier delivery. A later occurrence on the same path and
-source is a new row and becomes visible normally.
-
-This is distinct from **Forget alert**, which is available only for inactive
-discovered definitions and permanently removes their history and settings. Definitions
-derived from current Signal K zone metadata cannot be forgotten.
+The settings dialog provides **Remove stored alert** for inactive alerts. This is
+a destructive definition-level action: it deletes the alert's per-alert settings,
+all occurrences and events, delivery attempts, audio state, and related queued work.
+It never clears the upstream Signal K alert, so active alerts must be cleared at
+their source first. A zone or notification path still present in Signal K will be
+discovered again and will inherit the current global defaults.
 
 The definition settings panel controls enabled state, notification services, minimum
 severity, connectivity mode, repeat interval, and
@@ -134,7 +131,7 @@ Create a clean schema, recording its version for future migrations, with:
 - `alert_definitions`: zone/discovered identity and display metadata;
 - `alert_policies` plus a normalized definition-to-notifier mapping;
 - `alert_occurrences`: immutable occurrence identity, source/path, lifecycle,
-  source/receipt times, current and maximum severity, dismissal, and clear time;
+  source/receipt times, current and maximum severity, and clear time;
 - `alert_events`: immutable snapshots for meaningful lifecycle/operator changes;
 - `delivery_intents` and `delivery_attempts`: per-occurrence, per-notifier desired
   work and append-only results;
@@ -145,7 +142,7 @@ created by earlier commits should be deleted and recreated. Add indexes for
 current-list lookup and stable, cursor-based history order (`occurred_at`, unique
 id); future released schema changes must use transactional migrations.
 
-### 3. Recurrence, dismissal, and delay state machines — implemented
+### 3. Recurrence and delay state machines — implemented
 
 - Start an occurrence on inactive-to-active transition; coalesce identical updates
   while active; close it on null/normal; start a new occurrence on the next raise.
@@ -155,8 +152,8 @@ id); future released schema changes must use transactional migrations.
 - Persist `activation_due_at`. Promote still-active occurrences to notifier intents
   at the deadline; otherwise record suppression. Recover overdue deadlines on
   restart before running the delivery scheduler.
-- Make dismissal occurrence-scoped and independent of acknowledge, silence,
-  upstream clear, activation, and delivery state.
+- Keep local stored-alert deletion distinct from acknowledge, silence, and
+  upstream clear, and reject deletion while any occurrence is active.
 
 ### 4. Policy and history APIs — implemented
 
@@ -171,7 +168,6 @@ DELETE /definitions/:id
 GET   /occurrences
 GET   /occurrences/:id
 GET   /occurrences/:id/events
-POST  /occurrences/:id/dismiss
 POST  /occurrences/:id/acknowledge
 POST  /occurrences/:id/silence
 ```
@@ -194,7 +190,7 @@ Signal K router API, and publish the complete contract through `getOpenApi()`.
   notification-service list means “send to no remote services”; it is different
   from inheriting the global list. **Use global defaults** removes only the alert's
   overrides and retains its definition, occurrences, and history.
-- Add global history filters, pagination, dismissed-state visibility, empty/loading/
+- Add global history filters, pagination, empty/loading/
   auth/error states, and responsive layouts suitable for an onboard tablet.
 - Use `credentials: "include"`; redirect or link to Signal K login on 401/403.
 
@@ -251,7 +247,7 @@ is the acceptance environment:
   same suite works on developer machines and CI.
 
 The Docker acceptance suite should raise two sources on one path, exercise a
-never-fired zone definition, dismiss and re-raise a one-time occurrence, inspect
+never-fired zone definition, re-raise a one-time occurrence, inspect
 per-alert history, edit notifier/delay policy, clear both before and after the
 activation deadline, fail one notifier while two succeed, restart Signal K during
 pending activation and retry, and verify SQLite state plus connectivity ownership
@@ -480,12 +476,11 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `GET /definitions` and `GET /definitions/:id`
 - `PATCH /definitions/:id/policy`
 - `DELETE /definitions/:id/policy` to remove per-alert overrides
-- `DELETE /definitions/:id` for inactive discovered paths
+- `DELETE /definitions/:id` to remove an inactive stored alert, its settings, and history
 - `GET /notifiers`
 - `GET /audio/sounds`
 - `GET /occurrences` and `GET /occurrences/:id`
 - `GET /occurrences/:id/events`
-- `POST /occurrences/:id/dismiss`
 - `POST /occurrences/:id/acknowledge`
 - `POST /occurrences/:id/silence`
 
@@ -539,7 +534,7 @@ diagnostics. Do not increase the queue or request timeout as a first response be
 that permits more work to remain resident.
 
 `GET /occurrences` accepts exact `definitionId`, `path`, and `source` filters,
-plus `state`, `severity`, `dismissed`, `from`, and `to`. Filters can be combined;
+plus `state`, `severity`, `from`, and `to`. Filters can be combined;
 cursor ordering remains stable by occurrence start time and id.
 
 The dashboard is served at `/signalk-persistent-notifier`. The default **Alerts**
@@ -547,9 +542,9 @@ tab uses one compact table for all known definitions, with active alerts first. 
 its current information, recent event/audio/notifier timeline, and **Settings**. Acknowledge and
 Silence are available directly in active rows, with completed actions shown disabled.
 Inactive rows use a neutral status badge. Acknowledge and silence apply only
-to active occurrences. **Include dismissed** updates the table immediately. Inactive
-discovered definitions can be permanently forgotten from Settings; active alerts and
-Signal K zone definitions cannot be forgotten.
+to active occurrences. Any inactive stored alert can be permanently removed from
+Settings together with its configuration and complete history. Active alerts must
+be cleared in Signal K first. Definitions still supplied by Signal K are discovered again.
 
 The default **All alerts and zones** view includes inactive alerts and zone
 definitions that have never fired. Active alerts appear first, highest severity
@@ -601,8 +596,8 @@ docker compose -f docker-compose.acceptance.yml down -v
 
 This builds against the pinned Signal K 2.31.1 image, installs a test-only fixture
 plugin, publishes zone metadata and timestamped raise/clear deltas, changes a
-definition policy, checks recent history, dismisses a one-time occurrence, and
-verifies that a later raise creates a new visible occurrence. The separate mock
+definition policy, checks recent history, removes an inactive stored alert, and
+verifies recurrence behavior. The separate mock
 service also verifies scripted retry responses and captured request bodies.
 
 Install Chromium once with `npx playwright install chromium`, then run

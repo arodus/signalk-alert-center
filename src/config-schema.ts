@@ -646,11 +646,6 @@ export const pluginConfigSchema = {
                   title: "Alert is silenced",
                   default: true,
                 },
-                dismiss: {
-                  type: "boolean",
-                  title: "Alert is dismissed",
-                  default: true,
-                },
               },
             },
           },

@@ -26,7 +26,6 @@ export interface OccurrenceQuery {
   source?: string;
   state?: "active" | "cleared";
   severity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
-  dismissed?: boolean;
   from?: Date;
   to?: Date;
 }
@@ -52,7 +51,7 @@ export interface AlertPolicyPatch {
     { mode: "queue" | "wake" } | { mode: "wake_after"; delaySeconds: number };
 }
 export interface ActionResult {
-  status: "dismissed" | "acknowledged" | "silenced";
+  status: "acknowledged" | "silenced";
   upstream?:
     "applied" | "unsupported" | "failed" | "timed_out" | "not_requested";
   message?: string;
@@ -68,9 +67,9 @@ export interface AlertCenterRepository {
     patch: AlertPolicyPatch,
   ): MaybePromise<unknown | undefined>;
   resetPolicy(id: string): MaybePromise<unknown | undefined>;
-  forgetDefinition(
+  deleteDefinition(
     id: string,
-  ): MaybePromise<"deleted" | "active" | "not_discovered" | "not_found">;
+  ): MaybePromise<"deleted" | "active" | "not_found">;
   listOccurrences(query: OccurrenceQuery): MaybePromise<Page<unknown>>;
   getOccurrence(id: string): MaybePromise<unknown | undefined>;
   listOccurrenceEvents(
@@ -86,7 +85,6 @@ export interface AlertCenterRepository {
   retryDelivery(
     id: string,
   ): MaybePromise<"scheduled" | "not_retryable" | "not_found">;
-  dismissOccurrence(id: string): MaybePromise<ActionResult | false | undefined>;
   acknowledgeOccurrence(
     id: string,
   ): MaybePromise<ActionResult | "inactive" | false | undefined>;
@@ -284,7 +282,6 @@ function parseOccurrences(request: RequestLike): OccurrenceQuery {
       "alarm",
       "emergency",
     ] as const),
-    dismissed: boolParam(q.dismissed, "dismissed"),
     from,
     to,
   };
@@ -462,7 +459,7 @@ function parseAudioPolicy(
   if (!audio.stopOn || typeof audio.stopOn !== "object")
     throw new ApiError(400, "INVALID_BODY", "audio.stopOn is invalid");
   const stopOn = audio.stopOn as Record<string, unknown>;
-  const triggers = ["clear", "acknowledge", "silence", "dismiss"] as const;
+  const triggers = ["clear", "acknowledge", "silence"] as const;
   if (
     Object.keys(stopOn).some(
       (key) => !triggers.includes(key as (typeof triggers)[number]),
@@ -481,7 +478,6 @@ function parseAudioPolicy(
       clear: Boolean(stopOn.clear),
       acknowledge: Boolean(stopOn.acknowledge),
       silence: Boolean(stopOn.silence),
-      dismiss: Boolean(stopOn.dismiss),
     },
   };
 }
@@ -585,20 +581,14 @@ export function registerAlertCenterRoutes(
     "/definitions/:id",
     "readwrite",
     wrap(async (req, res) => {
-      const result = await repo().forgetDefinition(req.params?.id ?? "");
+      const result = await repo().deleteDefinition(req.params?.id ?? "");
       if (result === "not_found")
         throw new ApiError(404, "NOT_FOUND", "Alert definition was not found");
-      if (result === "not_discovered")
-        throw new ApiError(
-          400,
-          "NOT_DISCOVERED",
-          "Only discovered alert definitions can be forgotten",
-        );
       if (result === "active")
         throw new ApiError(
           409,
           "ALERT_ACTIVE",
-          "Clear the active alert before forgetting its definition",
+          "Clear the active alert in Signal K before removing its stored data",
         );
       res.json({ status: "deleted" });
     }),
@@ -771,7 +761,6 @@ export function registerAlertCenterRoutes(
     }),
   );
   const actions = {
-    dismiss: (id: string) => repo().dismissOccurrence(id),
     acknowledge: (id: string) => repo().acknowledgeOccurrence(id),
     silence: (id: string) => repo().silenceOccurrence(id),
   };
@@ -807,7 +796,6 @@ export function registerRoutes(
   status: () => unknown,
   runScheduler: () => Promise<void>,
   catalog: () => unknown,
-  removeAlert: (id: string) => boolean,
   acknowledgeAlert: (id: string) => boolean,
   silenceAlert: (id: string) => boolean,
 ): void {
@@ -818,7 +806,6 @@ export function registerRoutes(
     res.json(catalog()),
   );
   for (const [action, callback] of [
-    ["remove", removeAlert],
     ["acknowledge", acknowledgeAlert],
     ["silence", silenceAlert],
   ] as const)
@@ -831,7 +818,7 @@ export function registerRoutes(
         const id = req.params?.id;
         if (!id || !callback(id))
           return fail(res, 404, "NOT_FOUND", "Alert was not found");
-        res.json({ status: action === "remove" ? "removed" : `${action}d` });
+        res.json({ status: `${action}d` });
       },
     );
   addRoute(

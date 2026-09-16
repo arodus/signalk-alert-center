@@ -158,10 +158,11 @@ export function getAlertCenterOpenApi() {
           },
         },
         delete: {
-          summary: "Forget an inactive discovered definition and its history",
+          summary:
+            "Permanently remove an inactive stored alert, its policy, and history",
           parameters: [idParameter],
           responses: {
-            "200": response("Definition forgotten", {
+            "200": response("Stored alert removed", {
               type: "object",
               required: ["status"],
               properties: { status: { type: "string", enum: ["deleted"] } },
@@ -269,7 +270,6 @@ export function getAlertCenterOpenApi() {
               in: "query",
               schema: { $ref: "#/components/schemas/Severity" },
             },
-            { name: "dismissed", in: "query", schema: { type: "boolean" } },
             {
               name: "from",
               in: "query",
@@ -317,7 +317,7 @@ export function getAlertCenterOpenApi() {
         },
       },
       ...Object.fromEntries(
-        ["dismiss", "acknowledge", "silence"].map((action) => [
+        ["acknowledge", "silence"].map((action) => [
           `/occurrences/{id}/${action}`,
           {
             post: {
@@ -327,13 +327,9 @@ export function getAlertCenterOpenApi() {
                 "200": response("Action result", {
                   $ref: "#/components/schemas/ActionResult",
                 }),
-                ...(action === "dismiss"
-                  ? {}
-                  : {
-                      "409": response("The occurrence is not active", {
-                        $ref: "#/components/schemas/Error",
-                      }),
-                    }),
+                "409": response("The occurrence is not active", {
+                  $ref: "#/components/schemas/Error",
+                }),
                 ...errors,
               },
             },
@@ -472,7 +468,6 @@ export function getAlertCenterOpenApi() {
             "audio.stopOn.clear",
             "audio.stopOn.acknowledge",
             "audio.stopOn.silence",
-            "audio.stopOn.dismiss",
           ],
         },
         PolicyPatch: {
@@ -540,12 +535,11 @@ export function getAlertCenterOpenApi() {
             stopOn: {
               type: "object",
               additionalProperties: false,
-              required: ["clear", "acknowledge", "silence", "dismiss"],
+              required: ["clear", "acknowledge", "silence"],
               properties: {
                 clear: { type: "boolean" },
                 acknowledge: { type: "boolean" },
                 silence: { type: "boolean" },
-                dismiss: { type: "boolean" },
               },
             },
           },
@@ -619,7 +613,6 @@ export function getAlertCenterOpenApi() {
             startedAt: { type: "string", format: "date-time" },
             lastSeenAt: { type: "string", format: "date-time" },
             clearedAt: { type: "string", format: "date-time" },
-            dismissedAt: { type: "string", format: "date-time" },
             acknowledgedAt: { type: "string", format: "date-time" },
             silencedAt: { type: "string", format: "date-time" },
             activationDueAt: { type: "string", format: "date-time" },
@@ -754,12 +747,11 @@ export function getAlertCenterOpenApi() {
             repeatIntervalSeconds: { type: "integer", minimum: 1 },
             stopOn: {
               type: "object",
-              required: ["clear", "acknowledge", "silence", "dismiss"],
+              required: ["clear", "acknowledge", "silence"],
               properties: {
                 clear: { type: "boolean" },
                 acknowledge: { type: "boolean" },
                 silence: { type: "boolean" },
-                dismiss: { type: "boolean" },
               },
               additionalProperties: false,
             },
@@ -804,7 +796,7 @@ export function getAlertCenterOpenApi() {
           properties: {
             status: {
               type: "string",
-              enum: ["dismissed", "acknowledged", "silenced"],
+              enum: ["acknowledged", "silenced"],
             },
             upstream: {
               type: "string",

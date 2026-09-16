@@ -187,7 +187,7 @@ describe("PersistentNotifierRuntime", () => {
           rejected: 0,
         },
         scheduler: { running: false, activeRequests: 0 },
-        database: { healthy: true, schemaVersion: 6, expectedSchemaVersion: 6 },
+        database: { healthy: true, schemaVersion: 7, expectedSchemaVersion: 7 },
         services: [
           {
             id: "warning",
@@ -265,9 +265,6 @@ describe("PersistentNotifierRuntime", () => {
         runtime as unknown as { database: AlertDatabase }
       ).database.listWakeRequests(),
     ).toEqual([]);
-    expect(
-      await repository.dismissOccurrence(active.items[0].id),
-    ).toMatchObject({ status: "dismissed" });
     const definitions = (await repository.listDefinitions({
       limit: 10,
     })) as Page<{

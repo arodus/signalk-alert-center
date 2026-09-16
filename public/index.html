@@ -107,10 +107,6 @@
             <option>warn</option>
             <option>normal</option>
           </select>
-          <label class="check-label"
-            ><input id="dismissed-filter" type="checkbox" /> Include
-            dismissed</label
-          >
           <details class="advanced-filters">
             <summary>More filters</summary>
             <div class="advanced-filter-fields">
@@ -444,12 +440,6 @@
                 ><input id="audio-stop-silence" type="checkbox" />
                 Silenced</label
               >
-              <label
-                class="check-label"
-                data-policy-field="audio.stopOn.dismiss"
-                ><input id="audio-stop-dismiss" type="checkbox" />
-                Dismissed</label
-              >
             </div>
           </div>
         </fieldset>
@@ -495,20 +485,21 @@
         </div>
         <p id="policy-result" class="form-result" role="status"></p>
         <div class="dialog-actions">
-          <button
-            id="policy-forget"
-            class="button button-danger"
-            type="button"
-            hidden
-          >
-            Forget alert
-          </button>
           <button id="policy-cancel" class="button button-quiet" type="button">
             Cancel</button
           ><button id="policy-save" class="button button-primary" type="submit">
             Save settings
           </button>
         </div>
+        <section class="danger-zone" aria-labelledby="remove-alert-title">
+          <div>
+            <h3 id="remove-alert-title">Remove stored alert</h3>
+            <p id="policy-remove-help" class="field-help"></p>
+          </div>
+          <button id="policy-remove" class="button button-danger" type="button">
+            Remove stored alert
+          </button>
+        </section>
       </form>
     </dialog>
     <script src="./app.js" defer></script>

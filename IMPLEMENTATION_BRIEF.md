@@ -30,15 +30,12 @@ that the corresponding behavior has been implemented.
 - Capture notifications even with no selected notifier, no notifier enabled,
   no sound method, or no Internet connection. Do not depend on a browser being open.
 - A one-time notification means a discrete occurrence that may arrive once and
-  never receive a clear update. Keep it in the list across refreshes and restarts
-  until explicitly dismissed. One-time presentation, play-once audio, acknowledgement,
+  never receive a clear update. Keep it in the list across refreshes and restarts.
+  One-time presentation, play-once audio, acknowledgement,
   upstream resolution, and delivery success are separate concepts.
-- Dismissal hides an occurrence from the main list only. It must remain searchable
-  in history, and pending deliveries must survive. A later distinct occurrence
-  must appear again; a dismissed source must not become permanently invisible.
 - Full history means a durable chronological record of every distinct occurrence
   and meaningful lifecycle change, including message/severity changes, clear,
-  acknowledgement, silence, dismissal, and delivery attempts/outcomes. It does not
+  acknowledgement, silence, and delivery attempts/outcomes. It does not
   require recording every identical sensor delta. Preserve source identity,
   occurrence identity, source timestamp when available, receipt time, message,
   severity, and per-occurrence start/clear times and duration.
@@ -46,8 +43,8 @@ that the corresponding behavior has been implemented.
   their delivery results. Duplicate updates within one occurrence should coalesce.
   Do not invent separate one-shot occurrences from identical repeats without a
   documented identity/rearm policy.
-- Provide global and per-notification history in the UI and API, including dismissed
-  entries, with pagination and filters for time, path/source, state and severity.
+- Provide global and per-notification history in the UI and API with pagination
+  and filters for time, path/source, state and severity.
   History must work locally and remain available after restart and successful delivery.
 - Retain history by default. Any future bounded retention or purge must be explicit,
   documented, and separate from delivery-queue cleanup; protect pending work.
@@ -64,8 +61,8 @@ static findings, not a live Signal K compatibility or runtime certification.
 | Area | Current evidence | Missing behavior |
 | --- | --- | --- |
 | Notification list | The former `src/alerts/catalog.ts` combined rule and recognized-alert projections. | Replaced by definition/occurrence APIs and a unified Alerts table with history drill-down. |
-| One-time retention | `oneTime` is a rule flag; remove writes `removed_at`. Catalog filtering hides removed rows, and ingestion does not reset that flag. | Dismissed history access, reappearance of later occurrences, and defined handling for unconfigured one-shot events. |
-| Full history | `public/app.js` History filters current catalog rows to `cleared`; `src/api/routes.ts` has no event-history endpoint. | A real timeline including active, cleared and dismissed occurrences, with query/filter/pagination support. |
+| One-time retention | `oneTime` is snapshotted per occurrence, and later raises create distinct records. | Defined handling for unconfigured one-shot events. |
+| Full history | Occurrences and meaningful events are stored independently. | Continue expanding history presentation and filtering where useful. |
 | Event completeness | `src/storage/db.ts` records initial/state/severity events; same-state message changes and acknowledge/silence/remove actions are not event records. | Complete meaningful lifecycle audit, with immutable occurrence snapshots. |
 | Recurrence and delivery audit | `src/storage/schema.ts` has one alert per source key and one delivery per alert/transport. Ingestion uses `INSERT OR IGNORE`; first seen/max severity span recurrences. | Separate occurrences and delivery generations/attempt history, so later triggers and clears can be delivered without overwriting earlier results. |
 | Input semantics | Normalization defaults unknown states (including `notice`) to `alert`; null becomes an active alert. Delta source timestamps are not passed into ingestion. | Verify supported Signal K clear/null and severity semantics, retain original state/time, and test compatible normalization. |
@@ -87,9 +84,8 @@ implementing it, without delaying the required persistence and history work.
 
 1. Receive one notice once with no route, no WAN and no browser open. Restart the
    plugin: it remains visible with its original content and occurrence time.
-2. Dismiss that occurrence: it disappears from the main list, stays in history,
-   and any pending remote delivery remains queued. A distinct later occurrence
-   on the same source appears as a new item.
+2. Clear and raise the same source again: the later occurrence appears as a new
+   item while the earlier occurrence remains in history.
 3. Raise, update message/severity, clear, then raise the same path again. History
    shows both occurrences with independent durations and events; identical repeats
    do not create duplicate occurrences or deliveries.
@@ -100,8 +96,8 @@ implementing it, without delaying the required persistence and history work.
    cannot replace the individual notification/history records.
 6. Acknowledge or silence while the upstream API fails or is unavailable. Display
    the failure/local-only result accurately and preserve the action audit.
-7. Browse more than one history page, filter a single source, include dismissed
-   entries, and restart: ordering and records remain stable.
+7. Browse more than one history page, filter a single source, and restart:
+   ordering and records remain stable.
 
 The implemented alert center now covers occurrence/event storage, one-time
 lifecycle, history API/UI, zone discovery, and capability-aware controls. Playback
