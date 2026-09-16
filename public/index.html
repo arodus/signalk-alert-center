@@ -289,6 +289,28 @@
           <span id="health-state" class="health-pill">Checking</span>
           System diagnostics
         </summary>
+        <section class="service-tests" aria-labelledby="service-tests-title">
+          <div class="service-tests-heading">
+            <div>
+              <h3 id="service-tests-title">Test notification services</h3>
+              <p id="service-tests-help">
+                Uses each service's currently saved settings. Manual tests run
+                immediately, including during quiet periods, and never create
+                Alert center history or delivery records.
+              </p>
+            </div>
+            <a
+              class="button button-quiet button-small"
+              href="../admin/#/apps/configuration/signalk-persistent-notifier"
+              >Open plugin settings</a
+            >
+          </div>
+          <div
+            id="notifier-tests"
+            class="service-test-list"
+            aria-describedby="service-tests-help"
+          ></div>
+        </section>
         <div id="diagnostics-list" class="diagnostics-grid"></div>
       </details>
 

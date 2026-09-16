@@ -218,6 +218,72 @@ test("surfaces authentication failures", async ({ page }) => {
   await expect(page.locator("#error")).toContainText("Sign in to Signal K");
 });
 
+test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
+  page,
+}) => {
+  let calls = 0;
+  const operations: string[] = [];
+  await page.route(`**${plugin}/status`, async (route) => {
+    const response = await route.fetch();
+    const status = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...status,
+        services: [
+          {
+            id: "Test PagerDuty",
+            name: "Test PagerDuty",
+            type: "pagerduty",
+            enabled: true,
+            pendingCount: 0,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    `**${plugin}/notifiers/Test%20PagerDuty/test`,
+    async (route) => {
+      calls += 1;
+      const body = route.request().postDataJSON() as { operation: string };
+      operations.push(body.operation);
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      await route.fulfill({
+        json: {
+          status: "success",
+          category: "success",
+          message:
+            body.operation === "resolve"
+              ? "PagerDuty accepted the test-incident resolve event."
+              : "PagerDuty accepted the test alert. A real test incident was opened or updated.",
+          durationMs: 75,
+          operation: body.operation,
+          service: { id: "Test PagerDuty", type: "pagerduty" },
+        },
+      });
+    },
+  );
+
+  await page.goto("/signalk-persistent-notifier/");
+  await page.locator(".system-diagnostics summary").click();
+  const card = page.locator(".service-test-card").filter({
+    hasText: "Test PagerDuty",
+  });
+  const alertButton = card.getByRole("button", { name: "Test alert" });
+  await alertButton.evaluate((button) => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await expect(card.getByRole("status")).toContainText("real test incident");
+  expect(calls).toBe(1);
+
+  await card.getByRole("button", { name: "Test resolve" }).click();
+  await expect(card.getByRole("status")).toContainText("resolve event");
+  expect(calls).toBe(2);
+  expect(operations).toEqual(["send", "resolve"]);
+});
+
 test("saves a notification service after changing its type", async ({
   page,
 }, testInfo) => {

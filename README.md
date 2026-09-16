@@ -391,6 +391,7 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `DELETE /definitions/:id/policy` to remove per-alert overrides
 - `DELETE /definitions/:id` to remove an inactive stored alert, its settings, and history
 - `GET /notifiers`
+- `POST /notifiers/:id/test` to test one saved notification service
 - `GET /occurrences` and `GET /occurrences/:id`
 - `GET /occurrences/:id/events`
 - `GET /alert-history` for the global alert-update feed
@@ -474,6 +475,23 @@ Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert. Open the alert and select **Settings**
 to change them.
+
+Expand **System diagnostics** and use **Test notification services** to verify an
+enabled service with its currently saved plugin settings. Tests run immediately
+when requested, including during any quiet period, and use the configured delivery
+request timeout with a 30-second maximum. A second test for the same service is
+rejected while the first is running. Results distinguish credential, configuration,
+timeout, network, and remote-service failures without returning or logging tokens,
+webhook addresses, routing keys, or remote response bodies.
+
+ntfy and Discord receive an unmistakably marked manual test notification.
+PagerDuty's **Test alert** sends a real warning trigger and therefore opens or
+updates a clearly marked test incident. **Test resolve** is a separate action that
+uses the same stable test deduplication key to resolve that test incident. Service
+tests bypass the alert pipeline: they do not create alert occurrences, delivery
+rows, retries, connectivity wake requests, acknowledgements, or Alert center
+history. The generated Signal K settings form cannot expose actions for unsaved
+array entries, so save service changes before testing them from the Alert center.
 
 The separate **Deliveries** tab keeps transport troubleshooting out of the alert
 workflow. Unfinished work appears first, followed by recent completed and terminal

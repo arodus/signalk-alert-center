@@ -253,6 +253,69 @@ h2 {
   gap: 8px;
   margin-top: 8px;
 }
+.service-tests {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.service-tests-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.service-tests h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+.service-tests-heading p {
+  max-width: 760px;
+  margin: 3px 0 0;
+}
+.service-test-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+.service-test-card {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto;
+  align-items: center;
+  gap: 5px 14px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.service-test-card strong,
+.service-test-card span {
+  display: block;
+}
+.service-test-card span,
+.service-test-result {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.service-test-actions {
+  display: flex;
+  gap: 6px;
+}
+.service-test-result {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.service-test-result.success {
+  color: #185c31;
+}
+.service-test-result.error {
+  color: #84251e;
+}
+.service-test-result small {
+  display: inline;
+  font: inherit;
+}
 .diagnostic-item {
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -1017,6 +1080,14 @@ dialog input[type="checkbox"] {
   }
   .filter-row {
     flex-wrap: wrap;
+  }
+  .service-tests-heading,
+  .service-test-card {
+    display: block;
+  }
+  .service-tests-heading .button,
+  .service-test-actions {
+    margin-top: 8px;
   }
   .table-shell {
     overflow: visible;
