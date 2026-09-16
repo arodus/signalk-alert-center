@@ -14,9 +14,48 @@ describe("PersistentNotifierRuntime", () => {
   const directories: string[] = [];
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     for (const directory of directories)
       rmSync(directory, { recursive: true, force: true });
     directories.length = 0;
+  });
+
+  it("rejects overlapping manual tests for the same service", async () => {
+    let completeRequest: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            completeRequest = resolve;
+          }),
+      ),
+    );
+    const app = { debug: vi.fn(), error: vi.fn() } as unknown as ServerAPI;
+    const runtime = new PersistentNotifierRuntime(app);
+    const internal = runtime as unknown as {
+      config: object;
+      testNotifier(id: string, operation: "send" | "resolve"): Promise<unknown>;
+    };
+    internal.config = {
+      delivery: { requestTimeoutSeconds: 5 },
+      notifiers: [
+        {
+          name: "Crew",
+          type: "ntfy",
+          server: "https://ntfy.example",
+          topic: "boat",
+        },
+      ],
+    };
+
+    const first = internal.testNotifier("Crew", "send");
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    await expect(internal.testNotifier("Crew", "send")).resolves.toBe(
+      "in_progress",
+    );
+    completeRequest?.(new Response(undefined, { status: 200 }));
+    await expect(first).resolves.toMatchObject({ status: "success" });
   });
 
   it("resolves relative database paths inside the Signal K data directory", () => {

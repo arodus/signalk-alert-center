@@ -19,6 +19,9 @@ const state = {
   reloadQueued: false,
   policyDefaults: undefined,
   policyHiddenOverrides: [],
+  notifierTestResults: new Map(),
+  notifierTestsInFlight: new Set(),
+  lastStatus: undefined,
 };
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -28,6 +31,7 @@ const elements = {
   connectivityNote: $("#connectivity-note"),
   healthState: $("#health-state"),
   diagnostics: $("#diagnostics-list"),
+  notifierTests: $("#notifier-tests"),
   definitions: $("#definition-list"),
   deliveries: $("#delivery-list"),
   alertHistory: $("#alert-history-list"),
@@ -141,6 +145,7 @@ function renderDiagnostics(status) {
   const connectivity = status.connectivity ?? {};
   const reasons = status.health?.reasons ?? [];
   const services = status.services ?? [];
+  renderNotifierTests(services);
   const items = [
     [
       "Startup reconciliation",
@@ -182,6 +187,53 @@ function renderDiagnostics(status) {
         `<div class="diagnostic-item"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`,
     )
     .join("");
+}
+function renderNotifierTests(services) {
+  if (!services.length) {
+    elements.notifierTests.innerHTML =
+      '<p class="empty">No notification services are configured.</p>';
+    return;
+  }
+  elements.notifierTests.innerHTML = services
+    .map((service) => {
+      const id = String(service.id ?? service.name);
+      const inFlight = state.notifierTestsInFlight.has(id);
+      const result = state.notifierTestResults.get(id);
+      const disabled = service.enabled === false || inFlight;
+      const buttons =
+        service.type === "pagerduty"
+          ? `<button class="button button-primary button-small" type="button" data-test-notifier="${escapeHtml(id)}" data-test-operation="send" ${disabled ? "disabled" : ""}>${inFlight ? "Testing…" : "Test alert"}</button><button class="button button-quiet button-small" type="button" data-test-notifier="${escapeHtml(id)}" data-test-operation="resolve" ${disabled ? "disabled" : ""}>Test resolve</button>`
+          : `<button class="button button-primary button-small" type="button" data-test-notifier="${escapeHtml(id)}" data-test-operation="send" ${disabled ? "disabled" : ""}>${inFlight ? "Testing…" : "Send test notification"}</button>`;
+      const outcome = result
+        ? `<p class="service-test-result ${escapeHtml(result.status)}" role="status">${escapeHtml(result.message)}${result.technicalDetail ? ` <small>${escapeHtml(result.technicalDetail)}</small>` : ""}</p>`
+        : `<p class="service-test-result" role="status">${service.enabled === false ? "Enable and save this service before testing it." : "Not tested in this session."}</p>`;
+      return `<article class="service-test-card"><div><strong>${escapeHtml(service.name ?? id)}</strong><span>${escapeHtml(service.type ?? "unknown")} · ${service.enabled === false ? "disabled" : "enabled"}</span></div><div class="service-test-actions">${buttons}</div>${outcome}</article>`;
+    })
+    .join("");
+}
+
+async function runNotifierTest(button) {
+  const id = button.dataset.testNotifier;
+  const operation = button.dataset.testOperation ?? "send";
+  if (!id || state.notifierTestsInFlight.has(id)) return;
+  state.notifierTestsInFlight.add(id);
+  state.notifierTestResults.delete(id);
+  renderNotifierTests(state.lastStatus?.services ?? []);
+  try {
+    const result = await api(`/notifiers/${encodeURIComponent(id)}/test`, {
+      method: "POST",
+      body: JSON.stringify({ operation }),
+    });
+    state.notifierTestResults.set(id, result);
+  } catch (error) {
+    state.notifierTestResults.set(id, {
+      status: "error",
+      message: error instanceof Error ? error.message : "The test failed.",
+    });
+  } finally {
+    state.notifierTestsInFlight.delete(id);
+    renderNotifierTests(state.lastStatus?.services ?? []);
+  }
 }
 function definitionFor(occurrence) {
   return state.definitions.find(
@@ -615,6 +667,7 @@ async function load(preserveLoadedHistory = false) {
     elements.connectivityNote.textContent = status.connectivity?.state
       ? `${status.health?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
       : "delivery intents waiting";
+    state.lastStatus = status;
     renderDiagnostics(status);
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     elements.moreOccurrences.hidden = !state.occurrenceCursor;
@@ -1094,6 +1147,10 @@ function selectView(view, moveFocus = false) {
 }
 
 $("#refresh").addEventListener("click", () => void load());
+elements.notifierTests.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-test-notifier]");
+  if (button) void runNotifierTest(button);
+});
 $("#history-filters").addEventListener("submit", (event) => {
   event.preventDefault();
   void load();

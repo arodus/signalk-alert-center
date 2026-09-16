@@ -1,5 +1,9 @@
 import { AlertPolicyField, alertPolicyFields } from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
+import {
+  NotificationTestOperation,
+  NotificationTestResult,
+} from "../transports/test-service";
 
 export interface Page<T> {
   items: T[];
@@ -131,6 +135,16 @@ export interface AlertCenterChange {
 export interface AlertCenterDependencies {
   repository: () => AlertCenterRepository | undefined;
   listNotifiers?: () => MaybePromise<unknown[]>;
+  testNotifier?: (
+    id: string,
+    operation: NotificationTestOperation,
+  ) => MaybePromise<
+    | NotificationTestResult
+    | "not_found"
+    | "disabled"
+    | "in_progress"
+    | "unsupported"
+  >;
   subscribeChanges?: (
     listener: (change: AlertCenterChange) => void,
   ) => () => void;
@@ -515,6 +529,72 @@ export function registerAlertCenterRoutes(
       res.json(await repo().listDefinitions(parseDefinitions(req))),
     ),
   );
+  if (dependencies.testNotifier)
+    addRoute(
+      router,
+      "post",
+      "/notifiers/:id/test",
+      "readwrite",
+      wrap(async (req, res) => {
+        const body = req.body;
+        if (
+          body !== undefined &&
+          (!body || typeof body !== "object" || Array.isArray(body))
+        )
+          throw new ApiError(
+            400,
+            "INVALID_BODY",
+            "Request body must be an object",
+          );
+        const value = (body ?? {}) as Record<string, unknown>;
+        const extra = Object.keys(value).filter((key) => key !== "operation");
+        if (extra.length)
+          throw new ApiError(
+            400,
+            "INVALID_BODY",
+            "Request body has unknown fields",
+            {
+              fields: extra,
+            },
+          );
+        const operation = value.operation ?? "send";
+        if (operation !== "send" && operation !== "resolve")
+          throw new ApiError(
+            400,
+            "INVALID_BODY",
+            "operation must be send or resolve",
+          );
+        const result = await dependencies.testNotifier?.(
+          req.params?.id ?? "",
+          operation,
+        );
+        if (result === "not_found")
+          throw new ApiError(
+            404,
+            "NOT_FOUND",
+            "Notification service was not found",
+          );
+        if (result === "disabled")
+          throw new ApiError(
+            409,
+            "NOTIFIER_DISABLED",
+            "Enable and save this notification service before testing it",
+          );
+        if (result === "in_progress")
+          throw new ApiError(
+            409,
+            "TEST_IN_PROGRESS",
+            "A test is already running for this notification service",
+          );
+        if (result === "unsupported")
+          throw new ApiError(
+            400,
+            "UNSUPPORTED_TEST_OPERATION",
+            "Only PagerDuty services support a separate resolve test",
+          );
+        res.json(result);
+      }),
+    );
   addRoute(
     router,
     "delete",

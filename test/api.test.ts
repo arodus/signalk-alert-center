@@ -135,6 +135,19 @@ function fixture() {
   registerAlertCenterRoutes(router, {
     repository: () => repository,
     listNotifiers: () => [{ id: "ntfy-main", type: "ntfy" }],
+    testNotifier: (id, operation) =>
+      id === "ntfy-main"
+        ? {
+            status: "success",
+            category: "success",
+            message: "Test accepted",
+            durationMs: 12,
+            operation,
+            service: { id, type: "ntfy" },
+          }
+        : id === "busy"
+          ? "in_progress"
+          : "not_found",
     subscribeChanges: (listener) => {
       changeListener = listener;
       listener({
@@ -177,7 +190,36 @@ describe("alert-center routes", () => {
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
     expect(access.filter((value) => value === "readonly")).toHaveLength(11);
-    expect(access.filter((value) => value === "readwrite")).toHaveLength(6);
+    expect(access.filter((value) => value === "readwrite")).toHaveLength(7);
+  });
+
+  it("runs dedicated service tests and validates their operation", async () => {
+    const current = fixture();
+    const result = await current.invoke("POST", "/notifiers/:id/test", {
+      params: { id: "ntfy-main" },
+      body: { operation: "send" },
+    });
+    expect(result.body).toMatchObject({
+      status: "success",
+      operation: "send",
+      service: { id: "ntfy-main" },
+    });
+
+    const invalid = await current.invoke("POST", "/notifiers/:id/test", {
+      params: { id: "ntfy-main" },
+      body: { operation: "trigger" },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.body).toMatchObject({
+      error: { code: "INVALID_BODY" },
+    });
+
+    const busy = await current.invoke("POST", "/notifiers/:id/test", {
+      params: { id: "busy" },
+      body: { operation: "send" },
+    });
+    expect(busy.statusCode).toBe(409);
+    expect(busy.body).toMatchObject({ error: { code: "TEST_IN_PROGRESS" } });
   });
 
   it("pages delivery summaries, details, attempts, and retries", async () => {
