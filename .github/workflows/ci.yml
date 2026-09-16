@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [main]
@@ -22,6 +23,9 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:integration
+      - run: npm run build
+      - run: npm run package:check
+      - run: npm run package:smoke
 
   acceptance:
     runs-on: ubuntu-latest
