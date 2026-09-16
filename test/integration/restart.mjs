@@ -4,12 +4,12 @@ import { spawnSync } from "node:child_process";
 const compose = [
   "compose",
   "-p",
-  "notifier-restart",
+  "alert-center-restart",
   "-f",
   "docker-compose.acceptance.yml",
 ];
 const base = process.env.SIGNALK_RESTART_URL ?? "http://127.0.0.1:3300";
-const api = `${base}/plugins/signalk-persistent-notifier`;
+const api = `${base}/plugins/signalk-alert-center`;
 const fixture = `${base}/plugins/signalk-test-fixture`;
 const mock = process.env.NOTIFIER_MOCK_URL ?? "http://127.0.0.1:18080";
 const run = (args) => {
@@ -61,9 +61,9 @@ try {
   );
   const plugins = await json(`${base}/skServer/plugins`);
   const notifierPlugin = plugins.find(
-    (plugin) => plugin.id === "signalk-persistent-notifier",
+    (plugin) => plugin.id === "signalk-alert-center",
   );
-  await json(`${base}/skServer/plugins/signalk-persistent-notifier/config`, {
+  await json(`${base}/skServer/plugins/signalk-alert-center/config`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -86,6 +86,40 @@ try {
     () => json(`${api}/notifiers`),
     (page) => page.items?.some((item) => item.id === "Restart mock"),
     "mock notifier configuration",
+  );
+  run(["stop", "signalk"]);
+  run([
+    "run",
+    "--rm",
+    "--no-deps",
+    "--entrypoint",
+    "sh",
+    "signalk",
+    "-c",
+    "mv /home/node/.signalk/plugin-config-data/signalk-alert-center.json /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json",
+  ]);
+  run(["up", "-d", "--wait", "signalk"]);
+  run([
+    "exec",
+    "-T",
+    "signalk",
+    "test",
+    "-f",
+    "/home/node/.signalk/plugin-config-data/signalk-alert-center.json",
+  ]);
+  run([
+    "exec",
+    "-T",
+    "signalk",
+    "test",
+    "!",
+    "-e",
+    "/home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json",
+  ]);
+  await eventually(
+    () => json(`${api}/notifiers`),
+    (page) => page.items?.some((item) => item.id === "Restart mock"),
+    "notifier retained after plugin-id migration",
   );
   await json(`${api}/definitions/${encodeURIComponent(definition.id)}/policy`, {
     method: "PATCH",

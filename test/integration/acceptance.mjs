@@ -52,7 +52,7 @@ assert.equal(captured[0].headers["x-fixture"], "one");
 await json(`${signalkUrl}/signalk`);
 const eventController = new AbortController();
 const eventResponse = await fetch(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/events`,
+  `${signalkUrl}/plugins/signalk-alert-center/events`,
   { signal: eventController.signal },
 );
 assert.equal(eventResponse.status, 200);
@@ -70,9 +70,7 @@ await json(`${signalkUrl}/plugins/signalk-test-fixture/reset`, {
 });
 const definitionPage = await eventually(
   () =>
-    json(
-      `${signalkUrl}/plugins/signalk-persistent-notifier/definitions?limit=100`,
-    ),
+    json(`${signalkUrl}/plugins/signalk-alert-center/definitions?limit=100`),
   (page) =>
     page.items.some(
       (item) =>
@@ -87,7 +85,7 @@ const definition = definitionPage.items.find(
     "notifications.environment.inside.refrigerator.temperature",
 );
 const updatedDefinition = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}/policy`,
+  `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}/policy`,
   {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -126,7 +124,7 @@ assert.equal(
 const occurrencePage = await eventually(
   () =>
     json(
-      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
+      `${signalkUrl}/plugins/signalk-alert-center/occurrences?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
     ),
   (page) => page.items.length === 1,
   "raised occurrence was not persisted",
@@ -135,14 +133,14 @@ const occurrence = occurrencePage.items[0];
 assert.equal(occurrence.oneTime, true);
 assert.equal(occurrence.message, "Acceptance alert");
 const events = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences/${occurrence.id}/events`,
+  `${signalkUrl}/plugins/signalk-alert-center/occurrences/${occurrence.id}/events`,
 );
 assert.equal(
   events.items.some((event) => event.eventType === "raised"),
   true,
 );
 const alertHistory = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/alert-history?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
+  `${signalkUrl}/plugins/signalk-alert-center/alert-history?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
 );
 const raisedHistory = alertHistory.items.find(
   (event) => event.alertId === occurrence.id && event.eventType === "raised",
@@ -151,14 +149,12 @@ assert.equal(Boolean(raisedHistory), true);
 assert.equal(raisedHistory.message, "Acceptance alert");
 assert.equal(Object.hasOwn(raisedHistory, "deliveries"), false);
 const activeRemoval = await fetch(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+  `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}`,
   { method: "DELETE" },
 );
 assert.equal(activeRemoval.status, 409);
 
-const status = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/status`,
-);
+const status = await json(`${signalkUrl}/plugins/signalk-alert-center/status`);
 assert.equal(status.alerts.total >= 1, true);
 assert.equal(
   ["healthy", "degraded", "fault"].includes(status.health.state),
@@ -169,9 +165,7 @@ assert.equal(status.database.schemaVersion, 9);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);
-const alerts = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/alerts`,
-);
+const alerts = await json(`${signalkUrl}/plugins/signalk-alert-center/alerts`);
 assert.equal(
   alerts.some(
     (alert) =>
@@ -196,7 +190,7 @@ await json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
 const repeated = await eventually(
   () =>
     json(
-      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
+      `${signalkUrl}/plugins/signalk-alert-center/occurrences?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
     ),
   (page) => page.items.length === 2,
   "re-raised occurrence was not persisted",
@@ -210,21 +204,21 @@ await json(`${signalkUrl}/plugins/signalk-test-fixture/clear`, {
 await eventually(
   () =>
     json(
-      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences/${repeated.items[0].id}`,
+      `${signalkUrl}/plugins/signalk-alert-center/occurrences/${repeated.items[0].id}`,
     ),
   (item) => item.state === "cleared",
   "re-raised occurrence did not clear",
 );
 await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+  `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}`,
   { method: "DELETE" },
 );
 const removedDefinition = await fetch(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+  `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}`,
 );
 assert.equal(removedDefinition.status, 404);
 const removedOccurrences = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
+  `${signalkUrl}/plugins/signalk-alert-center/occurrences?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
 );
 assert.equal(removedOccurrences.items.length, 0);
 
@@ -234,9 +228,7 @@ const seeded = await json(`${signalkUrl}/plugins/signalk-test-fixture/seed`, {
 assert.equal(seeded.published, 12);
 const demoOccurrences = await eventually(
   () =>
-    json(
-      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
-    ),
+    json(`${signalkUrl}/plugins/signalk-alert-center/occurrences?limit=100`),
   (page) => page.items.length >= 9,
   "demo deltas were not persisted",
 );
@@ -249,9 +241,9 @@ assert.equal(
 
 const plugins = await json(`${signalkUrl}/skServer/plugins`);
 const notifierPlugin = plugins.find(
-  (plugin) => plugin.id === "signalk-persistent-notifier",
+  (plugin) => plugin.id === "signalk-alert-center",
 );
-assert.ok(notifierPlugin, "persistent notifier is listed by Signal K");
+assert.ok(notifierPlugin, "alert center is listed by Signal K");
 const configurationWithTestService = {
   ...notifierPlugin.data.configuration,
   notifiers: [
@@ -263,31 +255,28 @@ const configurationWithTestService = {
     },
   ],
 };
-await json(
-  `${signalkUrl}/skServer/plugins/signalk-persistent-notifier/config`,
-  {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...notifierPlugin.data,
-      configuration: configurationWithTestService,
-    }),
-  },
-);
+await json(`${signalkUrl}/skServer/plugins/signalk-alert-center/config`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    ...notifierPlugin.data,
+    configuration: configurationWithTestService,
+  }),
+});
 await eventually(
-  () => json(`${signalkUrl}/plugins/signalk-persistent-notifier/notifiers`),
+  () => json(`${signalkUrl}/plugins/signalk-alert-center/notifiers`),
   (page) => page.items.some((item) => item.id === "Acceptance ntfy"),
   "test notification service was not configured",
 );
 const occurrencesBeforeTest = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
+  `${signalkUrl}/plugins/signalk-alert-center/occurrences?limit=100`,
 );
 const deliveriesBeforeTest = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/deliveries?limit=100`,
+  `${signalkUrl}/plugins/signalk-alert-center/deliveries?limit=100`,
 );
 await json(`${mockUrl}/reset`, { method: "POST" });
 const serviceTest = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/notifiers/${encodeURIComponent("Acceptance ntfy")}/test`,
+  `${signalkUrl}/plugins/signalk-alert-center/notifiers/${encodeURIComponent("Acceptance ntfy")}/test`,
   {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -300,16 +289,13 @@ assert.equal(serviceTest.service.id, "Acceptance ntfy");
 const testRequests = await json(`${mockUrl}/requests`);
 assert.equal(testRequests.length, 1);
 assert.equal(testRequests[0].url, "/manual-test");
-assert.equal(
-  testRequests[0].headers.title,
-  "TEST: Signal K Persistent Notifier",
-);
+assert.equal(testRequests[0].headers.title, "TEST: Signal K Alert Center");
 assert.match(testRequests[0].body, /not a vessel alert/);
 const occurrencesAfterTest = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
+  `${signalkUrl}/plugins/signalk-alert-center/occurrences?limit=100`,
 );
 const deliveriesAfterTest = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/deliveries?limit=100`,
+  `${signalkUrl}/plugins/signalk-alert-center/deliveries?limit=100`,
 );
 assert.deepEqual(
   occurrencesAfterTest.items.map((item) => item.id),
@@ -319,42 +305,35 @@ assert.deepEqual(
   deliveriesAfterTest.items.map((item) => item.id),
   deliveriesBeforeTest.items.map((item) => item.id),
 );
-await json(
-  `${signalkUrl}/skServer/plugins/signalk-persistent-notifier/config`,
-  {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...notifierPlugin.data,
-      configuration: {
-        ...configurationWithTestService,
-        maintenance: { resetDatabase: true },
-      },
-    }),
-  },
-);
+await json(`${signalkUrl}/skServer/plugins/signalk-alert-center/config`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    ...notifierPlugin.data,
+    configuration: {
+      ...configurationWithTestService,
+      maintenance: { resetDatabase: true },
+    },
+  }),
+});
 await eventually(
   () => json(`${signalkUrl}/skServer/plugins`),
   (items) => {
-    const plugin = items.find(
-      (item) => item.id === "signalk-persistent-notifier",
-    );
+    const plugin = items.find((item) => item.id === "signalk-alert-center");
     return plugin?.data.configuration?.maintenance?.resetDatabase === false;
   },
   "one-shot database reset setting was not cleared",
 );
 await eventually(
   () =>
-    json(
-      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
-    ),
+    json(`${signalkUrl}/plugins/signalk-alert-center/occurrences?limit=100`),
   (page) => !page.items.some((item) => item.id === occurrence.id),
   "database reset retained an old occurrence",
 );
 await eventually(
   () =>
     json(
-      `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+      `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}`,
     ),
   (item) => item.policy.activationDelaySeconds === 0,
   "database reset did not restore the default alert policy",

@@ -1,21 +1,25 @@
 {
-  "name": "signalk-persistent-notifier",
+  "name": "signalk-alert-center",
   "version": "0.1.0",
   "description": "Durable offline-first Signal K alert delivery plugin",
   "author": "Sebastian Karasek",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/arodus/signalk-persistent-notifier.git"
+    "url": "git+https://github.com/arodus/signalk-alert-center.git"
   },
-  "homepage": "https://github.com/arodus/signalk-persistent-notifier#readme",
+  "homepage": "https://github.com/arodus/signalk-alert-center#readme",
   "bugs": {
-    "url": "https://github.com/arodus/signalk-persistent-notifier/issues"
+    "url": "https://github.com/arodus/signalk-alert-center/issues"
   },
   "main": "dist/plugin.js",
   "types": "dist/plugin.d.ts",
+  "bin": {
+    "signalk-alert-center-migrate": "scripts/migrate-name.mjs"
+  },
   "files": [
     "dist",
     "public",
+    "scripts/migrate-name.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -51,6 +55,7 @@
     "format:check": "prettier --check .",
     "package:check": "node scripts/verify-package.mjs",
     "package:smoke": "node scripts/smoke-package.mjs",
+    "migrate:name": "node scripts/migrate-name.mjs",
     "release:check": "npm run format:check && npm run typecheck && npm test && npm run build && npm run package:check && npm run package:smoke",
     "prepack": "npm run build"
   },
@@ -63,7 +68,7 @@
     "vitest": "^2.1.8"
   },
   "signalKPlugin": {
-    "id": "signalk-persistent-notifier"
+    "id": "signalk-alert-center"
   },
   "signalk-plugin-enabled-by-default": false
 }

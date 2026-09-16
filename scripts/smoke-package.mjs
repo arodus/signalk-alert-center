@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const temporaryDirectory = mkdtempSync(
-  join(tmpdir(), "persistent-notifier-package-smoke-"),
+  join(tmpdir(), "alert-center-package-smoke-"),
 );
 const npmCache = join(temporaryDirectory, "npm-cache");
 let packageFile;
@@ -47,18 +47,19 @@ try {
   const installedRoot = join(
     installRoot,
     "node_modules",
-    "signalk-persistent-notifier",
+    "signalk-alert-center",
   );
   const installedPackage = JSON.parse(
     readFileSync(join(installedRoot, "package.json"), "utf8"),
   );
-  if (installedPackage.signalKPlugin?.id !== "signalk-persistent-notifier")
+  if (installedPackage.signalKPlugin?.id !== "signalk-alert-center")
     throw new Error("Installed package has the wrong Signal K plugin id");
   for (const required of [
     installedPackage.main,
     "public/index.html",
     "public/app.js",
     "public/styles.css",
+    "scripts/migrate-name.mjs",
   ])
     if (!existsSync(join(installedRoot, required)))
       throw new Error(`Installed package is missing ${required}`);

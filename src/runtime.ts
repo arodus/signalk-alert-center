@@ -66,7 +66,7 @@ interface DefinitionView extends AlertDefinitionRecord {
   policy: EffectivePolicy;
 }
 
-export class PersistentNotifierRuntime {
+export class AlertCenterRuntime {
   private database?: AlertDatabase;
   private scheduler?: DeliveryScheduler;
   private connectivity?: ConnectivityManager;
@@ -275,12 +275,12 @@ export class PersistentNotifierRuntime {
   }
 
   private debug(message: string): void {
-    this.app.debug(`[persistent-notifier] ${message}`);
+    this.app.debug(`[alert-center] ${message}`);
   }
 
   private reportAsyncError(context: string, error: unknown): void {
     this.app.error(
-      `[persistent-notifier] ${context}: ${
+      `[alert-center] ${context}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -299,7 +299,7 @@ export class PersistentNotifierRuntime {
       } catch (error) {
         this.changeListeners.delete(listener);
         this.app.error(
-          `[persistent-notifier] Removed failed dashboard event listener: ${error instanceof Error ? error.message : String(error)}`,
+          `[alert-center] Removed failed dashboard event listener: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -323,7 +323,7 @@ export class PersistentNotifierRuntime {
     if (summary?.processed) {
       const message = `Delivery batch: processed=${summary.processed}, succeeded=${summary.succeeded}, retryableFailures=${summary.retryableFailures}, terminalFailures=${summary.terminalFailures}`;
       if (summary.retryableFailures || summary.terminalFailures)
-        this.app.error(`[persistent-notifier] ${message}`);
+        this.app.error(`[alert-center] ${message}`);
       else this.debug(message);
     }
     if (this.connectivity && this.database?.pendingDeliveryCount() === 0)
@@ -411,7 +411,7 @@ export class PersistentNotifierRuntime {
       this.lastQueueWarningAt = Date.now();
       const stats = this.ingestionQueue.stats();
       this.app.error(
-        `[persistent-notifier] Notification ingestion queue reached its ${stats.limit}-entry limit; rejected=${stats.rejected}, depth=${stats.depth}. Alert transitions may be missing.`,
+        `[alert-center] Notification ingestion queue reached its ${stats.limit}-entry limit; rejected=${stats.rejected}, depth=${stats.depth}. Alert transitions may be missing.`,
       );
     }
     if (!this.reconcilingStartup) this.scheduleIngestionDrain();
@@ -1203,7 +1203,7 @@ export class PersistentNotifierRuntime {
     } catch (error) {
       const durationMs = Date.now() - startedAt;
       this.app.error(
-        `[persistent-notifier] Manual service test failed: service=${notifier.name}, type=${notifier.type}, outcome=internal, durationMs=${durationMs}`,
+        `[alert-center] Manual service test failed: service=${notifier.name}, type=${notifier.type}, outcome=internal, durationMs=${durationMs}`,
       );
       throw error;
     } finally {

@@ -2,14 +2,14 @@ import { Plugin, ServerAPI } from "@signalk/server-api";
 import { getAlertCenterOpenApi } from "./api/openapi";
 import { PluginConfig } from "./config";
 import { pluginConfigSchema, pluginUiSchema } from "./config-schema";
-import { PersistentNotifierRuntime } from "./runtime";
+import { AlertCenterRuntime } from "./runtime";
 
-export = function persistentNotifier(app: ServerAPI): Plugin {
-  const runtime = new PersistentNotifierRuntime(app);
+export = function alertCenter(app: ServerAPI): Plugin {
+  const runtime = new AlertCenterRuntime(app);
 
   return {
-    id: "signalk-persistent-notifier",
-    name: "Persistent notifier",
+    id: "signalk-alert-center",
+    name: "Signal K Alert Center",
     description: "Offline-first durable Signal K alert delivery",
     schema: pluginConfigSchema,
     uiSchema: pluginUiSchema,
@@ -23,9 +23,9 @@ export = function persistentNotifier(app: ServerAPI): Plugin {
             resetDatabase: false,
           },
         };
-        app.debug("[persistent-notifier] Resetting alert database");
+        app.debug("[alert-center] Resetting alert database");
         runtime.resetDatabase(config);
-        app.debug("[persistent-notifier] Alert database reset complete");
+        app.debug("[alert-center] Alert database reset complete");
         setImmediate(() => restart(nextConfiguration));
         return;
       }

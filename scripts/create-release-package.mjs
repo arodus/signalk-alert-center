@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const npmCache = mkdtempSync(join(tmpdir(), "persistent-notifier-npm-cache-"));
+const npmCache = mkdtempSync(join(tmpdir(), "alert-center-npm-cache-"));
 const packed = spawnSync("npm", ["pack", "--json"], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "inherit"],
