@@ -51,24 +51,10 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await expect(page.locator("#policy-remove-help")).toContainText(
     "Clear it in Signal K",
   );
-  await expect(page.getByRole("group", { name: "Local sound" })).toBeVisible();
-  await expect(page.locator("#audio-sound")).toHaveValue("severity");
-  await expect(page.locator("#audio-sound option")).toHaveCount(5);
   await expect(page.locator("#policy-inheritance-status")).toHaveText(
     "Using global defaults",
   );
   await expect(page.locator("#policy-reset")).toBeDisabled();
-  const audioModeSetting = page.locator('[data-policy-field="audio.mode"]');
-  await expect(audioModeSetting.locator("#audio-mode")).toBeDisabled();
-  await audioModeSetting
-    .getByRole("button", { name: "Customize playback behavior" })
-    .click();
-  await expect(audioModeSetting.locator("#audio-mode")).toBeEnabled();
-  await expect(page.locator("#policy-inheritance-status")).toHaveText(
-    "1 custom setting",
-  );
-  await page.locator("#audio-mode").selectOption("repeat");
-  await expect(page.locator("#audio-repeat-field")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await page.locator("#drawer-close").click();
 
@@ -206,7 +192,7 @@ test("saves a notification service after changing its type", async ({
   await page.goto("/admin/#/apps/configuration/signalk-persistent-notifier");
   await expect(
     page.getByText("Enable local audio playback", { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   const services = page.locator("#root_configuration_notifiers");
   await services.getByRole("button").last().click();
   await page.locator("#root_configuration_notifiers_0_name").fill("Bridge");

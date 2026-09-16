@@ -103,10 +103,7 @@ describe("PersistentNotifierRuntime", () => {
         },
       },
     } as unknown as ServerAPI;
-    const playAudio = vi.fn(async () => ({ backend: "fake" }));
-    const runtime = new PersistentNotifierRuntime(app, () => ({
-      play: playAudio,
-    }));
+    const runtime = new PersistentNotifierRuntime(app);
     runtime.start({
       storage: { path: filename },
       notifiers: [
@@ -129,16 +126,6 @@ describe("PersistentNotifierRuntime", () => {
         oneTime: true,
         minSeverity: "alarm",
         notifiers: ["warning", "critical"],
-      },
-      audio: {
-        enabled: true,
-        defaults: {
-          enabled: true,
-          sound: "alarm",
-          minimumSeverity: "warn",
-          mode: "repeat",
-          repeatIntervalSeconds: 60,
-        },
       },
     });
     expect(getPath).not.toHaveBeenCalled();
@@ -187,7 +174,7 @@ describe("PersistentNotifierRuntime", () => {
           rejected: 0,
         },
         scheduler: { running: false, activeRequests: 0 },
-        database: { healthy: true, schemaVersion: 7, expectedSchemaVersion: 7 },
+        database: { healthy: true, schemaVersion: 8, expectedSchemaVersion: 8 },
         services: [
           {
             id: "warning",
@@ -218,10 +205,6 @@ describe("PersistentNotifierRuntime", () => {
     expect(
       await repository.acknowledgeOccurrence(active.items[0].id),
     ).toMatchObject({ upstream: "applied" });
-    expect(playAudio).toHaveBeenCalledWith("alarm", expect.any(AbortSignal));
-    expect(
-      runtimeDatabase.getAudioPlaybackForAlert(active.items[0].id),
-    ).toMatchObject({ state: "cancelled", playCount: 1 });
     expect(
       await repository.silenceOccurrence(active.items[0].id),
     ).toMatchObject({

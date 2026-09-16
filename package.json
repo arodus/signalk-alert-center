@@ -1,7 +1,7 @@
 {
   "name": "signalk-persistent-notifier",
   "version": "0.1.0",
-  "description": "Durable offline-first Signal K alert audio and delivery plugin",
+  "description": "Durable offline-first Signal K alert delivery plugin",
   "main": "dist/plugin.js",
   "types": "dist/plugin.d.ts",
   "files": [

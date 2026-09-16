@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 7;
+export const currentSchemaVersion = 8;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -171,6 +171,21 @@ UPDATE audio_playbacks
 SET stop_on_json = json_remove(stop_on_json, '$.dismiss');
 DELETE FROM alert_events WHERE event_type='dismissed';
 ALTER TABLE alert_occurrences DROP COLUMN dismissed_at;
+`,
+  },
+  {
+    version: 8,
+    sql: `
+UPDATE alert_policies
+SET override_fields_json = (
+  SELECT json_group_array(value)
+  FROM json_each(alert_policies.override_fields_json)
+  WHERE value NOT LIKE 'audio.%'
+);
+DELETE FROM alert_events WHERE event_type LIKE 'audio_%';
+DROP TABLE audio_attempts;
+DROP TABLE audio_playbacks;
+ALTER TABLE alert_policies DROP COLUMN audio_policy_json;
 `,
   },
 ];

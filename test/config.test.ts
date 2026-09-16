@@ -5,6 +5,7 @@ import { pluginConfigSchema } from "../src/config-schema";
 describe("validateConfig", () => {
   it("exposes only global settings in the Signal K plugin form", () => {
     expect(pluginConfigSchema.properties).not.toHaveProperty("rules");
+    expect(pluginConfigSchema.properties).not.toHaveProperty("audio");
     const notifierItems = pluginConfigSchema.properties.notifiers.items;
     const variants = notifierItems.dependencies.type.oneOf;
     expect(pluginConfigSchema.properties.notifiers.type).toBe("array");
@@ -94,123 +95,6 @@ describe("validateConfig", () => {
     expect(() =>
       validateConfig({ ingestion: { queueLimit: 10, batchSize: 11 } }),
     ).toThrow("must not exceed");
-  });
-
-  it("keeps local audio opt-in and defaults new alerts to severity-matched sounds", () => {
-    const audio = pluginConfigSchema.properties.audio;
-    expect(audio.properties.enabled.default).toBe(false);
-    expect(audio.properties.defaults.properties.enabled.default).toBe(false);
-    expect(audio.properties.defaults.properties.sound).toBeUndefined();
-    expect(
-      audio.properties.beforePlaybackCommand.properties.executable.title,
-    ).toBe("Executable");
-    expect(
-      audio.properties.afterPlaybackCommand.properties.arguments.type,
-    ).toBe("array");
-    expect(
-      audio.properties.sessionStartCommand.properties.executable.title,
-    ).toBe("Start executable");
-    expect(audio.properties.sessionIdleCooldownSeconds.default).toBe(30);
-    expect(audio.properties.customSounds.items.properties.filePath.title).toBe(
-      "WAV file path",
-    );
-    expect(() =>
-      validateConfig({
-        audio: {
-          enabled: true,
-          backend: "aplay",
-          masterVolume: 80,
-          customSounds: [
-            { name: "Ship bell", filePath: "sounds/ship-bell.wav" },
-          ],
-          defaults: { sound: "severity", repeatIntervalSeconds: 60 },
-        },
-      }),
-    ).not.toThrow();
-    expect(() =>
-      validateConfig({
-        audio: {
-          customSounds: [
-            { name: "Ship bell", filePath: "sounds/ship-bell.mp3" },
-          ],
-        },
-      }),
-    ).toThrow("must reference a .wav file");
-    expect(() =>
-      validateConfig({
-        audio: {
-          customSounds: [
-            { name: "Bell", filePath: "one.wav" },
-            { name: "bell", filePath: "two.wav" },
-          ],
-        },
-      }),
-    ).toThrow("must be unique");
-    expect(() =>
-      validateConfig({
-        audio: {
-          beforePlaybackCommand: {},
-          afterPlaybackCommand: { arguments: [] },
-        },
-      }),
-    ).not.toThrow();
-    expect(() =>
-      validateConfig({
-        audio: {
-          beforePlaybackCommand: { arguments: ["pause"] },
-        },
-      }),
-    ).toThrow("must name an executable");
-    expect(() => validateConfig({ audio: { masterVolume: 101 } })).toThrow(
-      "audio.masterVolume",
-    );
-    expect(() =>
-      validateConfig({
-        audio: {
-          quietHours: { enabled: true, start: "bad", end: "07:00" },
-        },
-      }),
-    ).toThrow("quiet hours");
-    expect(() =>
-      validateConfig({
-        audio: {
-          beforePlaybackCommand: {
-            executable: "/usr/bin/mpc",
-            arguments: ["pause"],
-          },
-          afterPlaybackCommand: {
-            executable: "/usr/bin/mpc",
-            arguments: ["play"],
-          },
-          commandTimeoutSeconds: 10,
-        },
-      }),
-    ).not.toThrow();
-    expect(() =>
-      validateConfig({
-        audio: {
-          beforePlaybackCommand: {
-            executable: "bad\0command",
-          },
-        },
-      }),
-    ).toThrow("beforePlaybackCommand");
-    expect(() =>
-      validateConfig({
-        audio: {
-          sessionStartCommand: { executable: "/usr/local/bin/amp-on" },
-        },
-      }),
-    ).toThrow("must be configured together");
-    expect(() =>
-      validateConfig({
-        audio: {
-          sessionStartCommand: { executable: "/usr/local/bin/amp-on" },
-          sessionStopCommand: { executable: "/usr/local/bin/amp-off" },
-          sessionIdleCooldownSeconds: 30,
-        },
-      }),
-    ).not.toThrow();
   });
 
   it("rejects invalid notifier credentials", () => {

@@ -4,7 +4,6 @@ const state = {
   occurrences: [],
   activeDefinitionIds: new Set(),
   notifiers: [],
-  audioSounds: [],
   deliveries: [],
   occurrenceCursor: undefined,
   deliveryCursor: undefined,
@@ -83,14 +82,6 @@ const policyFieldNames = {
   rearmAfterSeconds: "repeat while active",
   connectivity: "internet connection behavior",
   notifierIds: "notification services",
-  "audio.enabled": "local sound",
-  "audio.sound": "sound",
-  "audio.minimumSeverity": "lowest audio severity",
-  "audio.mode": "playback behavior",
-  "audio.repeatIntervalSeconds": "audio repeat interval",
-  "audio.stopOn.clear": "stop sound when cleared",
-  "audio.stopOn.acknowledge": "stop sound when acknowledged",
-  "audio.stopOn.silence": "stop sound when silenced",
 };
 
 async function api(path, options = {}) {
@@ -143,7 +134,6 @@ function renderDiagnostics(status) {
   const scheduler = status.scheduler ?? {};
   const database = status.database ?? {};
   const connectivity = status.connectivity ?? {};
-  const audio = status.audio ?? {};
   const reasons = status.health?.reasons ?? [];
   const services = status.services ?? [];
   const items = [
@@ -162,10 +152,6 @@ function renderDiagnostics(status) {
     [
       "Runtime lifecycle",
       `Generation ${runtime.generation ?? 0} · ${runtime.changeListeners ?? 0} dashboard streams · ${runtime.startCount ?? 0} starts / ${runtime.stopCount ?? 0} stops`,
-    ],
-    [
-      "Local audio",
-      `${audio.enabled ? "Enabled" : "Disabled"} · ${audio.running ? "playing" : "idle"} · ${audio.pending ?? 0} pending · last played ${formatDate(audio.lastPlayedAt)}${audio.session ? ` · session ${String(audio.session.state).replaceAll("_", " ")}${audio.session.ownedByPlugin ? " (plugin-owned)" : ""}${audio.session.stopScheduledAt ? ` until ${formatDate(audio.session.stopScheduledAt)}` : ""}` : ""}${audio.lastError ? ` · ${audio.lastError}` : ""}${audio.session?.lastError && audio.session.lastError !== audio.lastError ? ` · ${audio.session.lastError}` : ""}`,
     ],
     [
       "Pending work",
@@ -205,26 +191,6 @@ function alertName(definition) {
     .split(".")
     .map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2"))
     .join(" › ");
-}
-function audioSoundLabel(sound) {
-  return sound === "severity" ? "matches severity" : String(sound ?? "sound");
-}
-function renderAudioSoundOptions() {
-  const select = $("#audio-sound");
-  select.innerHTML = state.audioSounds
-    .map(
-      (sound) =>
-        `<option value="${escapeHtml(sound.id)}">${escapeHtml(sound.name)}${sound.type === "custom" ? " (custom)" : ""}</option>`,
-    )
-    .join("");
-}
-function ensureAudioSoundOption(sound) {
-  const select = $("#audio-sound");
-  if ([...select.options].some((option) => option.value === sound)) return;
-  select.insertAdjacentHTML(
-    "beforeend",
-    `<option value="${escapeHtml(sound)}">${escapeHtml(audioSoundLabel(sound))} (unavailable)</option>`,
-  );
 }
 function definitionOrigin(sourceType) {
   return (
@@ -365,7 +331,7 @@ function renderDefinitions() {
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Status">${status}</td>
             <td data-label="Last activity">${formatDate(latestTimestamp(latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
-            <td data-label="Notify via"><span class="cell-title">${[policy.audio?.enabled ? `🔊 ${audioSoundLabel(policy.audio.sound)}` : "", policy.enabled === false ? "" : policy.notifierIds?.join(", ")].filter(Boolean).map(escapeHtml).join(" · ") || '<span class="muted">No delivery selected</span>'}</span><span class="cell-detail">${policy.audio?.enabled ? `${escapeHtml(policy.audio.minimumSeverity)}+ local${policy.audio.mode === "repeat" ? ` · every ${policy.audio.repeatIntervalSeconds}s` : " · once"}` : ""}${policy.audio?.enabled && policy.enabled !== false && notifierCount ? " · " : ""}${policy.enabled === false ? "Remote off" : notifierCount ? `${escapeHtml(policy.minimumSeverity ?? "normal")}+ remote` : ""}</span></td>
+            <td data-label="Notify via"><span class="cell-title">${(policy.enabled === false ? "" : policy.notifierIds?.join(", ")) || '<span class="muted">No delivery selected</span>'}</span><span class="cell-detail">${policy.enabled === false ? "Remote off" : notifierCount ? `${escapeHtml(policy.minimumSeverity ?? "normal")}+ remote` : ""}</span></td>
             <td class="action-cell">${active ? `<div class="table-actions"><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="acknowledge" type="button" ${latest.acknowledgedAt ? "disabled" : ""}>${latest.acknowledgedAt ? "Acknowledged" : "Acknowledge"}</button><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="silence" type="button" ${latest.silencedAt ? "disabled" : ""}>${latest.silencedAt ? "Silenced" : "Silence"}</button></div>` : ""}</td>
           </tr>`;
           })
@@ -514,7 +480,6 @@ async function load() {
       activeOccurrences,
       occurrences,
       notifiers,
-      audioSounds,
       status,
       deliveryPage,
     ] = await Promise.all([
@@ -522,7 +487,6 @@ async function load() {
       allPages("/occurrences?state=active"),
       api(`/occurrences?${occurrenceParams()}`),
       api("/notifiers"),
-      api("/audio/sounds"),
       api("/status").catch(() => ({})),
       api("/deliveries?limit=50"),
     ]);
@@ -535,10 +499,8 @@ async function load() {
       ? pageItems(occurrences)
       : mergeById(activeOccurrences, pageItems(occurrences));
     state.notifiers = pageItems(notifiers);
-    state.audioSounds = pageItems(audioSounds);
     state.deliveries = pageItems(deliveryPage);
     state.deliveryCursor = deliveryPage.nextCursor;
-    renderAudioSoundOptions();
     state.occurrenceCursor = occurrences.nextCursor;
     elements.activeCount.textContent = activeOccurrences.length;
     elements.definitionCount.textContent =
@@ -719,12 +681,8 @@ async function openOccurrence(id) {
     );
     state.selectedOccurrence = id;
     state.eventCursor = undefined;
-    const audio = occurrence.audioPlayback;
-    const audioOutcome = audio
-      ? `<h3>Local sound</h3><div class="delivery-meta"><strong>${escapeHtml(audioSoundLabel(audio.sound))}</strong> · ${escapeHtml(String(audio.state).replaceAll("_", " "))}<div>${audio.playCount} completed play${audio.playCount === 1 ? "" : "s"}${audio.lastErrorMessage ? ` · ${escapeHtml(audio.lastErrorMessage)}` : ""}</div></div>`
-      : "";
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>${audioOutcome}${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.operation ?? "notify")} · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.operation ?? "notify")} · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
     elements.drawerResult.textContent = "";
     elements.drawerBody
       .querySelector(".drawer-settings")
@@ -776,17 +734,6 @@ function setPolicyControlValues(policy) {
   $("#rearm-after").value = policy.rearmAfterSeconds ?? "";
   $("#connectivity-mode").value = policy.connectivity?.mode ?? "queue";
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
-  const audio = policy.audio ?? {};
-  $("#audio-enabled").checked = audio.enabled === true;
-  const sound = audio.sound ?? "severity";
-  ensureAudioSoundOption(sound);
-  $("#audio-sound").value = sound;
-  $("#audio-minimum-severity").value = audio.minimumSeverity ?? "warn";
-  $("#audio-mode").value = audio.mode ?? "once";
-  $("#audio-repeat-interval").value = audio.repeatIntervalSeconds ?? 60;
-  $("#audio-stop-clear").checked = audio.stopOn?.clear !== false;
-  $("#audio-stop-acknowledge").checked = audio.stopOn?.acknowledge !== false;
-  $("#audio-stop-silence").checked = audio.stopOn?.silence !== false;
 }
 
 function applyDefaultForField(field) {
@@ -810,25 +757,6 @@ function applyDefaultForField(field) {
         input.checked = defaults.notifierIds.includes(input.value);
       });
     },
-    "audio.enabled": () =>
-      ($("#audio-enabled").checked = defaults.audio.enabled),
-    "audio.sound": () => ($("#audio-sound").value = defaults.audio.sound),
-    "audio.minimumSeverity": () =>
-      ($("#audio-minimum-severity").value = defaults.audio.minimumSeverity),
-    "audio.mode": () => {
-      $("#audio-mode").value = defaults.audio.mode;
-      toggleAudioRepeat();
-    },
-    "audio.repeatIntervalSeconds": () =>
-      ($("#audio-repeat-interval").value =
-        defaults.audio.repeatIntervalSeconds),
-    "audio.stopOn.clear": () =>
-      ($("#audio-stop-clear").checked = defaults.audio.stopOn.clear),
-    "audio.stopOn.acknowledge": () =>
-      ($("#audio-stop-acknowledge").checked =
-        defaults.audio.stopOn.acknowledge),
-    "audio.stopOn.silence": () =>
-      ($("#audio-stop-silence").checked = defaults.audio.stopOn.silence),
   };
   setters[field]?.();
 }
@@ -892,7 +820,6 @@ function openPolicy(id) {
   state.policyDefaults = policy.defaults ?? policy;
   setPolicyControlValues(policy);
   toggleWakeDelay();
-  toggleAudioRepeat();
   elements.policyResult.textContent = "";
   const remove = $("#policy-remove");
   const hasActive = state.activeDefinitionIds.has(id);
@@ -951,9 +878,6 @@ function toggleWakeDelay() {
   $("#wake-delay-field").hidden =
     $("#connectivity-mode").value !== "wake_after";
 }
-function toggleAudioRepeat() {
-  $("#audio-repeat-field").hidden = $("#audio-mode").value !== "repeat";
-}
 async function savePolicy(event) {
   event.preventDefault();
   const id = $("#policy-definition-id").value;
@@ -972,18 +896,6 @@ async function savePolicy(event) {
       mode === "wake_after"
         ? { mode, delaySeconds: Number($("#wake-delay").value) }
         : { mode },
-    audio: {
-      enabled: $("#audio-enabled").checked,
-      sound: $("#audio-sound").value,
-      minimumSeverity: $("#audio-minimum-severity").value,
-      mode: $("#audio-mode").value,
-      repeatIntervalSeconds: Number($("#audio-repeat-interval").value),
-      stopOn: {
-        clear: $("#audio-stop-clear").checked,
-        acknowledge: $("#audio-stop-acknowledge").checked,
-        silence: $("#audio-stop-silence").checked,
-      },
-    },
   };
   $("#policy-save").disabled = true;
   try {
@@ -1074,7 +986,6 @@ document.addEventListener("keydown", (event) => {
     closeDrawer();
 });
 $("#connectivity-mode").addEventListener("change", toggleWakeDelay);
-$("#audio-mode").addEventListener("change", toggleAudioRepeat);
 $("#policy-form").addEventListener("submit", savePolicy);
 $("#policy-close").addEventListener("click", () =>
   elements.policyDialog.close(),

@@ -218,24 +218,6 @@ export function getAlertCenterOpenApi() {
           },
         },
       },
-      "/audio/sounds": {
-        get: {
-          summary: "List automatic, built-in, and configured custom sounds",
-          responses: {
-            "200": response("Audio sound list", {
-              type: "object",
-              required: ["items"],
-              properties: {
-                items: {
-                  type: "array",
-                  items: { $ref: "#/components/schemas/AudioSound" },
-                },
-              },
-            }),
-            ...errors,
-          },
-        },
-      },
       "/events": {
         get: {
           summary: "Stream alert-center change notifications",
@@ -347,7 +329,6 @@ export function getAlertCenterOpenApi() {
             "reconciliation",
             "scheduler",
             "ingestion",
-            "audio",
             "connectivity",
             "alerts",
             "services",
@@ -368,7 +349,6 @@ export function getAlertCenterOpenApi() {
             reconciliation: { type: "object", additionalProperties: true },
             scheduler: { type: "object", additionalProperties: true },
             ingestion: { type: "object", additionalProperties: true },
-            audio: { type: "object", additionalProperties: true },
             connectivity: { type: "object", additionalProperties: true },
             alerts: { type: "object", additionalProperties: true },
             database: { type: "object", additionalProperties: true },
@@ -403,7 +383,6 @@ export function getAlertCenterOpenApi() {
             "activationDelaySeconds",
             "minimumSeverity",
             "connectivity",
-            "audio",
           ],
           properties: {
             enabled: { type: "boolean" },
@@ -426,7 +405,6 @@ export function getAlertCenterOpenApi() {
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             connectivity: { $ref: "#/components/schemas/Connectivity" },
-            audio: { $ref: "#/components/schemas/AudioPolicy" },
           },
         },
         Policy: {
@@ -460,14 +438,6 @@ export function getAlertCenterOpenApi() {
             "rearmAfterSeconds",
             "connectivity",
             "notifierIds",
-            "audio.enabled",
-            "audio.sound",
-            "audio.minimumSeverity",
-            "audio.mode",
-            "audio.repeatIntervalSeconds",
-            "audio.stopOn.clear",
-            "audio.stopOn.acknowledge",
-            "audio.stopOn.silence",
           ],
         },
         PolicyPatch: {
@@ -500,48 +470,6 @@ export function getAlertCenterOpenApi() {
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             connectivity: { $ref: "#/components/schemas/Connectivity" },
-            audio: { $ref: "#/components/schemas/AudioPolicy" },
-          },
-        },
-        AudioPolicy: {
-          type: "object",
-          additionalProperties: false,
-          required: [
-            "enabled",
-            "sound",
-            "minimumSeverity",
-            "mode",
-            "repeatIntervalSeconds",
-            "stopOn",
-          ],
-          properties: {
-            enabled: { type: "boolean" },
-            sound: {
-              oneOf: [
-                {
-                  type: "string",
-                  enum: ["severity", "chime", "warning", "alarm", "emergency"],
-                },
-                { type: "string", pattern: "^custom:.+$" },
-              ],
-            },
-            minimumSeverity: { $ref: "#/components/schemas/Severity" },
-            mode: { type: "string", enum: ["once", "repeat"] },
-            repeatIntervalSeconds: {
-              type: "integer",
-              minimum: 1,
-              maximum: 86400,
-            },
-            stopOn: {
-              type: "object",
-              additionalProperties: false,
-              required: ["clear", "acknowledge", "silence"],
-              properties: {
-                clear: { type: "boolean" },
-                acknowledge: { type: "boolean" },
-                silence: { type: "boolean" },
-              },
-            },
           },
         },
         Connectivity: {
@@ -616,9 +544,6 @@ export function getAlertCenterOpenApi() {
             acknowledgedAt: { type: "string", format: "date-time" },
             silencedAt: { type: "string", format: "date-time" },
             activationDueAt: { type: "string", format: "date-time" },
-            audioPlayback: {
-              $ref: "#/components/schemas/AudioPlayback",
-            },
             deliveries: {
               type: "array",
               items: { type: "object", additionalProperties: true },
@@ -689,79 +614,6 @@ export function getAlertCenterOpenApi() {
             errorCode: { type: "string" },
             errorMessage: { type: "string" },
             remoteId: { type: "string" },
-          },
-        },
-        AudioSound: {
-          type: "object",
-          required: ["id", "name", "type"],
-          properties: {
-            id: { type: "string" },
-            name: { type: "string" },
-            type: {
-              type: "string",
-              enum: ["automatic", "built-in", "custom"],
-            },
-          },
-          additionalProperties: false,
-        },
-        AudioPlayback: {
-          type: "object",
-          required: [
-            "id",
-            "alertId",
-            "state",
-            "sound",
-            "minimumSeverity",
-            "mode",
-            "repeatIntervalSeconds",
-            "stopOn",
-            "attemptCount",
-            "playCount",
-          ],
-          properties: {
-            id: { type: "string" },
-            alertId: { type: "string" },
-            state: {
-              type: "string",
-              enum: [
-                "queued",
-                "waiting_severity",
-                "playing",
-                "completed",
-                "cancelled",
-                "failed_retryable",
-                "failed_terminal",
-              ],
-            },
-            sound: {
-              oneOf: [
-                {
-                  type: "string",
-                  enum: ["severity", "chime", "warning", "alarm", "emergency"],
-                },
-                { type: "string", pattern: "^custom:.+$" },
-              ],
-            },
-            minimumSeverity: { $ref: "#/components/schemas/Severity" },
-            mode: { type: "string", enum: ["once", "repeat"] },
-            repeatIntervalSeconds: { type: "integer", minimum: 1 },
-            stopOn: {
-              type: "object",
-              required: ["clear", "acknowledge", "silence"],
-              properties: {
-                clear: { type: "boolean" },
-                acknowledge: { type: "boolean" },
-                silence: { type: "boolean" },
-              },
-              additionalProperties: false,
-            },
-            attemptCount: { type: "integer", minimum: 0 },
-            playCount: { type: "integer", minimum: 0 },
-            nextPlayAt: { type: "string", format: "date-time" },
-            lastStartedAt: { type: "string", format: "date-time" },
-            lastFinishedAt: { type: "string", format: "date-time" },
-            lastErrorCode: { type: "string" },
-            lastErrorMessage: { type: "string" },
           },
         },
         Event: {

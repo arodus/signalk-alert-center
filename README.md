@@ -1,8 +1,8 @@
 # Signal K Persistent Notifier
 
-An offline-first Signal K plugin for durable server-side audio and alert delivery
-through ntfy, PagerDuty, and Discord. Alerts, local playback work, and independent
-per-notifier delivery rows are stored in SQLite before external work begins.
+An offline-first Signal K plugin for durable alert delivery through ntfy,
+PagerDuty, and Discord. Alerts and independent per-notifier delivery rows are
+stored in SQLite before external work begins.
 
 ## Alert center
 
@@ -21,14 +21,11 @@ retries and attempt histories remain independent.
 
 One-time behavior is snapshotted when an occurrence starts. Every occurrence
 remains available in history, and a later raise creates a distinct occurrence.
-Per-definition settings cover enabled state, minimum severity,
-notifiers, local sound, activation delay, repeat intervals, stop behavior, and
-connectivity mode.
+Per-definition settings cover enabled state, minimum severity, notifiers,
+activation delay, repeat intervals, and connectivity mode.
 
-Local sound playback runs on the Signal K server and continues with no dashboard
-open. It supports four built-in sounds, play-once or repeat-while-active behavior,
-quiet hours, and configurable stopping on clear, acknowledge, or silence.
-Text-to-speech remains separate follow-up work.
+Local playback is intentionally outside this plugin. The former playback
+implementation is preserved on the `archive/local-playback` branch.
 
 See the [gap assessment and acceptance scenarios](IMPLEMENTATION_BRIEF.md#product-goal-and-gap-assessment-2026-09-06)
 for verified source findings, required behavior, and unresolved scope decisions.
@@ -50,20 +47,18 @@ following boundaries explicit:
 | Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                                        |
 | Ingestion       | An all-source subscription feeds one bounded worker. Equivalent pending updates coalesce, transitions stay ordered, and queue pressure is observable. `$source`, source time, receipt time, and raw values are persisted. Null/normal values clear an occurrence. |
 | Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                                |
-| Stored removal  | Removing an inactive stored alert deletes its definition, per-alert settings, occurrences, history, deliveries, and audio work. Signal K can rediscover it using current defaults.                                                                                |
+| Stored removal  | Removing an inactive stored alert deletes its definition, per-alert settings, occurrences, history, deliveries, and related queued work. Signal K can rediscover it using current defaults.                                                                       |
 | Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                |
 | Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                            |
 | PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                   |
-| Local audio     | A durable serial queue invokes an allow-listed player without a shell. Optional administrator-configured pre/post executables also receive literal argument arrays. Built-in sounds, outcomes, repeats, and cancellation are recorded per occurrence.             |
 | API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                           |
 
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player)
 is a useful product reference: it discovers known/configured notifications, opens
-per-path recent history, persists zone transitions even when audio is disabled,
-and supports per-path playback controls. Its synchronous JSON log, large untyped
-single module, mutable GET endpoints, and playback-specific queue should not be
-copied. This plugin's SQLite occurrence/event model and authenticated REST
-mutations are the better base for durable remote delivery.
+per-path recent history, and persists zone transitions. Its synchronous JSON log,
+large untyped single module, and mutable GET endpoints should not be copied. This
+plugin's SQLite occurrence/event model and authenticated REST mutations are the
+better base for durable remote delivery.
 
 ## Dashboard behavior
 
@@ -86,7 +81,7 @@ for state and severity.
 
 The settings dialog provides **Remove stored alert** for inactive alerts. This is
 a destructive definition-level action: it deletes the alert's per-alert settings,
-all occurrences and events, delivery attempts, audio state, and related queued work.
+all occurrences and events, delivery attempts, and related queued work.
 It never clears the upstream Signal K alert, so active alerts must be cleared at
 their source first. A zone or notification path still present in Signal K will be
 discovered again and will inherit the current global defaults.
@@ -352,11 +347,11 @@ When `storage.path` is relative, it is resolved from that data directory. An abs
 path remains supported when you intentionally manage the database elsewhere.
 
 The Signal K plugin form contains only global configuration: storage/discovery,
-bounded ingestion and delivery limits, retry behavior, notifier connections and secrets, local audio
-hardware/defaults, and optional connectivity management. Optional **History retention** removes only
+bounded ingestion and delivery limits, retry behavior, notifier connections and
+secrets, and optional connectivity management. Optional **History retention** removes only
 cleared occurrences older than the configured age, in bounded batches. It is
 disabled by default and always protects active alerts, pending/retryable/in-flight
-deliveries, unfinished audio playback, and persisted wake requests. Retention status and the most recent
+deliveries, and persisted wake requests. Retention status and the most recent
 cleanup counts are available from `/status`.
 
 The form also contains a destructive, one-shot database reset
@@ -371,8 +366,8 @@ Database maintenance appears last in the plugin settings. Each notification
 service has one **Service type** selector. Changing it immediately replaces the
 connection fields with those required by ntfy, PagerDuty, or Discord.
 
-Per-alert notifier selection, local sound behavior, minimum severity, activation
-delay, repeat interval, and connectivity policy are stored from the Alert center's
+Per-alert notifier selection, minimum severity, activation delay, repeat interval,
+and connectivity policy are stored from the Alert center's
 **Settings** dialog. A
 notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
 that notifier send at a lower severity.
@@ -383,89 +378,7 @@ Renaming a service does not rewrite saved alert policies, so reselect the rename
 service on affected alerts. The Signal K form only asks for credentials relevant to
 the selected service type.
 
-Repeated updates coalesce by notification path and available source identifier. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. Local playback has an independent durable queue, so player failures never block remote delivery. Completed one-shot audio is not replayed after restart; interrupted repeats resume on their next interval. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
-
-### Local audio setup
-
-Local audio is disabled by default. In Signal K plugin configuration, open
-**Local audio playback**, enable it, select the player/output device, choose global
-defaults, and optionally enable **Play a test chime when saving**. The test checkbox
-turns itself off and writes success or failure to the Signal K log. Then open an
-alert in the Alert center and configure its **Local sound** section.
-
-New alerts use **Match alert severity** rather than inheriting one fixed sound:
-`warn` plays **Chime**, `alert` plays **Warning**, `alarm` plays **Alarm**, and
-`emergency` plays **Emergency**. The sound is resolved from the alert's current
-severity for every playback, so a repeating alert changes sound when it escalates
-or de-escalates. An individual alert can still select a fixed sound when it needs
-a recognizable tone independent of severity.
-
-To add your own tone, add an entry under **Custom sounds** in the global plugin
-configuration. Give it a unique display name and a `.wav` file path. A relative
-path such as `sounds/ship-bell.wav` is resolved inside Signal K's data directory;
-an absolute path is used as written. The named custom sound then appears in every
-alert's Sound dropdown. The file is checked when playback starts, so a missing or
-unreadable file produces a bounded, logged playback failure without affecting
-remote notifications. Custom WAV files retain their own encoded level; the plugin's
-master volume applies only to generated built-in tones.
-
-Optional **Command before each sound** and **Command after each sound** settings
-can pause/resume music, adjust a mixer, or control an indicator around one sound.
-Configure the executable separately from its ordered argument list. The before
-command must succeed before playback starts. The after command runs after every
-attempted sound, including a failed or cancelled sound; its failure is logged but
-does not replay an already completed sound. They run once per playback attempt,
-so a repeating alert runs both hooks around every repetition.
-
-Use **Command when audio becomes active** and **Command when audio becomes idle**
-for hardware that should remain enabled across multiple sounds. These queue-session
-commands must be configured together. The start command runs once immediately
-before the first actual playback. After the final sound, the plugin waits for the
-configured **Audio-session idle cooldown**; new queued or repeating playback during
-that time cancels the pending stop and reuses the active session. The stop command
-runs once after an uninterrupted cooldown. Plugin shutdown also attempts it when
-the current plugin process successfully ran the start command. Startup never sends
-a stop command for a session it does not own.
-
-For an amplifier, configure `/usr/local/bin/amplifier-on` as the session start,
-`/usr/local/bin/amplifier-off` as the session stop, and a cooldown longer than the
-normal gap between repeating alerts. A start failure prevents that sound from
-playing and uses the normal bounded audio retry policy. A stop failure is logged
-and shown in diagnostics, but completed sounds are not replayed. All per-sound and
-session commands share the bounded command timeout and run directly without a
-shell or alert-data interpolation.
-
-For example, to pause and resume MPD playback, set the before executable to
-`/usr/bin/mpc` with one argument, `pause`, and the after executable to
-`/usr/bin/mpc` with one argument, `play`. Paths and installed programs refer to the
-Signal K host—or to the container when Signal K runs in Docker.
-
-On macOS, automatic mode uses the built-in `afplay`. On a native Linux install,
-install either ALSA's `aplay` (usually the `alsa-utils` package) or PulseAudio's
-`paplay` (usually `pulseaudio-utils`). Automatic mode tries PulseAudio and then
-ALSA. The repository's Docker image includes `aplay`, but access to the host audio
-device remains opt-in. On a Linux Docker host run:
-
-```sh
-docker compose -f docker-compose.live.yml -f docker-compose.audio.yml up --build
-```
-
-The audio override maps `/dev/snd` into the container. Do not use it on hosts that
-do not expose that device. Choose **ALSA (aplay)** in plugin configuration; leave
-the output device blank for the default device, or enter an ALSA device such as
-`hw:1,0`. For custom sounds, mount a host directory into the Signal K data
-directory, for example `./sounds:/home/node/.signalk/sounds:ro`, and configure a
-relative path such as `sounds/ship-bell.wav`. Master volume is applied to generated
-built-in WAV files and does not modify the host mixer.
-
-The built-in `chime`, `warning`, `alarm`, and `emergency` sound IDs and globally
-registered custom WAV names are accepted. Raw per-alert file paths are rejected.
-The configured backend is selected from a fixed list and is launched directly
-with argument arrays. Pre/post executables are intentionally
-administrator-configurable, but no shell is used (`shell: false`), arguments are
-not parsed as a command line, and alert data is never interpolated into them.
-Playback attempts and errors appear in the occurrence history, Signal K log, and
-system diagnostics.
+Repeated updates coalesce by notification path and available source identifier. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
 
 The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifier`:
 
@@ -478,7 +391,6 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `DELETE /definitions/:id/policy` to remove per-alert overrides
 - `DELETE /definitions/:id` to remove an inactive stored alert, its settings, and history
 - `GET /notifiers`
-- `GET /audio/sounds`
 - `GET /occurrences` and `GET /occurrences/:id`
 - `GET /occurrences/:id/events`
 - `POST /occurrences/:id/acknowledge`
@@ -493,15 +405,14 @@ Global defaults are resolved when a new alert occurrence is created. Untouched
 and partially customized alerts therefore pick up later global changes for every
 field they still inherit. Each occurrence stores the resulting effective policy
 as a snapshot, so changing a global default or alert override does not alter
-deliveries or local audio already in progress.
+deliveries already in progress.
 
 ### Operational diagnostics
 
 `GET /status` returns a bounded operational snapshot without notifier secrets or
 notification payloads. It includes runtime generation and listener counts; ingestion
 queue depth, limit, high-water mark, and totals; startup reconciliation state and duration;
-the last delivery and audio scheduler runs; active request count and oldest request;
-pending sounds; audio-session ownership, cooldown, and command failures; the oldest pending
+the last delivery scheduler run; active request count and oldest request; the oldest pending
 delivery, overdue activation count, database/schema health, pending connectivity wake work, switch ownership,
 the last connectivity transition and probe result, and per-service pending count
 plus last success/failure time and failure code. The dashboard exposes the same
@@ -513,7 +424,7 @@ and active/pending counts.
 Health is **healthy** when the schema is current, startup reconciliation has
 completed, connectivity is not faulted, activations are not overdue, and no
 service's newest outcome is a failure. It is **degraded** while reconciliation is
-running, when activations are overdue, after a delivery/audio scheduler error, or when a service's
+running, when activations are overdue, after a delivery scheduler error, or when a service's
 latest outcome is a failure. It is **fault** when the database/schema check fails,
 startup reconciliation fails, or connectivity enters `FAULT`. A later successful
 service delivery clears that service's degraded condition.
@@ -539,7 +450,7 @@ cursor ordering remains stable by occurrence start time and id.
 
 The dashboard is served at `/signalk-persistent-notifier`. The default **Alerts**
 tab uses one compact table for all known definitions, with active alerts first. Select an alert to open
-its current information, recent event/audio/notifier timeline, and **Settings**. Acknowledge and
+its current information, recent event/notifier timeline, and **Settings**. Acknowledge and
 Silence are available directly in active rows, with completed actions shown disabled.
 Inactive rows use a neutral status badge. Acknowledge and silence apply only
 to active occurrences. Any inactive stored alert can be permanently removed from
@@ -555,7 +466,7 @@ Source names are shown in alert details, not in the table.
 Use **More filters** for an exact Signal K path or source and a started-at time
 range. These filters are evaluated by the server and work with **Load more**.
 Zone definitions share the Alerts table; their threshold ranges appear in the
-detail drawer when you open an alert. Notification services, local sound, and delivery timing
+detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert. Open the alert and select **Settings**
 to change them.
 
@@ -572,9 +483,9 @@ reconnect the same-origin stream; while it is unavailable, the UI uses a slow
 60-second fallback poll.
 
 Policy edits apply to future occurrences. Each occurrence snapshots its effective
-one-time, severity, activation, rearm, connectivity, audio, and notifier policy
-into durable delivery and playback work, so a later settings edit cannot rewrite
-history or silently retarget pending work.
+one-time, severity, activation, rearm, connectivity, and notifier policy into
+durable delivery work, so a later settings edit cannot rewrite history or silently
+retarget pending work.
 
 When connectivity is enabled, the plugin sends an HTTP `HEAD` request to the
 configured probe URL and enters `ONLINE` after any 2xx response. The default is
@@ -605,7 +516,6 @@ Install Chromium once with `npx playwright install chromium`, then run
 starts an isolated Docker project and removes its named test volume afterward.
 `npm run test:restart` separately verifies that pending activation, retryable
 delivery work, occurrence history, and event history survive Signal K restarts.
-Audio unit tests use a fake player; Docker suites leave physical audio disabled.
 Both suites use only the local fixture and mock notifier.
 
 For interactive UI testing:

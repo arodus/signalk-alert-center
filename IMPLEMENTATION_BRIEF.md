@@ -6,17 +6,17 @@
 > commit `bef795c`. The occurrence model, policy/history API, dashboard, zone
 > discovery, startup reconciliation, and Docker acceptance path have since been
 > implemented. The 2026-09-07 UI/configuration revision also replaced configured
-> rules with dashboard-owned per-alert policies and one unified Alerts table, and
-> issue #11 subsequently added durable server-side local sound playback. See
-> the README for current behavior and the remaining roadmap.
+> rules with dashboard-owned per-alert policies and one unified Alerts table.
+> The former local-playback implementation is preserved separately on the
+> `archive/local-playback` branch and is not part of the current plugin.
 
 Build a persistent onboard notification center, comparable in purpose to
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
 with a usable notification list, retained one-time notifications, and full history,
 alongside the existing offline remote-delivery and connectivity features.
-The reference provides configurable sound/speech, playback controls, a notification
-viewer, and persistent zone-change logging. It is a product reference, not an
-instruction to copy its implementation or every integration.
+The reference provides a notification viewer and persistent zone-change logging,
+alongside playback features that are outside this plugin's current scope. It is a
+product reference, not an instruction to copy its implementation or every integration.
 
 This section takes precedence over older suggestions below that make event storage
 or the core web UI optional. The phases below are design guidance, not evidence
@@ -27,12 +27,12 @@ that the corresponding behavior has been implemented.
 - Keep discovered zones (including never-fired definitions), current
   notifications, and historical occurrences distinguishable. Grouping must still
   allow every matching path and source to be inspected individually.
-- Capture notifications even with no selected notifier, no notifier enabled,
-  no sound method, or no Internet connection. Do not depend on a browser being open.
+- Capture notifications even with no selected notifier, no notifier enabled, or
+  no Internet connection. Do not depend on a browser being open.
 - A one-time notification means a discrete occurrence that may arrive once and
   never receive a clear update. Keep it in the list across refreshes and restarts.
-  One-time presentation, play-once audio, acknowledgement,
-  upstream resolution, and delivery success are separate concepts.
+  One-time presentation, acknowledgement, upstream resolution, and delivery
+  success are separate concepts.
 - Full history means a durable chronological record of every distinct occurrence
   and meaningful lifecycle change, including message/severity changes, clear,
   acknowledgement, silence, and delivery attempts/outcomes. It does not
@@ -68,17 +68,14 @@ static findings, not a live Signal K compatibility or runtime certification.
 | Input semantics | Normalization defaults unknown states (including `notice`) to `alert`; null becomes an active alert. Delta source timestamps are not passed into ingestion. | Verify supported Signal K clear/null and severity semantics, retain original state/time, and test compatible normalization. |
 | Zones and startup | `src/alerts/zones.ts` exists, but `src/plugin.ts` does not call it or pass zones to the catalog. Startup subscribes without reading existing notifications. | Wire zone discovery/current values and startup reconciliation without generating duplicate historical occurrences. |
 | Controls | Acknowledge/silence persist local timestamps before optional upstream calls; no confirmed asynchronous result is required. | Verified supported server API behavior, truthful control results, and action history. |
-| Player similarity | Server-side built-in sound playback now uses a durable queue with per-alert play-once/repeat and stop policies plus bounded pre/post command hooks. | Text-to-speech and timed global disable controls remain follow-up work. Avoid running a second player for the same paths. |
+| Playback scope | Local sound and speech are not implemented by this plugin. | Use a dedicated playback integration; the removed implementation remains available on `archive/local-playback` for reference. |
 
 ### Scope decisions still open
 
-The notification list, one-time retention, full history, and local sound are owned
-here. Text-to-speech remains separate follow-up work. Running this plugin's local
-sound for the same paths as Signal K Notification Player would duplicate audio. Slack,
-shell command lines, exact visual copying, and the reference's URL compatibility
-are not implied requirements. Pre/post hooks are explicit executable-plus-argument
-configurations without shell parsing or alert interpolation. Confirm playback architecture before
-implementing it, without delaying the required persistence and history work.
+The notification list, one-time retention, full history, and remote delivery are
+owned here. Local sound and text-to-speech belong in a dedicated playback
+integration. Slack, shell command lines, exact visual copying, and the reference's
+URL compatibility are not implied requirements.
 
 ### Acceptance scenarios for future implementation
 
@@ -100,9 +97,9 @@ implementing it, without delaying the required persistence and history work.
    ordering and records remain stable.
 
 The implemented alert center now covers occurrence/event storage, one-time
-lifecycle, history API/UI, zone discovery, and capability-aware controls. Playback
-ownership, richer observability/retention, and expanded browser/restart acceptance
-coverage remain follow-up work.
+lifecycle, history API/UI, zone discovery, and capability-aware controls. Richer
+observability/retention and expanded browser/restart acceptance coverage remain
+follow-up work.
 
 ## Objective
 

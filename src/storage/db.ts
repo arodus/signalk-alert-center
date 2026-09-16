@@ -3,9 +3,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   AlertDefinitionRecord,
   AlertEventRecord,
-  AlertAudioPolicy,
-  PlayableAudioSound,
-  AudioPlaybackRecord,
   AlertPolicyRecord,
   AlertPolicyField,
   AlertRecord,
@@ -108,27 +105,6 @@ const deliveryAttemptRecord = (row: Row): DeliveryAttemptRecord => ({
   remoteId: row.remote_id ? String(row.remote_id) : undefined,
 });
 
-const audioPlaybackRecord = (row: Row): AudioPlaybackRecord => ({
-  id: String(row.id),
-  alertId: String(row.alert_id),
-  state: row.state as AudioPlaybackRecord["state"],
-  sound: row.sound as AudioPlaybackRecord["sound"],
-  minimumSeverity:
-    row.minimum_severity as AudioPlaybackRecord["minimumSeverity"],
-  mode: row.mode as AudioPlaybackRecord["mode"],
-  repeatIntervalSeconds: Number(row.repeat_interval_seconds),
-  stopOn: json(row.stop_on_json) as AudioPlaybackRecord["stopOn"],
-  attemptCount: Number(row.attempt_count),
-  playCount: Number(row.play_count),
-  nextPlayAt: date(row.next_play_at),
-  lastStartedAt: date(row.last_started_at),
-  lastFinishedAt: date(row.last_finished_at),
-  lastErrorCode: row.last_error_code ? String(row.last_error_code) : undefined,
-  lastErrorMessage: row.last_error_message
-    ? String(row.last_error_message)
-    : undefined,
-});
-
 export class AlertDatabase {
   readonly db: DatabaseSync;
 
@@ -169,8 +145,6 @@ export class AlertDatabase {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
-        "audio_attempts",
-        "audio_playbacks",
         "delivery_attempts",
         "deliveries",
         "wake_requests",
@@ -186,7 +160,7 @@ export class AlertDatabase {
       ])
         this.db.exec(`DELETE FROM ${table}`);
       this.db.exec(
-        "DELETE FROM sqlite_sequence WHERE name IN ('alert_events', 'delivery_attempts', 'audio_attempts')",
+        "DELETE FROM sqlite_sequence WHERE name IN ('alert_events', 'delivery_attempts')",
       );
       this.db
         .prepare(
@@ -429,11 +403,6 @@ export class AlertDatabase {
            )
            AND NOT EXISTS (
              SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM audio_playbacks a
-             WHERE a.alert_id=o.id
-               AND a.state IN ('queued', 'waiting_severity', 'playing', 'failed_retryable')
            )`,
       )
       .get(cutoff.toISOString()) as Row;
@@ -459,11 +428,6 @@ export class AlertDatabase {
                )
                AND NOT EXISTS (
                  SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
-               )
-               AND NOT EXISTS (
-                 SELECT 1 FROM audio_playbacks a
-                 WHERE a.alert_id=o.id
-                   AND a.state IN ('queued', 'waiting_severity', 'playing', 'failed_retryable')
                )
              ORDER BY o.started_at, o.id LIMIT ?`,
           )
@@ -519,7 +483,6 @@ export class AlertDatabase {
         )
         .run(id);
       for (const table of [
-        "audio_playbacks",
         "deliveries",
         "wake_requests",
         "occurrence_notifier_thresholds",
@@ -561,15 +524,14 @@ export class AlertDatabase {
         .prepare(
           `INSERT INTO alert_policies
             (definition_id, enabled, minimum_severity, connectivity_json,
-             one_time, activation_delay_seconds, rearm_after_seconds, audio_policy_json,
+             one_time, activation_delay_seconds, rearm_after_seconds,
              override_fields_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(definition_id) DO UPDATE SET
             enabled=excluded.enabled, minimum_severity=excluded.minimum_severity,
             connectivity_json=excluded.connectivity_json, one_time=excluded.one_time,
             activation_delay_seconds=excluded.activation_delay_seconds,
             rearm_after_seconds=excluded.rearm_after_seconds,
-            audio_policy_json=excluded.audio_policy_json,
             override_fields_json=excluded.override_fields_json,
             updated_at=excluded.updated_at`,
         )
@@ -583,7 +545,6 @@ export class AlertDatabase {
           policy.oneTime === undefined ? null : Number(policy.oneTime),
           policy.activationDelaySeconds ?? null,
           policy.rearmAfterSeconds ?? null,
-          policy.audio === undefined ? null : JSON.stringify(policy.audio),
           JSON.stringify([...new Set(policy.overrideFields)]),
           timestamp,
         );
@@ -633,7 +594,6 @@ export class AlertDatabase {
           ? undefined
           : Number(row.rearm_after_seconds),
       notifierIds: notifiers.map((item) => String(item.transport_instance_id)),
-      audio: json(row.audio_policy_json) as AlertAudioPolicy | undefined,
       overrideFields:
         (json(row.override_fields_json) as AlertPolicyField[] | undefined) ??
         [],
@@ -1375,328 +1335,6 @@ export class AlertDatabase {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
-    }
-  }
-
-  ensureAudioPlayback(
-    alertId: string,
-    policy: AlertAudioPolicy,
-    dueAt = new Date(),
-    now = new Date(),
-  ): AudioPlaybackRecord {
-    this.getAlert(alertId);
-    const id = randomUUID();
-    const result = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO audio_playbacks
-          (id, alert_id, state, sound, minimum_severity, mode, repeat_interval_seconds,
-           stop_on_json, attempt_count, play_count, next_play_at, created_at, updated_at)
-         VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        alertId,
-        policy.sound,
-        policy.minimumSeverity,
-        policy.mode,
-        policy.repeatIntervalSeconds,
-        JSON.stringify(policy.stopOn),
-        dueAt.toISOString(),
-        now.toISOString(),
-        now.toISOString(),
-      );
-    if (result.changes)
-      this.addEvent(alertId, "audio_queued", now, {
-        sound: policy.sound,
-        mode: policy.mode,
-        dueAt: dueAt.toISOString(),
-      });
-    else {
-      const resumed = this.db
-        .prepare(
-          `UPDATE audio_playbacks SET state='queued', next_play_at=?, updated_at=?
-           WHERE alert_id=? AND state='waiting_severity'`,
-        )
-        .run(dueAt.toISOString(), now.toISOString(), alertId);
-      if (resumed.changes)
-        this.addEvent(alertId, "audio_queued", now, {
-          sound: policy.sound,
-          mode: policy.mode,
-          dueAt: dueAt.toISOString(),
-          reason: "severity_reached",
-        });
-    }
-    return this.getAudioPlaybackForAlert(alertId)!;
-  }
-
-  getAudioPlaybackForAlert(alertId: string): AudioPlaybackRecord | undefined {
-    const row = this.db
-      .prepare("SELECT * FROM audio_playbacks WHERE alert_id=?")
-      .get(alertId) as Row | undefined;
-    return row ? audioPlaybackRecord(row) : undefined;
-  }
-
-  listDueAudioPlaybacks(now = new Date(), limit = 25): AudioPlaybackRecord[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM audio_playbacks
-           WHERE state IN ('queued', 'failed_retryable')
-             AND (next_play_at IS NULL OR next_play_at <= ?)
-           ORDER BY COALESCE(next_play_at, created_at), rowid LIMIT ?`,
-        )
-        .all(now.toISOString(), Math.max(1, Math.min(100, limit))) as Row[]
-    ).map(audioPlaybackRecord);
-  }
-
-  nextAudioPlaybackDueAt(): Date | undefined {
-    const row = this.db
-      .prepare(
-        `SELECT MIN(COALESCE(next_play_at, created_at)) AS due_at
-         FROM audio_playbacks WHERE state IN ('queued', 'failed_retryable')`,
-      )
-      .get() as Row;
-    return date(row.due_at);
-  }
-
-  pendingAudioPlaybackCount(): number {
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count FROM audio_playbacks
-         WHERE state IN ('queued', 'waiting_severity', 'playing', 'failed_retryable')`,
-      )
-      .get() as Row;
-    return Number(row.count ?? 0);
-  }
-
-  claimAudioPlayback(id: string, now = new Date()): boolean {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = this.db
-        .prepare(
-          `UPDATE audio_playbacks SET state='playing', attempt_count=attempt_count+1,
-           last_started_at=?, last_error_code=NULL, last_error_message=NULL, updated_at=?
-           WHERE id=? AND state IN ('queued', 'failed_retryable')
-             AND (next_play_at IS NULL OR next_play_at <= ?)`,
-        )
-        .run(now.toISOString(), now.toISOString(), id, now.toISOString());
-      if (result.changes) {
-        const playback = this.db
-          .prepare(
-            "SELECT alert_id, attempt_count FROM audio_playbacks WHERE id=?",
-          )
-          .get(id) as Row;
-        this.db
-          .prepare(
-            `INSERT INTO audio_attempts
-              (playback_id, attempt_number, started_at, outcome)
-             VALUES (?, ?, ?, 'playing')`,
-          )
-          .run(id, Number(playback.attempt_count), now.toISOString());
-        this.addEvent(String(playback.alert_id), "audio_started", now);
-      }
-      this.db.exec("COMMIT");
-      return result.changes > 0;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  recordAudioSuccess(
-    id: string,
-    nextPlayAt: Date | undefined,
-    backend: string,
-    playedSound: PlayableAudioSound,
-    now = new Date(),
-  ): void {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const playback = this.db
-        .prepare(
-          "SELECT alert_id, attempt_count FROM audio_playbacks WHERE id=?",
-        )
-        .get(id) as Row | undefined;
-      if (!playback) throw new Error(`Unknown audio playback: ${id}`);
-      this.db
-        .prepare(
-          `UPDATE audio_attempts SET finished_at=?, outcome='played'
-           WHERE playback_id=? AND attempt_number=? AND outcome='playing'`,
-        )
-        .run(now.toISOString(), id, Number(playback.attempt_count));
-      const result = this.db
-        .prepare(
-          `UPDATE audio_playbacks SET state=?, play_count=play_count+1,
-           next_play_at=?, last_finished_at=?, updated_at=?
-           WHERE id=? AND state='playing'`,
-        )
-        .run(
-          nextPlayAt ? "queued" : "completed",
-          nextPlayAt?.toISOString() ?? null,
-          now.toISOString(),
-          now.toISOString(),
-          id,
-        );
-      if (result.changes)
-        this.addEvent(String(playback.alert_id), "audio_played", now, {
-          backend,
-          sound: playedSound,
-          nextPlayAt: nextPlayAt?.toISOString(),
-        });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  recordAudioFailure(
-    id: string,
-    code: string,
-    message: string,
-    retryAt: Date | undefined,
-    now = new Date(),
-  ): void {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const playback = this.db
-        .prepare(
-          "SELECT alert_id, attempt_count FROM audio_playbacks WHERE id=?",
-        )
-        .get(id) as Row | undefined;
-      if (!playback) throw new Error(`Unknown audio playback: ${id}`);
-      const outcome = retryAt ? "failed_retryable" : "failed_terminal";
-      this.db
-        .prepare(
-          `UPDATE audio_attempts SET finished_at=?, outcome=?, error_code=?, error_message=?
-           WHERE playback_id=? AND attempt_number=? AND outcome='playing'`,
-        )
-        .run(
-          now.toISOString(),
-          outcome,
-          code,
-          message,
-          id,
-          Number(playback.attempt_count),
-        );
-      const result = this.db
-        .prepare(
-          `UPDATE audio_playbacks SET state=?, next_play_at=?, last_finished_at=?,
-           last_error_code=?, last_error_message=?, updated_at=?
-           WHERE id=? AND state='playing'`,
-        )
-        .run(
-          outcome,
-          retryAt?.toISOString() ?? null,
-          now.toISOString(),
-          code,
-          message,
-          now.toISOString(),
-          id,
-        );
-      if (result.changes)
-        this.addEvent(String(playback.alert_id), "audio_failed", now, {
-          code,
-          message,
-          retryAt: retryAt?.toISOString(),
-        });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  postponeAudioPlayback(id: string, nextPlayAt: Date, now = new Date()): void {
-    this.db
-      .prepare(
-        `UPDATE audio_playbacks SET state='queued', next_play_at=?, updated_at=?
-         WHERE id=? AND state IN ('queued', 'failed_retryable')`,
-      )
-      .run(nextPlayAt.toISOString(), now.toISOString(), id);
-  }
-
-  waitAudioForSeverity(id: string, now = new Date()): void {
-    const row = this.db
-      .prepare("SELECT alert_id FROM audio_playbacks WHERE id=?")
-      .get(id) as Row | undefined;
-    const result = this.db
-      .prepare(
-        `UPDATE audio_playbacks SET state='waiting_severity', next_play_at=NULL,
-         updated_at=? WHERE id=? AND state IN ('queued', 'failed_retryable')`,
-      )
-      .run(now.toISOString(), id);
-    if (result.changes && row)
-      this.addEvent(String(row.alert_id), "audio_waiting_severity", now);
-  }
-
-  cancelAudioPlaybackForAlert(
-    alertId: string,
-    trigger: keyof AlertAudioPolicy["stopOn"],
-    now = new Date(),
-  ): boolean {
-    const playback = this.getAudioPlaybackForAlert(alertId);
-    if (!playback?.stopOn[trigger]) return false;
-    if (["completed", "cancelled", "failed_terminal"].includes(playback.state))
-      return false;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db
-        .prepare(
-          `UPDATE audio_attempts SET finished_at=?, outcome='interrupted',
-           error_code='CANCELLED', error_message=?
-           WHERE playback_id=? AND outcome='playing'`,
-        )
-        .run(now.toISOString(), `Stopped on ${trigger}`, playback.id);
-      this.db
-        .prepare(
-          `UPDATE audio_playbacks SET state='cancelled', next_play_at=NULL,
-           last_finished_at=?, last_error_code=NULL, last_error_message=NULL, updated_at=?
-           WHERE id=?`,
-        )
-        .run(now.toISOString(), now.toISOString(), playback.id);
-      this.addEvent(alertId, "audio_cancelled", now, { trigger });
-      this.db.exec("COMMIT");
-      return true;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  recoverPlayingAudio(now = new Date()): void {
-    const rows = this.db
-      .prepare(
-        "SELECT id, alert_id, attempt_count, mode, repeat_interval_seconds FROM audio_playbacks WHERE state='playing'",
-      )
-      .all() as Row[];
-    for (const row of rows) {
-      const repeat = String(row.mode) === "repeat";
-      const next = repeat
-        ? new Date(now.getTime() + Number(row.repeat_interval_seconds) * 1000)
-        : undefined;
-      this.db
-        .prepare(
-          `UPDATE audio_attempts SET finished_at=?, outcome='interrupted',
-           error_code='INTERRUPTED', error_message='Playback ended during plugin shutdown or restart'
-           WHERE playback_id=? AND attempt_number=? AND outcome='playing'`,
-        )
-        .run(now.toISOString(), String(row.id), Number(row.attempt_count));
-      this.db
-        .prepare(
-          `UPDATE audio_playbacks SET state=?, next_play_at=?, last_finished_at=?, updated_at=?
-           WHERE id=?`,
-        )
-        .run(
-          repeat ? "queued" : "completed",
-          next?.toISOString() ?? null,
-          now.toISOString(),
-          now.toISOString(),
-          String(row.id),
-        );
-      this.addEvent(String(row.alert_id), "audio_interrupted", now, {
-        willRepeat: repeat,
-      });
     }
   }
 

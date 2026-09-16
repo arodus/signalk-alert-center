@@ -1,10 +1,4 @@
-import {
-  AlertAudioPolicy,
-  AlertPolicyField,
-  alertPolicyFields,
-  isBuiltInAudioSoundSelection,
-  severities,
-} from "../alerts/types";
+import { AlertPolicyField, alertPolicyFields } from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
 
 export interface Page<T> {
@@ -46,7 +40,6 @@ export interface AlertPolicyPatch {
   notifierIds?: string[];
   activationDelaySeconds?: number;
   minimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
-  audio?: AlertAudioPolicy;
   connectivity?:
     { mode: "queue" | "wake" } | { mode: "wake_after"; delaySeconds: number };
 }
@@ -128,7 +121,6 @@ export interface AlertCenterChange {
 export interface AlertCenterDependencies {
   repository: () => AlertCenterRepository | undefined;
   listNotifiers?: () => MaybePromise<unknown[]>;
-  listAudioSounds?: () => MaybePromise<unknown[]>;
   subscribeChanges?: (
     listener: (change: AlertCenterChange) => void,
   ) => () => void;
@@ -286,10 +278,7 @@ function parseOccurrences(request: RequestLike): OccurrenceQuery {
     to,
   };
 }
-function parsePolicy(
-  body: unknown,
-  availableAudioSounds = new Set<string>(),
-): AlertPolicyPatch {
+function parsePolicy(body: unknown): AlertPolicyPatch {
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new ApiError(400, "INVALID_BODY", "Request body must be an object");
   const value = body as Record<string, unknown>;
@@ -301,7 +290,6 @@ function parsePolicy(
     "activationDelaySeconds",
     "minimumSeverity",
     "connectivity",
-    "audio",
     "overrideFields",
   ]);
   const extra = Object.keys(value).filter((key) => !allowed.has(key));
@@ -403,8 +391,6 @@ function parsePolicy(
       };
     else throw new ApiError(400, "INVALID_BODY", "connectivity is invalid");
   }
-  if (value.audio !== undefined)
-    patch.audio = parseAudioPolicy(value.audio, availableAudioSounds);
   if (!Object.keys(patch).length)
     throw new ApiError(
       400,
@@ -412,74 +398,6 @@ function parsePolicy(
       "At least one policy field is required",
     );
   return patch;
-}
-
-function parseAudioPolicy(
-  value: unknown,
-  availableAudioSounds: Set<string>,
-): AlertAudioPolicy {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new ApiError(400, "INVALID_BODY", "audio must be an object");
-  const audio = value as Record<string, unknown>;
-  const allowed = new Set([
-    "enabled",
-    "sound",
-    "minimumSeverity",
-    "mode",
-    "repeatIntervalSeconds",
-    "stopOn",
-  ]);
-  if (Object.keys(audio).some((key) => !allowed.has(key)))
-    throw new ApiError(400, "INVALID_BODY", "audio has unknown fields");
-  if (typeof audio.enabled !== "boolean")
-    throw new ApiError(400, "INVALID_BODY", "audio.enabled must be boolean");
-  if (
-    !isBuiltInAudioSoundSelection(audio.sound) &&
-    !availableAudioSounds.has(String(audio.sound))
-  )
-    throw new ApiError(400, "INVALID_BODY", "audio.sound is invalid");
-  if (
-    !severities.includes(
-      audio.minimumSeverity as AlertAudioPolicy["minimumSeverity"],
-    )
-  )
-    throw new ApiError(400, "INVALID_BODY", "audio.minimumSeverity is invalid");
-  if (audio.mode !== "once" && audio.mode !== "repeat")
-    throw new ApiError(400, "INVALID_BODY", "audio.mode is invalid");
-  if (
-    !Number.isInteger(audio.repeatIntervalSeconds) ||
-    Number(audio.repeatIntervalSeconds) < 1 ||
-    Number(audio.repeatIntervalSeconds) > 86_400
-  )
-    throw new ApiError(
-      400,
-      "INVALID_BODY",
-      "audio.repeatIntervalSeconds must be an integer from 1 to 86400",
-    );
-  if (!audio.stopOn || typeof audio.stopOn !== "object")
-    throw new ApiError(400, "INVALID_BODY", "audio.stopOn is invalid");
-  const stopOn = audio.stopOn as Record<string, unknown>;
-  const triggers = ["clear", "acknowledge", "silence"] as const;
-  if (
-    Object.keys(stopOn).some(
-      (key) => !triggers.includes(key as (typeof triggers)[number]),
-    ) ||
-    triggers.some((trigger) => typeof stopOn[trigger] !== "boolean")
-  )
-    throw new ApiError(400, "INVALID_BODY", "audio.stopOn is invalid");
-  return {
-    enabled: audio.enabled,
-    sound: audio.sound as AlertAudioPolicy["sound"],
-    minimumSeverity:
-      audio.minimumSeverity as AlertAudioPolicy["minimumSeverity"],
-    mode: audio.mode,
-    repeatIntervalSeconds: Number(audio.repeatIntervalSeconds),
-    stopOn: {
-      clear: Boolean(stopOn.clear),
-      acknowledge: Boolean(stopOn.acknowledge),
-      silence: Boolean(stopOn.silence),
-    },
-  };
 }
 
 export function registerAlertCenterRoutes(
@@ -611,16 +529,7 @@ export function registerAlertCenterRoutes(
     "/definitions/:id/policy",
     "readwrite",
     wrap(async (req, res) => {
-      const availableAudioSounds = new Set(
-        dependencies.listAudioSounds
-          ? (await dependencies.listAudioSounds()).map((item) =>
-              typeof item === "string"
-                ? item
-                : String((item as { id?: unknown }).id),
-            )
-          : [],
-      );
-      const patch = parsePolicy(req.body, availableAudioSounds);
+      const patch = parsePolicy(req.body);
       if (patch.notifierIds && dependencies.listNotifiers) {
         const known = new Set(
           (await dependencies.listNotifiers()).map((item) =>
@@ -653,19 +562,6 @@ export function registerAlertCenterRoutes(
       res.json({
         items: dependencies.listNotifiers
           ? await dependencies.listNotifiers()
-          : [],
-      }),
-    ),
-  );
-  addRoute(
-    router,
-    "get",
-    "/audio/sounds",
-    "readonly",
-    wrap(async (_req, res) =>
-      res.json({
-        items: dependencies.listAudioSounds
-          ? await dependencies.listAudioSounds()
           : [],
       }),
     ),
