@@ -214,7 +214,6 @@ function playbackStopTrigger(
   if (alert.currentState === "cleared" && stopOn.clear) return "clear";
   if (alert.acknowledgedAt && stopOn.acknowledge) return "acknowledge";
   if (alert.silencedAt && stopOn.silence) return "silence";
-  if (alert.dismissedAt && stopOn.dismiss) return "dismiss";
   return undefined;
 }
 

@@ -525,8 +525,7 @@ h2 {
   outline: 3px solid rgba(13, 119, 114, 0.35);
   outline-offset: -3px;
 }
-.clickable-row.is-resolved,
-.clickable-row.is-dismissed {
+.clickable-row.is-resolved {
   background: var(--paper);
   opacity: 0.72;
 }
@@ -707,8 +706,23 @@ dialog .button {
   line-height: 1.25;
   white-space: nowrap;
 }
-#policy-forget {
-  margin-right: auto;
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 14px;
+  border: 1px solid #e1b8b3;
+  border-radius: 8px;
+  background: #fff8f7;
+}
+.danger-zone h3,
+.danger-zone p {
+  margin: 0;
+}
+.danger-zone p {
+  margin-top: 4px;
 }
 .inheritance-summary {
   display: flex;

@@ -2,6 +2,7 @@ const apiBase = "/plugins/signalk-persistent-notifier";
 const state = {
   definitions: [],
   occurrences: [],
+  activeDefinitionIds: new Set(),
   notifiers: [],
   audioSounds: [],
   deliveries: [],
@@ -90,7 +91,6 @@ const policyFieldNames = {
   "audio.stopOn.clear": "stop sound when cleared",
   "audio.stopOn.acknowledge": "stop sound when acknowledged",
   "audio.stopOn.silence": "stop sound when silenced",
-  "audio.stopOn.dismiss": "stop sound when dismissed",
 };
 
 async function api(path, options = {}) {
@@ -289,9 +289,7 @@ function renderDefinitions() {
   const visible = state.definitions
     .flatMap((definition) => {
       const occurrences = state.occurrences.filter(
-        (occurrence) =>
-          occurrence.definitionId === definition.id &&
-          ($("#dismissed-filter").checked || !occurrence.dismissedAt),
+        (occurrence) => occurrence.definitionId === definition.id,
       );
       const active = occurrences.filter(
         (occurrence) => occurrence.state === "active",
@@ -342,7 +340,7 @@ function renderDefinitions() {
         ),
     );
   $("#list-summary").textContent =
-    `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first${$("#dismissed-filter").checked ? " · including dismissed" : ""}`;
+    `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
             <thead><tr><th>Alert</th><th>Status</th><th>Last activity</th><th>Notify via</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
@@ -361,12 +359,12 @@ function renderDefinitions() {
               .filter(Boolean)
               .join(" · ");
             const status = active
-              ? `<span class="status-summary"><span class="alert-severity ${escapeHtml(latest.currentSeverity)}">${escapeHtml(latest.currentSeverity)}</span>${latest.dismissedAt ? '<span class="muted">Dismissed</span>' : ""}</span>`
+              ? `<span class="status-summary"><span class="alert-severity ${escapeHtml(latest.currentSeverity)}">${escapeHtml(latest.currentSeverity)}</span></span>`
               : `<span class="alert-severity inactive" title="${hasHistory ? "No active alert" : "No alert has been recorded for this definition"}">Inactive</span>`;
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Status">${status}</td>
-            <td data-label="Last activity">${formatDate(latestTimestamp(latest?.dismissedAt, latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
+            <td data-label="Last activity">${formatDate(latestTimestamp(latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
             <td data-label="Notify via"><span class="cell-title">${[policy.audio?.enabled ? `🔊 ${audioSoundLabel(policy.audio.sound)}` : "", policy.enabled === false ? "" : policy.notifierIds?.join(", ")].filter(Boolean).map(escapeHtml).join(" · ") || '<span class="muted">No delivery selected</span>'}</span><span class="cell-detail">${policy.audio?.enabled ? `${escapeHtml(policy.audio.minimumSeverity)}+ local${policy.audio.mode === "repeat" ? ` · every ${policy.audio.repeatIntervalSeconds}s` : " · once"}` : ""}${policy.audio?.enabled && policy.enabled !== false && notifierCount ? " · " : ""}${policy.enabled === false ? "Remote off" : notifierCount ? `${escapeHtml(policy.minimumSeverity ?? "normal")}+ remote` : ""}</span></td>
             <td class="action-cell">${active ? `<div class="table-actions"><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="acknowledge" type="button" ${latest.acknowledgedAt ? "disabled" : ""}>${latest.acknowledgedAt ? "Acknowledged" : "Acknowledge"}</button><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="silence" type="button" ${latest.silencedAt ? "disabled" : ""}>${latest.silencedAt ? "Silenced" : "Silence"}</button></div>` : ""}</td>
           </tr>`;
@@ -456,7 +454,6 @@ function occurrenceParams(cursor) {
     const value = $(`#${id}-filter`).value;
     if (value) params.set(id, new Date(value).toISOString());
   }
-  if (!$("#dismissed-filter").checked) params.set("dismissed", "false");
   return params;
 }
 
@@ -530,6 +527,9 @@ async function load() {
       api("/deliveries?limit=50"),
     ]);
     state.definitions = definitions;
+    state.activeDefinitionIds = new Set(
+      activeOccurrences.map((item) => item.definitionId),
+    );
     renderPathOptions();
     state.occurrences = hasHistoryFilters()
       ? pageItems(occurrences)
@@ -540,9 +540,7 @@ async function load() {
     state.deliveryCursor = deliveryPage.nextCursor;
     renderAudioSoundOptions();
     state.occurrenceCursor = occurrences.nextCursor;
-    elements.activeCount.textContent = activeOccurrences.filter(
-      (item) => !item.dismissedAt,
-    ).length;
+    elements.activeCount.textContent = activeOccurrences.length;
     elements.definitionCount.textContent =
       status.alerts?.definitions ?? state.definitions.length;
     const pendingDeliveryCount =
@@ -605,12 +603,7 @@ async function mutateOccurrence(id, action) {
     );
     await load();
     if (state.selectedOccurrence === id) await openOccurrence(id);
-    const localAction =
-      action === "acknowledge"
-        ? "Acknowledged"
-        : action === "silence"
-          ? "Silenced"
-          : "Dismissed";
+    const localAction = action === "acknowledge" ? "Acknowledged" : "Silenced";
     elements.drawerResult.textContent = result.message
       ? `${localAction} locally. ${result.message}`
       : result.upstream === "applied"
@@ -731,14 +724,11 @@ async function openOccurrence(id) {
       ? `<h3>Local sound</h3><div class="delivery-meta"><strong>${escapeHtml(audioSoundLabel(audio.sound))}</strong> · ${escapeHtml(String(audio.state).replaceAll("_", " "))}<div>${audio.playCount} completed play${audio.playCount === 1 ? "" : "s"}${audio.lastErrorMessage ? ` · ${escapeHtml(audio.lastErrorMessage)}` : ""}</div></div>`
       : "";
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}${occurrence.dismissedAt ? " · dismissed" : ""}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}${!occurrence.dismissedAt ? `<button class="button button-quiet drawer-dismiss" type="button">Dismiss</button>` : ""}</div>${audioOutcome}${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.operation ?? "notify")} · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>${audioOutcome}${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.operation ?? "notify")} · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
     elements.drawerResult.textContent = "";
     elements.drawerBody
       .querySelector(".drawer-settings")
       ?.addEventListener("click", () => openPolicy(definition.id));
-    elements.drawerBody
-      .querySelector(".drawer-dismiss")
-      ?.addEventListener("click", () => mutateOccurrence(id, "dismiss"));
     elements.events.innerHTML = '<div class="empty">Loading history…</div>';
     elements.backdrop.hidden = false;
     elements.drawer.classList.add("is-open");
@@ -797,7 +787,6 @@ function setPolicyControlValues(policy) {
   $("#audio-stop-clear").checked = audio.stopOn?.clear !== false;
   $("#audio-stop-acknowledge").checked = audio.stopOn?.acknowledge !== false;
   $("#audio-stop-silence").checked = audio.stopOn?.silence !== false;
-  $("#audio-stop-dismiss").checked = audio.stopOn?.dismiss !== false;
 }
 
 function applyDefaultForField(field) {
@@ -840,8 +829,6 @@ function applyDefaultForField(field) {
         defaults.audio.stopOn.acknowledge),
     "audio.stopOn.silence": () =>
       ($("#audio-stop-silence").checked = defaults.audio.stopOn.silence),
-    "audio.stopOn.dismiss": () =>
-      ($("#audio-stop-dismiss").checked = defaults.audio.stopOn.dismiss),
   };
   setters[field]?.();
 }
@@ -907,16 +894,15 @@ function openPolicy(id) {
   toggleWakeDelay();
   toggleAudioRepeat();
   elements.policyResult.textContent = "";
-  const forget = $("#policy-forget");
-  const hasActive = state.occurrences.some(
-    (occurrence) =>
-      occurrence.definitionId === id && occurrence.state === "active",
-  );
-  forget.hidden = definition.sourceType !== "recognized";
-  forget.disabled = hasActive;
-  forget.title = hasActive
-    ? "Clear the active alert before forgetting it"
-    : "Permanently remove this discovered alert and its history";
+  const remove = $("#policy-remove");
+  const hasActive = state.activeDefinitionIds.has(id);
+  remove.disabled = hasActive;
+  remove.title = hasActive
+    ? "Clear the active alert in Signal K before removing its stored data"
+    : "Permanently remove this alert, its settings, and its complete history";
+  $("#policy-remove-help").textContent = hasActive
+    ? "This alert is active. Clear it in Signal K before removing its stored data."
+    : "Permanently deletes this alert's settings and complete stored history. If Signal K still defines or publishes it, it will be discovered again using the current global defaults.";
   $("#notifier-options").innerHTML = state.notifiers.length
     ? state.notifiers
         .map((notifier) => {
@@ -940,17 +926,17 @@ function openPolicy(id) {
   updateInheritanceSummary();
   if (!elements.policyDialog.open) elements.policyDialog.showModal();
 }
-async function forgetDefinition() {
+async function removeStoredAlert() {
   const id = $("#policy-definition-id").value;
   const definition = state.definitions.find((item) => item.id === id);
   if (
     !definition ||
     !window.confirm(
-      `Forget “${definition.name}” and permanently delete its stored history?`,
+      `Remove “${definition.name}” from stored alerts?\n\nThis permanently deletes its settings and complete history. If Signal K still defines or publishes it, the alert will be discovered again using the current global defaults.`,
     )
   )
     return;
-  $("#policy-forget").disabled = true;
+  $("#policy-remove").disabled = true;
   try {
     await api(`/definitions/${encodeURIComponent(id)}`, { method: "DELETE" });
     elements.policyDialog.close();
@@ -958,7 +944,7 @@ async function forgetDefinition() {
     await load();
   } catch (error) {
     elements.policyResult.textContent = error.message;
-    $("#policy-forget").disabled = false;
+    $("#policy-remove").disabled = false;
   }
 }
 function toggleWakeDelay() {
@@ -996,7 +982,6 @@ async function savePolicy(event) {
         clear: $("#audio-stop-clear").checked,
         acknowledge: $("#audio-stop-acknowledge").checked,
         silence: $("#audio-stop-silence").checked,
-        dismiss: $("#audio-stop-dismiss").checked,
       },
     },
   };
@@ -1067,7 +1052,6 @@ $("#history-filters").addEventListener("submit", (event) => {
 $("#state-filter").addEventListener("change", load);
 $("#alert-search").addEventListener("input", renderDefinitions);
 $("#severity-filter").addEventListener("change", load);
-$("#dismissed-filter").addEventListener("change", load);
 $("#filters-clear").addEventListener("click", () => {
   $("#history-filters").reset();
   void load();
@@ -1098,7 +1082,7 @@ $("#policy-close").addEventListener("click", () =>
 $("#policy-cancel").addEventListener("click", () =>
   elements.policyDialog.close(),
 );
-$("#policy-forget").addEventListener("click", forgetDefinition);
+$("#policy-remove").addEventListener("click", removeStoredAlert);
 $("#policy-reset").addEventListener("click", resetPolicy);
 initializePolicyOverrideControls();
 for (const [view, button] of [

@@ -91,7 +91,8 @@ function fixture() {
     getDefinition: (id) => (id === "bilge" ? { id } : undefined),
     updatePolicy: (id, policy) => (id === "bilge" ? { id, policy } : undefined),
     resetPolicy: (id) => (id === "bilge" ? { id, reset: true } : undefined),
-    forgetDefinition: (id) => (id === "bilge" ? "deleted" : "not_found"),
+    deleteDefinition: (id) =>
+      id === "bilge" ? "deleted" : id === "active" ? "active" : "not_found",
     listOccurrences(query) {
       queries.push(query);
       return { items: [] };
@@ -113,7 +114,6 @@ function fixture() {
         : id === "pending"
           ? "not_retryable"
           : "not_found",
-    dismissOccurrence: () => ({ status: "dismissed" }),
     acknowledgeOccurrence: (id) =>
       id === "inactive" ? "inactive" : { status: "acknowledged" },
     silenceOccurrence: (id) =>
@@ -168,7 +168,7 @@ describe("alert-center routes", () => {
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
     expect(access.filter((value) => value === "readonly")).toHaveLength(11);
-    expect(access.filter((value) => value === "readwrite")).toHaveLength(7);
+    expect(access.filter((value) => value === "readwrite")).toHaveLength(6);
   });
 
   it("pages delivery summaries, details, attempts, and retries", async () => {
@@ -249,7 +249,6 @@ describe("alert-center routes", () => {
         path: "notifications.navigation.anchor",
         source: "gps.primary",
         state: "active",
-        dismissed: "false",
         from: "2026-09-01T00:00:00Z",
       },
     });
@@ -261,14 +260,13 @@ describe("alert-center routes", () => {
       path: "notifications.navigation.anchor",
       source: "gps.primary",
       state: "active",
-      dismissed: false,
     });
     expect((queries[0] as { from: Date }).from).toBeInstanceOf(Date);
   });
 
   it("returns structured errors for invalid filters", async () => {
     const response = await fixture().invoke("GET", "/occurrences", {
-      query: { limit: "101", dismissed: "sometimes" },
+      query: { limit: "101" },
     });
     expect(response.statusCode).toBe(400);
     expect(response.body).toMatchObject({
@@ -301,7 +299,6 @@ describe("alert-center routes", () => {
               clear: true,
               acknowledge: true,
               silence: true,
-              dismiss: true,
             },
           },
         },
@@ -335,7 +332,6 @@ describe("alert-center routes", () => {
               clear: true,
               acknowledge: true,
               silence: true,
-              dismiss: true,
             },
           },
         },
@@ -368,7 +364,6 @@ describe("alert-center routes", () => {
               clear: true,
               acknowledge: true,
               silence: true,
-              dismiss: true,
             },
           },
         },
@@ -395,12 +390,20 @@ describe("alert-center routes", () => {
     });
   });
 
-  it("forgets discovered definitions through a write-protected route", async () => {
+  it("removes stored alerts through a write-protected route", async () => {
     const response = await fixture().invoke("DELETE", "/definitions/:id", {
       params: { id: "bilge" },
     });
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ status: "deleted" });
+  });
+
+  it("rejects removal while an alert is active", async () => {
+    const response = await fixture().invoke("DELETE", "/definitions/:id", {
+      params: { id: "active" },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toMatchObject({ error: { code: "ALERT_ACTIVE" } });
   });
 
   it("resets an alert policy without deleting its definition", async () => {

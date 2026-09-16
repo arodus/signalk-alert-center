@@ -49,7 +49,7 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(6);
+    expect(migrated.schemaVersion()).toBe(7);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -207,6 +207,64 @@ describe("occurrence storage", () => {
          VALUES ('delivery', 1, ?, ?, 'delivered', 'remote')`,
       )
       .run("2026-01-01T00:00:01.000Z", "2026-01-01T00:00:02.000Z");
+    legacy
+      .prepare("UPDATE alert_occurrences SET dismissed_at=? WHERE id=?")
+      .run("2026-01-01T00:00:03.000Z", "occurrence");
+    legacy
+      .prepare(
+        "INSERT INTO alert_events(alert_id, event_type, occurred_at) VALUES (?, ?, ?), (?, ?, ?)",
+      )
+      .run(
+        "occurrence",
+        "raised",
+        "2026-01-01T00:00:00.000Z",
+        "occurrence",
+        "dismissed",
+        "2026-01-01T00:00:03.000Z",
+      );
+    legacy
+      .prepare(
+        `INSERT INTO alert_policies
+          (definition_id, audio_policy_json, override_fields_json, updated_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(
+        "anchor",
+        JSON.stringify({
+          enabled: true,
+          sound: "warning",
+          minimumSeverity: "warn",
+          mode: "once",
+          repeatIntervalSeconds: 60,
+          stopOn: {
+            clear: true,
+            acknowledge: true,
+            silence: true,
+            dismiss: true,
+          },
+        }),
+        JSON.stringify(["audio.stopOn.dismiss"]),
+        "2026-01-01T00:00:00.000Z",
+      );
+    legacy
+      .prepare(
+        `INSERT INTO audio_playbacks
+          (id, alert_id, state, sound, minimum_severity, mode,
+           repeat_interval_seconds, stop_on_json, created_at, updated_at)
+         VALUES (?, ?, 'completed', 'warning', 'warn', 'once', 60, ?, ?, ?)`,
+      )
+      .run(
+        "audio",
+        "occurrence",
+        JSON.stringify({
+          clear: true,
+          acknowledge: true,
+          silence: true,
+          dismiss: true,
+        }),
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
     legacy.close();
 
     const migrated = new AlertDatabase(filename);
@@ -219,6 +277,27 @@ describe("occurrence storage", () => {
     expect(migrated.listDeliveryAttempts("delivery")).toMatchObject([
       { attemptNumber: 1, outcome: "delivered", remoteId: "remote" },
     ]);
+    expect(migrated.listOccurrences()).toHaveLength(1);
+    expect(
+      migrated.listAlertEvents("occurrence").map((event) => event.eventType),
+    ).toEqual(["raised"]);
+    expect(migrated.getPolicy("anchor")?.overrideFields).toEqual([]);
+    expect(migrated.getPolicy("anchor")?.audio?.stopOn).toEqual({
+      clear: true,
+      acknowledge: true,
+      silence: true,
+    });
+    expect(migrated.getAudioPlaybackForAlert("occurrence")?.stopOn).toEqual({
+      clear: true,
+      acknowledge: true,
+      silence: true,
+    });
+    expect(
+      migrated.db
+        .prepare("PRAGMA table_info(alert_occurrences)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).not.toContain("dismissed_at");
     expect(migrated.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
@@ -229,11 +308,11 @@ describe("occurrence storage", () => {
     expect(db.operationalStatus()).toMatchObject({
       healthy: false,
       schemaVersion: 0,
-      expectedSchemaVersion: 6,
+      expectedSchemaVersion: 7,
     });
   });
 
-  it("stores raise-clear-raise as distinct occurrences and keeps dismissal history", () => {
+  it("stores raise-clear-raise as distinct visible occurrences", () => {
     const db = database();
     const first = db.ingest(
       active(),
@@ -245,7 +324,6 @@ describe("occurrence storage", () => {
       ["ntfy"],
       new Date("2026-01-01T00:01:00Z"),
     );
-    db.dismissOccurrence(first.id, new Date("2026-01-01T00:02:00Z"));
     const second = db.ingest(
       active(),
       ["ntfy"],
@@ -255,11 +333,9 @@ describe("occurrence storage", () => {
     expect(second.id).not.toBe(first.id);
     expect(second.occurrenceNumber).toBe(2);
     expect(db.listOccurrences()).toHaveLength(2);
-    expect(db.listOccurrences({ dismissed: true })).toHaveLength(1);
-    expect(db.listOccurrences({ dismissed: false })).toEqual([second]);
     expect(
       db.listAlertEvents(first.id).map((event) => event.eventType),
-    ).toEqual(["raised", "cleared", "dismissed"]);
+    ).toEqual(["raised", "cleared"]);
     expect(db.listDeliveries()).toHaveLength(2);
   });
 
@@ -287,7 +363,6 @@ describe("occurrence storage", () => {
         clear: true,
         acknowledge: true,
         silence: true,
-        dismiss: true,
       },
     });
     db.setPolicy(occurrence.definitionId, {
@@ -302,7 +377,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(6);
+    expect(db.schemaVersion()).toBe(7);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
@@ -811,20 +886,71 @@ describe("occurrence storage", () => {
     ).toHaveLength(1);
   });
 
-  it("forgets only inactive discovered definitions and their history", () => {
+  it("removes an inactive stored alert and all definition-owned data", () => {
     const db = database();
     const occurrence = db.ingest(active(), ["ntfy"])!;
     const definitionId = occurrence.definitionId!;
-    expect(db.forgetDiscoveredDefinition(definitionId)).toBe("active");
+    db.setPolicy(definitionId, {
+      enabled: true,
+      notifierIds: ["ntfy"],
+      audio: {
+        enabled: true,
+        sound: "warning",
+        minimumSeverity: "warn",
+        mode: "once",
+        repeatIntervalSeconds: 60,
+        stopOn: { clear: true, acknowledge: true, silence: true },
+      },
+      overrideFields: ["enabled", "notifierIds", "audio.enabled"],
+    });
+    db.setWakeDue(occurrence.id, new Date("2026-01-01T00:10:00Z"));
+    const playback = db.ensureAudioPlayback(occurrence.id, {
+      enabled: true,
+      sound: "warning",
+      minimumSeverity: "warn",
+      mode: "once",
+      repeatIntervalSeconds: 60,
+      stopOn: { clear: true, acknowledge: true, silence: true },
+    });
+    expect(db.claimAudioPlayback(playback.id)).toBe(true);
+    db.recordAudioSuccess(playback.id, undefined, "test", "warning");
+    const delivery = db.listDeliveries()[0];
+    expect(db.claimDelivery(delivery.id)).toBe(true);
+    db.recordDeliverySuccess(delivery.id, "remote-id");
+
+    expect(db.deleteDefinition(definitionId)).toBe("active");
 
     db.ingest(active({ state: "cleared", severity: "normal" }), []);
-    expect(db.forgetDiscoveredDefinition(definitionId)).toBe("deleted");
+    expect(db.deleteDefinition(definitionId)).toBe("deleted");
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
+    expect(db.listAlertEvents()).toEqual([]);
+    expect(db.listWakeRequests()).toEqual([]);
+    expect(() =>
+      db.recordDeliverySuccess(delivery.id, "late-result"),
+    ).not.toThrow();
+    for (const table of [
+      "alert_policies",
+      "alert_policy_notifiers",
+      "occurrence_notifiers",
+      "occurrence_notifier_thresholds",
+      "audio_playbacks",
+      "audio_attempts",
+      "deliveries",
+      "delivery_attempts",
+    ]) {
+      const row = db.db
+        .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
+        .get() as {
+        count: number;
+      };
+      expect(Number(row.count), table).toBe(0);
+    }
+    expect(db.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("does not forget definitions sourced from Signal K metadata", () => {
+  it("also removes inactive definitions sourced from Signal K metadata", () => {
     const db = database();
     db.upsertDefinition({
       id: "zone:anchor",
@@ -832,7 +958,8 @@ describe("occurrence storage", () => {
       pathPattern: "notifications.navigation.anchor",
       name: "Anchor",
     });
-    expect(db.forgetDiscoveredDefinition("zone:anchor")).toBe("not_discovered");
+    expect(db.deleteDefinition("zone:anchor")).toBe("deleted");
+    expect(db.listDefinitions()).toEqual([]);
   });
 
   it("does not rewrite an unchanged definition during discovery refresh", () => {
@@ -900,7 +1027,6 @@ describe("occurrence storage", () => {
         clear: false,
         acknowledge: true,
         silence: true,
-        dismiss: true,
       },
     });
     db.ingest(

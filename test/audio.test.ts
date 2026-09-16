@@ -30,7 +30,6 @@ const policy = (
     clear: true,
     acknowledge: true,
     silence: true,
-    dismiss: true,
   },
   ...overrides,
 });
@@ -81,7 +80,7 @@ describe("local audio playback", () => {
     database.close();
   });
 
-  it.each(["clear", "acknowledge", "silence", "dismiss"] as const)(
+  it.each(["clear", "acknowledge", "silence"] as const)(
     "cancels repeating playback on %s",
     async (trigger) => {
       const database = new AlertDatabase();

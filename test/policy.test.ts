@@ -51,7 +51,6 @@ describe("AlertPolicyResolver", () => {
           clear: true,
           acknowledge: true,
           silence: true,
-          dismiss: true,
         },
       },
       overrideFields: [
@@ -65,7 +64,6 @@ describe("AlertPolicyResolver", () => {
         "audio.stopOn.clear",
         "audio.stopOn.acknowledge",
         "audio.stopOn.silence",
-        "audio.stopOn.dismiss",
       ],
     });
     expect(
@@ -109,7 +107,6 @@ describe("AlertPolicyResolver", () => {
           clear: true,
           acknowledge: true,
           silence: true,
-          dismiss: true,
         },
       },
       overrideFields: ["minimumSeverity", "notifierIds", "audio.sound"],

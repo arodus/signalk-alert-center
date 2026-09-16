@@ -394,7 +394,7 @@ export class AlertDatabase {
     const row = this.db
       .prepare(
         `SELECT COUNT(*) AS total,
-                SUM(CASE WHEN current_state='active' AND dismissed_at IS NULL THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN current_state='active' THEN 1 ELSE 0 END) AS active,
                 SUM(CASE WHEN activation_state='pending' THEN 1 ELSE 0 END) AS pending_activation
          FROM alert_occurrences`,
       )
@@ -499,14 +499,11 @@ export class AlertDatabase {
     }
   }
 
-  forgetDiscoveredDefinition(
-    id: string,
-  ): "deleted" | "active" | "not_discovered" | "not_found" {
+  deleteDefinition(id: string): "deleted" | "active" | "not_found" {
     const definition = this.db
-      .prepare("SELECT source_type FROM alert_definitions WHERE id=?")
+      .prepare("SELECT 1 FROM alert_definitions WHERE id=?")
       .get(id) as Row | undefined;
     if (!definition) return "not_found";
-    if (definition.source_type !== "recognized") return "not_discovered";
     const active = this.db
       .prepare(
         "SELECT 1 FROM alert_occurrences WHERE definition_id=? AND current_state='active' LIMIT 1",
@@ -1249,11 +1246,6 @@ export class AlertDatabase {
       clauses.push("current_severity=?");
       parameters.push(query.severity);
     }
-    if (query.dismissed !== undefined) {
-      clauses.push(
-        query.dismissed ? "dismissed_at IS NOT NULL" : "dismissed_at IS NULL",
-      );
-    }
     if (query.from) {
       clauses.push("started_at >= ?");
       parameters.push(query.from.toISOString());
@@ -1318,8 +1310,6 @@ export class AlertDatabase {
       clearedAt: date(row.cleared_at),
       lastFiredAt: date(lifetime.last_fired_at),
       fireCount: Number(lifetime.count),
-      removedAt: date(row.dismissed_at),
-      dismissedAt: date(row.dismissed_at),
       currentState: row.current_state as AlertRecord["currentState"],
       currentSeverity: row.current_severity as AlertRecord["currentSeverity"],
       maxSeverity: row.max_severity as AlertRecord["maxSeverity"],
@@ -1352,10 +1342,6 @@ export class AlertDatabase {
     this.markOccurrence(id, "silenced_at", "silenced", now);
   }
 
-  dismissOccurrence(id: string, now = new Date()): void {
-    this.markOccurrence(id, "dismissed_at", "dismissed", now);
-  }
-
   recordOccurrenceEvent(
     id: string,
     eventType: string,
@@ -1366,13 +1352,9 @@ export class AlertDatabase {
     this.addEvent(id, eventType, now, payload);
   }
 
-  removeAlert(id: string, now = new Date()): void {
-    this.dismissOccurrence(id, now);
-  }
-
   private markOccurrence(
     id: string,
-    column: "acknowledged_at" | "silenced_at" | "dismissed_at",
+    column: "acknowledged_at" | "silenced_at",
     event: string,
     now: Date,
   ): void {
@@ -1996,7 +1978,13 @@ export class AlertDatabase {
            WHERE d.id=?`,
         )
         .get(id) as Row | undefined;
-      if (!row) throw new Error(`Unknown delivery intent: ${id}`);
+      // An administrator may remove the complete stored alert while a transport
+      // request is in flight. Its result has nowhere to be persisted, which is
+      // expected after that explicit deletion.
+      if (!row) {
+        this.db.exec("COMMIT");
+        return;
+      }
       this.db
         .prepare(
           `UPDATE deliveries SET state=?, delivered_at=?, remote_id=?, next_attempt_at=?,

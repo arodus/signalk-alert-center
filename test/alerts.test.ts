@@ -168,16 +168,6 @@ describe("AlertLifecycle", () => {
     expect(database.getAlert(second.id).fireCount).toBe(2);
   });
 
-  it("soft-removes an alert without deleting its delivery history", () => {
-    const { database, lifecycle } = createLifecycle(["ntfy-main"]);
-    const record = lifecycle.ingest(alert());
-
-    database.removeAlert(record.id);
-
-    expect(database.getAlert(record.id).removedAt).toBeInstanceOf(Date);
-    expect(database.listDeliveries()).toHaveLength(1);
-  });
-
   it("persists a notification id and clears acknowledge/silence on re-fire", () => {
     const { database, lifecycle } = createLifecycle(["ntfy-main"]);
     const raisedAt = new Date("2026-09-05T10:00:00.000Z");

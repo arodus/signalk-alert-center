@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 6;
+export const currentSchemaVersion = 7;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -147,6 +147,30 @@ CREATE INDEX deliveries_service_success_idx
   ON deliveries(transport_instance_id, delivered_at DESC);
 CREATE INDEX delivery_attempts_finished_idx
   ON delivery_attempts(finished_at DESC, id DESC);
+`,
+  },
+  {
+    version: 7,
+    sql: `
+UPDATE alert_policies
+SET override_fields_json = json_remove(
+  override_fields_json,
+  '$[' || (
+    SELECT key FROM json_each(override_fields_json)
+    WHERE value='audio.stopOn.dismiss' LIMIT 1
+  ) || ']'
+)
+WHERE EXISTS (
+  SELECT 1 FROM json_each(override_fields_json)
+  WHERE value='audio.stopOn.dismiss'
+);
+UPDATE alert_policies
+SET audio_policy_json = json_remove(audio_policy_json, '$.stopOn.dismiss')
+WHERE audio_policy_json IS NOT NULL;
+UPDATE audio_playbacks
+SET stop_on_json = json_remove(stop_on_json, '$.dismiss');
+DELETE FROM alert_events WHERE event_type='dismissed';
+ALTER TABLE alert_occurrences DROP COLUMN dismissed_at;
 `,
   },
 ];

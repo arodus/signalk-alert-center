@@ -1025,10 +1025,14 @@ export class PersistentNotifierRuntime {
         this.emitChange("policy");
         return updated;
       },
-      forgetDefinition: (id: string) => {
-        const result = this.db().forgetDiscoveredDefinition(id);
+      deleteDefinition: (id: string) => {
+        const result = this.db().deleteDefinition(id);
         if (result === "deleted") {
-          this.debug(`Forgot discovered alert: definitionId=${id}`);
+          this.scheduleNextWake();
+          this.scheduleNextActivation();
+          this.scheduleNextDelivery();
+          this.scheduleNextAudio();
+          this.debug(`Removed stored alert: definitionId=${id}`);
           this.emitChange("definition");
         }
         return result;
@@ -1085,16 +1089,6 @@ export class PersistentNotifierRuntime {
           this.emitChange("deliveries");
         }
         return result;
-      },
-      dismissOccurrence: (id) => {
-        const occurrence = this.getOccurrence(id);
-        if (!occurrence) return false;
-        this.db().dismissOccurrence(id);
-        this.audioScheduler?.cancel(id, "dismiss");
-        this.scheduleNextAudio();
-        this.debug(`Dismissed occurrence: occurrenceId=${id}`);
-        this.emitChange("occurrence");
-        return { status: "dismissed", upstream: "not_requested" };
       },
       acknowledgeOccurrence: async (id) => {
         const occurrence = this.getOccurrence(id);
@@ -1345,7 +1339,6 @@ export class PersistentNotifierRuntime {
         this.database
           ?.listDefinitions()
           .map((item) => this.definitionView(item)) ?? [],
-      (id) => Boolean(repository.dismissOccurrence(id)),
       (id) => Boolean(repository.acknowledgeOccurrence(id)),
       (id) => Boolean(repository.silenceOccurrence(id)),
     );

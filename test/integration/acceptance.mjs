@@ -141,14 +141,11 @@ assert.equal(
   events.items.some((event) => event.eventType === "raised"),
   true,
 );
-await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences/${occurrence.id}/dismiss`,
-  { method: "POST" },
+const activeRemoval = await fetch(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+  { method: "DELETE" },
 );
-const dismissed = await json(
-  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences/${occurrence.id}`,
-);
-assert.equal(Boolean(dismissed.dismissedAt), true);
+assert.equal(activeRemoval.status, 409);
 
 const status = await json(
   `${signalkUrl}/plugins/signalk-persistent-notifier/status`,
@@ -159,7 +156,7 @@ assert.equal(
   true,
 );
 assert.equal(status.database.healthy, true);
-assert.equal(status.database.schemaVersion, 6);
+assert.equal(status.database.schemaVersion, 7);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);
@@ -203,7 +200,31 @@ const repeated = await eventually(
   "re-raised occurrence was not persisted",
 );
 assert.notEqual(repeated.items[0].id, occurrence.id);
-assert.equal(Boolean(repeated.items[0].dismissedAt), false);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/clear`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ source: "fixture.acceptance" }),
+});
+await eventually(
+  () =>
+    json(
+      `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences/${repeated.items[0].id}`,
+    ),
+  (item) => item.state === "cleared",
+  "re-raised occurrence did not clear",
+);
+await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+  { method: "DELETE" },
+);
+const removedDefinition = await fetch(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
+);
+assert.equal(removedDefinition.status, 404);
+const removedOccurrences = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
+);
+assert.equal(removedOccurrences.items.length, 0);
 
 const seeded = await json(`${signalkUrl}/plugins/signalk-test-fixture/seed`, {
   method: "POST",
@@ -214,7 +235,7 @@ const demoOccurrences = await eventually(
     json(
       `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
     ),
-  (page) => page.items.length >= 10,
+  (page) => page.items.length >= 9,
   "demo deltas were not persisted",
 );
 assert.equal(
