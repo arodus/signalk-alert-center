@@ -10,7 +10,7 @@ const requireValue = (condition, message) => {
 };
 
 requireValue(
-  packageJson.name === "signalk-persistent-notifier",
+  packageJson.name === "signalk-alert-center",
   "unexpected package name",
 );
 requireValue(
@@ -57,8 +57,13 @@ requireValue(
   `missing type entry point ${packageJson.types}`,
 );
 requireValue(existsSync("LICENSE"), "LICENSE file is required");
+requireValue(
+  packageJson.bin?.["signalk-alert-center-migrate"] ===
+    "scripts/migrate-name.mjs",
+  "configuration migration command is required",
+);
 
-const npmCache = mkdtempSync(join(tmpdir(), "persistent-notifier-npm-cache-"));
+const npmCache = mkdtempSync(join(tmpdir(), "alert-center-npm-cache-"));
 const packed = spawnSync(
   "npm",
   ["pack", "--dry-run", "--json", "--ignore-scripts"],
@@ -90,10 +95,12 @@ if (packed.status !== 0) {
       "public/index.html",
       "public/app.js",
       "public/styles.css",
+      "scripts/migrate-name.mjs",
     ])
       requireValue(paths.includes(required), `package is missing ${required}`);
 
-    const allowed = /^(LICENSE|README\.md|package\.json|dist\/|public\/)/;
+    const allowed =
+      /^(LICENSE|README\.md|package\.json|dist\/|public\/|scripts\/migrate-name\.mjs$)/;
     for (const path of paths)
       requireValue(allowed.test(path), `unexpected packaged file: ${path}`);
 

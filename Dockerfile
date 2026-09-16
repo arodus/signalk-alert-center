@@ -16,10 +16,10 @@ FROM ${SIGNALK_SERVER_IMAGE} AS runtime
 # Baked outside /home/node/.signalk: that path is normally bind-mounted for
 # persistence, which would otherwise shadow a plugin copied directly into it.
 # The entrypoint installs it into the mounted volume on first run instead.
-COPY --from=build --chown=node:node /build/package.json /build/README.md /build/LICENSE /opt/signalk-persistent-notifier/
-COPY --from=build --chown=node:node /build/dist /opt/signalk-persistent-notifier/dist
-COPY --from=build --chown=node:node /build/public /opt/signalk-persistent-notifier/public
-COPY --from=build --chown=node:node /build/node_modules /opt/signalk-persistent-notifier/node_modules
+COPY --from=build --chown=node:node /build/package.json /build/README.md /build/LICENSE /opt/signalk-alert-center/
+COPY --from=build --chown=node:node /build/dist /opt/signalk-alert-center/dist
+COPY --from=build --chown=node:node /build/public /opt/signalk-alert-center/public
+COPY --from=build --chown=node:node /build/node_modules /opt/signalk-alert-center/node_modules
 COPY --chown=node:node --chmod=755 docker-entrypoint.sh /home/node/docker-entrypoint.sh
 ENTRYPOINT ["/home/node/docker-entrypoint.sh"]
 

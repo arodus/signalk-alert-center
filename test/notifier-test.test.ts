@@ -23,7 +23,7 @@ describe("manual notification-service tests", () => {
         method: "POST",
         headers: expect.objectContaining({
           Authorization: "Bearer secret-token",
-          Title: "TEST: Signal K Persistent Notifier",
+          Title: "TEST: Signal K Alert Center",
         }),
       }),
     );
@@ -135,7 +135,7 @@ describe("manual notification-service tests", () => {
       routing_key: "private-routing-key",
       event_action: "trigger",
       payload: {
-        summary: "TEST: Signal K Persistent Notifier: Emergency",
+        summary: "TEST: Signal K Alert Center: Emergency",
         severity: "warning",
       },
     });

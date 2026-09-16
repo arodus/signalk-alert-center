@@ -1,4 +1,4 @@
-const apiBase = "/plugins/signalk-persistent-notifier";
+const apiBase = "/plugins/signalk-alert-center";
 const state = {
   definitions: [],
   occurrences: [],

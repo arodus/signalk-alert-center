@@ -42,7 +42,7 @@ const page = (item: string) => ({
 export function getAlertCenterOpenApi() {
   return {
     openapi: "3.0.3",
-    info: { title: "Persistent Notifier Alert Center", version: "1.0.0" },
+    info: { title: "Signal K Alert Center", version: "1.0.0" },
     paths: {
       "/status": {
         get: {

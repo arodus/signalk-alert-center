@@ -26,7 +26,11 @@ install_plugin() {
   cp -R "$source_dir" "$destination"
 }
 
-install_plugin /opt/signalk-persistent-notifier signalk-persistent-notifier
+install_plugin /opt/signalk-alert-center signalk-alert-center
+# Development images before the rename installed the old package into the
+# persistent data volume. Remove only that obsolete package copy; its database
+# and configuration are handled separately below.
+rm -rf /home/node/.signalk/node_modules/signalk-persistent-notifier
 if [ -d /opt/signalk-test-fixture ]; then
   install_plugin /opt/signalk-test-fixture signalk-test-fixture
 fi
@@ -42,9 +46,18 @@ EOF
 fi
 
 mkdir -p /home/node/.signalk/plugin-config-data
-if [ ! -f /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json ]; then
+old_config=/home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json
+new_config=/home/node/.signalk/plugin-config-data/signalk-alert-center.json
+if [ ! -f "$new_config" ] && [ -f "$old_config" ]; then
+  mv "$old_config" "$new_config"
+  echo "Migrated Signal K Alert Center configuration to the new plugin id"
+elif [ -f "$new_config" ] && [ -f "$old_config" ]; then
+  echo "Both old and new Alert Center configurations exist; leaving the old file untouched" >&2
+fi
+
+if [ ! -f "$new_config" ]; then
   zone_refresh_seconds="${SIGNALK_ZONE_REFRESH_SECONDS:-300}"
-  cat > /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json <<EOF
+  cat > "$new_config" <<EOF
 {
   "enabled": true,
   "configuration": {
@@ -59,7 +72,7 @@ fi
 
 # Convert the pre-list development format without dropping locally stored
 # credentials. New installations and the Signal K form always write an array.
-node - /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json <<'NODE'
+node - "$new_config" <<'NODE'
 const fs = require("node:fs");
 const filename = process.argv[2];
 const saved = JSON.parse(fs.readFileSync(filename, "utf8"));

@@ -4,11 +4,6 @@ npm is the authoritative package source and supplies the Signal K App Store.
 Each published version also has an annotated Git tag and a GitHub Release with
 the exact npm tarball and its SHA-256 checksum.
 
-The first publication is blocked by issue #50, which renames the package and
-repository to `signalk-alert-center`. Update the names and trusted-publisher
-configuration as part of that work. Do not publish the interim
-`signalk-persistent-notifier` package.
-
 ## One-time repository setup
 
 1. Create a protected GitHub environment named `release` and require maintainer

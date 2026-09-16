@@ -1,4 +1,4 @@
-# Signal K Persistent Notifier
+# Signal K Alert Center
 
 An offline-first Signal K plugin for durable alert delivery through ntfy,
 PagerDuty, and Discord. Alerts and independent per-notifier delivery rows are
@@ -264,9 +264,9 @@ installed without resolving the package from npm:
 npm install --prefix ~/.signalk ./signalk-alert-center-X.Y.Z.tgz
 ```
 
-The first publication will use the `signalk-alert-center` name after the rename
-tracked in issue #50. Do not install directly from a moving Git branch. Maintainer
-release policy, validation, rollback, and database-backup requirements are in
+The first publication will use the `signalk-alert-center` package name. Do not
+install directly from a moving Git branch. Maintainer release policy, validation,
+rollback, and database-backup requirements are in
 [`docs/RELEASING.md`](docs/RELEASING.md).
 
 For development, install dependencies with `npm install` and compile with
@@ -364,6 +364,36 @@ By default, the database is `persistent-notifier.sqlite` inside Signal K's data
 directory, so the configuration works across native and container installations.
 When `storage.path` is relative, it is resolved from that data directory. An absolute
 path remains supported when you intentionally manage the database elsewhere.
+The database filename intentionally keeps its old name so an upgrade retains all
+definitions, per-alert settings, occurrences, and delivery history without copying
+or rewriting SQLite data.
+
+### Migrating a development installation from the old name
+
+The rename changes the npm package, Signal K plugin id, settings filename,
+dashboard URL, and API URL. Stop Signal K before migrating. Install the new package,
+move the saved settings with the included guarded command, remove the old package,
+and then restart Signal K:
+
+```sh
+npm install --prefix ~/.signalk ./signalk-alert-center-X.Y.Z.tgz
+~/.signalk/node_modules/.bin/signalk-alert-center-migrate --data-dir ~/.signalk
+npm uninstall --prefix ~/.signalk signalk-persistent-notifier
+```
+
+The migration command moves
+`plugin-config-data/signalk-persistent-notifier.json` to
+`plugin-config-data/signalk-alert-center.json` without reading or printing its
+notification-service secrets. It refuses to overwrite anything when both files
+exist. The configured database path is not changed, so stored alert data and
+per-alert policy remain in place. After restart, use `/signalk-alert-center` rather
+than the former dashboard URL.
+
+The provided Docker entrypoint performs the same settings-file move automatically
+inside an existing named volume before Signal K starts. It retains
+`persistent-notifier.sqlite`. Back up the Signal K data directory before any manual
+upgrade; if migration must be reversed, stop Signal K and move the configuration
+file back to its former name before reinstalling the old development package.
 
 The Signal K plugin form contains only global configuration: storage/discovery,
 bounded ingestion and delivery limits, retry behavior, notifier connections and
@@ -399,7 +429,7 @@ the selected service type.
 
 Repeated updates coalesce by notification path and available source identifier. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
 
-The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifier`:
+The plugin API is mounted by Signal K under `/plugins/signalk-alert-center`:
 
 - `GET /status`
 - `GET /alerts`
@@ -469,7 +499,7 @@ that permits more work to remain resident.
 plus `state`, `severity`, `from`, and `to`. Filters can be combined;
 cursor ordering remains stable by occurrence start time and id.
 
-The dashboard is served at `/signalk-persistent-notifier`. The default **Alerts**
+The dashboard is served at `/signalk-alert-center`. The default **Alerts**
 tab uses one compact table for all known definitions, with active alerts first. Select an alert to open
 its current information, five most recent occurrences, selected occurrence timeline, and **Settings**. Acknowledge and
 Silence are available directly in active rows, with completed actions shown disabled.
@@ -567,7 +597,7 @@ docker compose -f docker-compose.live.yml up --build
 ```
 
 Open `http://localhost:3000`, complete Signal K setup if prompted, enable/configure
-the plugin, then open `http://localhost:3000/signalk-persistent-notifier`. The live
+the plugin, then open `http://localhost:3000/signalk-alert-center`. The live
 Compose file uses a named volume. Remove it only when you intentionally want a
 fresh development database:
 

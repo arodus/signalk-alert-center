@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 const compose = [
   "compose",
   "-p",
-  "notifier-browser",
+  "alert-center-browser",
   "-f",
   "docker-compose.acceptance.yml",
 ];

@@ -5,12 +5,12 @@ import { ServerAPI } from "@signalk/server-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pathDefinitionId } from "../src/alerts/policy";
 import { AlertCenterRepository, Page } from "../src/api/routes";
-import { PersistentNotifierRuntime } from "../src/runtime";
+import { AlertCenterRuntime } from "../src/runtime";
 import { AlertDatabase } from "../src/storage/db";
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-describe("PersistentNotifierRuntime", () => {
+describe("AlertCenterRuntime", () => {
   const directories: string[] = [];
 
   afterEach(() => {
@@ -32,7 +32,7 @@ describe("PersistentNotifierRuntime", () => {
       ),
     );
     const app = { debug: vi.fn(), error: vi.fn() } as unknown as ServerAPI;
-    const runtime = new PersistentNotifierRuntime(app);
+    const runtime = new AlertCenterRuntime(app);
     const internal = runtime as unknown as {
       config: object;
       testNotifier(id: string, operation: "send" | "resolve"): Promise<unknown>;
@@ -60,7 +60,7 @@ describe("PersistentNotifierRuntime", () => {
 
   it("resolves relative database paths inside the Signal K data directory", () => {
     const dataDirectory = join(tmpdir(), "signalk-data");
-    const runtime = new PersistentNotifierRuntime({
+    const runtime = new AlertCenterRuntime({
       getDataDirPath: () => dataDirectory,
     } as unknown as ServerAPI);
     const databasePath = (
@@ -142,7 +142,7 @@ describe("PersistentNotifierRuntime", () => {
         },
       },
     } as unknown as ServerAPI;
-    const runtime = new PersistentNotifierRuntime(app);
+    const runtime = new AlertCenterRuntime(app);
     runtime.start({
       storage: { path: filename },
       notifiers: [
@@ -380,7 +380,7 @@ describe("PersistentNotifierRuntime", () => {
         },
       },
     } as unknown as ServerAPI;
-    const runtime = new PersistentNotifierRuntime(app);
+    const runtime = new AlertCenterRuntime(app);
     try {
       runtime.start({
         ingestion: { queueLimit: 10, batchSize: 2 },
@@ -501,7 +501,7 @@ describe("PersistentNotifierRuntime", () => {
         },
       },
     } as unknown as ServerAPI;
-    const runtime = new PersistentNotifierRuntime(app);
+    const runtime = new AlertCenterRuntime(app);
     runtime.start({ ingestion: { queueLimit: 10, batchSize: 2 } });
     try {
       await vi.waitFor(() => {

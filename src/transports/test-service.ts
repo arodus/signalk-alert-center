@@ -29,7 +29,7 @@ interface TestOptions {
   operation?: NotificationTestOperation;
 }
 
-const testTitle = "TEST: Signal K Persistent Notifier";
+const testTitle = "TEST: Signal K Alert Center";
 const testBody =
   "Manual notification-service test. This is not a vessel alert and no alert occurrence was created.";
 
@@ -89,7 +89,7 @@ function requestFor(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: "Signal K Persistent Notifier",
+          username: "Signal K Alert Center",
           embeds: [
             {
               title: testTitle,
@@ -102,7 +102,7 @@ function requestFor(
       },
       successMessage: "Discord accepted the manual test notification.",
     };
-  const dedupKey = `signalk-persistent-notifier-test:${createHash("sha256")
+  const dedupKey = `signalk-alert-center-test:${createHash("sha256")
     .update(notifier.name)
     .digest("hex")
     .slice(0, 24)}`;
@@ -122,7 +122,7 @@ function requestFor(
               payload: {
                 summary: `${testTitle}: ${notifier.name}`,
                 severity: "warning",
-                source: "signalk-persistent-notifier/manual-test",
+                source: "signalk-alert-center/manual-test",
                 timestamp: new Date().toISOString(),
                 custom_details: { message: testBody },
               },

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const plugin = "/plugins/signalk-persistent-notifier";
+const plugin = "/plugins/signalk-alert-center";
 const fixture = "/plugins/signalk-test-fixture";
 
 test.beforeEach(async ({ request }) => {
@@ -10,7 +10,7 @@ test.beforeEach(async ({ request }) => {
 test("shows alerts, opens details, edits settings, and filters exact sources", async ({
   page,
 }) => {
-  await page.goto("/signalk-persistent-notifier/");
+  await page.goto("/signalk-alert-center/");
   await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
   await expect(page.locator("#health-state")).toHaveText(/healthy|degraded/);
   const diagnostics = page.locator(".system-diagnostics");
@@ -80,7 +80,7 @@ test("refreshes from the live event stream without a page reload", async ({
   page,
   request,
 }) => {
-  await page.goto("/signalk-persistent-notifier/");
+  await page.goto("/signalk-alert-center/");
   const marker = `Browser SSE ${Date.now()}`;
   await request.post(`${fixture}/raise`, {
     data: { source: `browser.sse.${Date.now()}`, message: marker },
@@ -91,7 +91,7 @@ test("refreshes from the live event stream without a page reload", async ({
 test("shows alert updates in a separate history tab without delivery data", async ({
   page,
 }) => {
-  await page.goto("/signalk-persistent-notifier/#history");
+  await page.goto("/signalk-alert-center/#history");
   await expect(page.locator("#alert-history-panel")).toBeVisible();
   await expect(page.locator("#alerts-panel")).toBeHidden();
   await expect(page.locator("#deliveries-panel")).toBeHidden();
@@ -142,7 +142,7 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
     service: { id: "Bridge alerts", name: "Bridge alerts", type: "ntfy" },
   };
   await page.route(
-    /\/plugins\/signalk-persistent-notifier\/deliveries(?:\/.*)?(?:\?.*)?$/,
+    /\/plugins\/signalk-alert-center\/deliveries(?:\/.*)?(?:\?.*)?$/,
     async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname.endsWith("/delivery-1/retry")) {
@@ -172,7 +172,7 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
     },
   );
 
-  await page.goto("/signalk-persistent-notifier/");
+  await page.goto("/signalk-alert-center/");
   await expect(page.locator("#alerts-panel")).toBeVisible();
   await expect(page.locator("#deliveries-panel")).toBeHidden();
   await page.getByRole("tab", { name: /Deliveries/ }).click();
@@ -197,7 +197,7 @@ test("shows an empty Deliveries tab", async ({ page }) => {
   await page.route(`**${plugin}/deliveries**`, (route) =>
     route.fulfill({ json: { items: [] } }),
   );
-  await page.goto("/signalk-persistent-notifier/#deliveries");
+  await page.goto("/signalk-alert-center/#deliveries");
   await expect(page.locator("#deliveries-panel")).toBeVisible();
   await expect(page.locator("#delivery-list")).toContainText(
     "No deliveries yet",
@@ -213,7 +213,7 @@ test("surfaces authentication failures", async ({ page }) => {
       body: '{"error":"unauthorized"}',
     });
   });
-  await page.goto("/signalk-persistent-notifier/");
+  await page.goto("/signalk-alert-center/");
   await expect(page.locator("#login")).toBeVisible();
   await expect(page.locator("#error")).toContainText("Sign in to Signal K");
 });
@@ -265,7 +265,7 @@ test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
     },
   );
 
-  await page.goto("/signalk-persistent-notifier/");
+  await page.goto("/signalk-alert-center/");
   await page.locator(".system-diagnostics summary").click();
   const card = page.locator(".service-test-card").filter({
     hasText: "Test PagerDuty",
@@ -292,7 +292,7 @@ test("saves a notification service after changing its type", async ({
     "Configuration is shared by both browser projects.",
   );
 
-  await page.goto("/admin/#/apps/configuration/signalk-persistent-notifier");
+  await page.goto("/admin/#/apps/configuration/signalk-alert-center");
   await expect(
     page.getByText("Enable local audio playback", { exact: true }),
   ).toHaveCount(0);
