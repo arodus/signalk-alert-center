@@ -66,9 +66,10 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await page.getByRole("button", { name: "Cancel" }).click();
   await page.locator("#drawer-close").click();
 
-  await page.getByText("More filters").click();
+  const alertsPanel = page.locator("#alerts-panel");
+  await alertsPanel.getByText("More filters").click();
   await page.locator("#source-filter").fill("demo.fridge.sensor");
-  await page.getByRole("button", { name: "Apply" }).click();
+  await alertsPanel.getByRole("button", { name: "Apply" }).click();
   await expect(fridge).toBeVisible();
   await expect(page.locator("#definition-list")).not.toContainText(
     "High water detected",
