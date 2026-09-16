@@ -252,6 +252,73 @@ const notifierPlugin = plugins.find(
   (plugin) => plugin.id === "signalk-persistent-notifier",
 );
 assert.ok(notifierPlugin, "persistent notifier is listed by Signal K");
+const configurationWithTestService = {
+  ...notifierPlugin.data.configuration,
+  notifiers: [
+    {
+      name: "Acceptance ntfy",
+      type: "ntfy",
+      server: "http://notifier-mock:8080",
+      topic: "manual-test",
+    },
+  ],
+};
+await json(
+  `${signalkUrl}/skServer/plugins/signalk-persistent-notifier/config`,
+  {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...notifierPlugin.data,
+      configuration: configurationWithTestService,
+    }),
+  },
+);
+await eventually(
+  () => json(`${signalkUrl}/plugins/signalk-persistent-notifier/notifiers`),
+  (page) => page.items.some((item) => item.id === "Acceptance ntfy"),
+  "test notification service was not configured",
+);
+const occurrencesBeforeTest = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
+);
+const deliveriesBeforeTest = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/deliveries?limit=100`,
+);
+await json(`${mockUrl}/reset`, { method: "POST" });
+const serviceTest = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/notifiers/${encodeURIComponent("Acceptance ntfy")}/test`,
+  {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ operation: "send" }),
+  },
+);
+assert.equal(serviceTest.status, "success");
+assert.equal(serviceTest.category, "success");
+assert.equal(serviceTest.service.id, "Acceptance ntfy");
+const testRequests = await json(`${mockUrl}/requests`);
+assert.equal(testRequests.length, 1);
+assert.equal(testRequests[0].url, "/manual-test");
+assert.equal(
+  testRequests[0].headers.title,
+  "TEST: Signal K Persistent Notifier",
+);
+assert.match(testRequests[0].body, /not a vessel alert/);
+const occurrencesAfterTest = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/occurrences?limit=100`,
+);
+const deliveriesAfterTest = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/deliveries?limit=100`,
+);
+assert.deepEqual(
+  occurrencesAfterTest.items.map((item) => item.id),
+  occurrencesBeforeTest.items.map((item) => item.id),
+);
+assert.deepEqual(
+  deliveriesAfterTest.items.map((item) => item.id),
+  deliveriesBeforeTest.items.map((item) => item.id),
+);
 await json(
   `${signalkUrl}/skServer/plugins/signalk-persistent-notifier/config`,
   {
@@ -260,7 +327,7 @@ await json(
     body: JSON.stringify({
       ...notifierPlugin.data,
       configuration: {
-        ...notifierPlugin.data.configuration,
+        ...configurationWithTestService,
         maintenance: { resetDatabase: true },
       },
     }),

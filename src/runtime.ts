@@ -44,6 +44,11 @@ import { DiscordTransport } from "./transports/discord";
 import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
 import { NotificationTransport } from "./transports/transport";
+import {
+  NotificationTestOperation,
+  NotificationTestResult,
+  testNotificationService,
+} from "./transports/test-service";
 
 const MAX_TIMER_DELAY = 2_147_000_000;
 const UPSTREAM_ACTION_TIMEOUT_MS = 5_000;
@@ -87,6 +92,7 @@ export class PersistentNotifierRuntime {
   private lastQueueWarningAt = 0;
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
+  private notifierTests = new Set<string>();
   private changeRevision = 0;
   private changeListeners = new Set<(change: AlertCenterChange) => void>();
   private retentionState?: {
@@ -1153,8 +1159,56 @@ export class PersistentNotifierRuntime {
             enabled: true,
             minimumSeverity: notifier.minSeverity ?? "normal",
           })),
+      testNotifier: (id, operation) => this.testNotifier(id, operation),
       subscribeChanges: (listener) => this.subscribeChanges(listener),
     });
+  }
+
+  private async testNotifier(
+    id: string,
+    operation: NotificationTestOperation,
+  ): Promise<
+    | NotificationTestResult
+    | "not_found"
+    | "disabled"
+    | "in_progress"
+    | "unsupported"
+  > {
+    const notifier = (this.config.notifiers ?? []).find(
+      (candidate) => candidate.name === id,
+    );
+    if (!notifier) return "not_found";
+    if (notifier.enabled === false) return "disabled";
+    if (operation === "resolve" && notifier.type !== "pagerduty")
+      return "unsupported";
+    if (this.notifierTests.has(id)) return "in_progress";
+    this.notifierTests.add(id);
+    const startedAt = Date.now();
+    try {
+      const timeoutMs = Math.min(
+        30_000,
+        Math.max(
+          1_000,
+          (this.config.delivery?.requestTimeoutSeconds ?? 15) * 1_000,
+        ),
+      );
+      const result = await testNotificationService(notifier, {
+        timeoutMs,
+        operation,
+      });
+      this.debug(
+        `Manual service test: service=${notifier.name}, type=${notifier.type}, operation=${operation}, outcome=${result.category}, durationMs=${result.durationMs}`,
+      );
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      this.app.error(
+        `[persistent-notifier] Manual service test failed: service=${notifier.name}, type=${notifier.type}, outcome=internal, durationMs=${durationMs}`,
+      );
+      throw error;
+    } finally {
+      this.notifierTests.delete(id);
+    }
   }
 
   async stop(): Promise<void> {

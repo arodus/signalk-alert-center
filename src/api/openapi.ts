@@ -218,6 +218,36 @@ export function getAlertCenterOpenApi() {
           },
         },
       },
+      "/notifiers/{id}/test": {
+        post: {
+          summary: "Run a manual notification-service test",
+          description:
+            "Uses the saved service configuration without creating alert occurrences or delivery history. PagerDuty send tests create a real marked test incident; resolve tests close that same test incident.",
+          parameters: [idParameter],
+          requestBody: {
+            content: json({
+              type: "object",
+              properties: {
+                operation: {
+                  type: "string",
+                  enum: ["send", "resolve"],
+                  default: "send",
+                },
+              },
+              additionalProperties: false,
+            }),
+          },
+          responses: {
+            "200": response("Test outcome", {
+              $ref: "#/components/schemas/NotificationTestResult",
+            }),
+            "409": response("Service disabled or test already running", {
+              $ref: "#/components/schemas/Error",
+            }),
+            ...errors,
+          },
+        },
+      },
       "/events": {
         get: {
           summary: "Stream alert-center change notifications",
@@ -717,6 +747,45 @@ export function getAlertCenterOpenApi() {
             enabled: { type: "boolean" },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
           },
+        },
+        NotificationTestResult: {
+          type: "object",
+          required: [
+            "status",
+            "category",
+            "message",
+            "durationMs",
+            "operation",
+            "service",
+          ],
+          properties: {
+            status: { type: "string", enum: ["success", "error"] },
+            category: {
+              type: "string",
+              enum: [
+                "success",
+                "timeout",
+                "authentication",
+                "validation",
+                "transport",
+                "remote",
+              ],
+            },
+            message: { type: "string" },
+            technicalDetail: { type: "string" },
+            durationMs: { type: "integer", minimum: 0 },
+            operation: { type: "string", enum: ["send", "resolve"] },
+            service: {
+              type: "object",
+              required: ["id", "type"],
+              properties: {
+                id: { type: "string" },
+                type: { type: "string" },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
         },
         ActionResult: {
           type: "object",
