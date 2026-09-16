@@ -251,7 +251,26 @@ hardware.
 
 ## Runtime
 
-The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newer. Install with `npm install`, compile with `npm run build`, and install the package through Signal K's normal plugin mechanism.
+The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newer.
+Signal K 2.31.1 is the pinned supported server target; CI also tests the current
+Signal K release as an early compatibility signal.
+
+Stable releases are installed through the Signal K App Store from npm. Every
+published version has a matching annotated source tag and GitHub Release containing
+the exact npm tarball and SHA-256 checksum. A downloaded release tarball can be
+installed without resolving the package from npm:
+
+```sh
+npm install --prefix ~/.signalk ./signalk-alert-center-X.Y.Z.tgz
+```
+
+The first publication will use the `signalk-alert-center` name after the rename
+tracked in issue #50. Do not install directly from a moving Git branch. Maintainer
+release policy, validation, rollback, and database-backup requirements are in
+[`docs/RELEASING.md`](docs/RELEASING.md).
+
+For development, install dependencies with `npm install` and compile with
+`npm run build`.
 
 Startup subscribes to notification deltas before reconciling the existing Signal K
 model. Live updates received during that scan enter a fixed-size queue. Equivalent
