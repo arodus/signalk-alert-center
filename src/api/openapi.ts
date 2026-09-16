@@ -233,6 +233,46 @@ export function getAlertCenterOpenApi() {
           },
         },
       },
+      "/alert-history": {
+        get: {
+          summary:
+            "List alert lifecycle updates without notification-delivery data",
+          parameters: [
+            ...pageParameters,
+            { name: "definitionId", in: "query", schema: { type: "string" } },
+            { name: "path", in: "query", schema: { type: "string" } },
+            { name: "source", in: "query", schema: { type: "string" } },
+            { name: "eventType", in: "query", schema: { type: "string" } },
+            {
+              name: "state",
+              in: "query",
+              schema: { type: "string", enum: ["active", "cleared"] },
+            },
+            {
+              name: "severity",
+              in: "query",
+              schema: { $ref: "#/components/schemas/Severity" },
+            },
+            {
+              name: "from",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              name: "to",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
+          ],
+          responses: {
+            "200": response(
+              "Alert history page",
+              page("#/components/schemas/AlertHistoryEvent"),
+            ),
+            ...errors,
+          },
+        },
+      },
       "/occurrences": {
         get: {
           summary:
@@ -626,6 +666,42 @@ export function getAlertCenterOpenApi() {
             occurredAt: { type: "string", format: "date-time" },
             payload: {},
           },
+        },
+        AlertHistoryEvent: {
+          type: "object",
+          required: [
+            "id",
+            "alertId",
+            "definitionId",
+            "occurrenceNumber",
+            "name",
+            "path",
+            "sourceKey",
+            "state",
+            "severity",
+            "eventType",
+            "occurredAt",
+            "startedAt",
+          ],
+          properties: {
+            id: { type: "integer" },
+            alertId: { type: "string" },
+            definitionId: { type: "string" },
+            occurrenceNumber: { type: "integer", minimum: 1 },
+            name: { type: "string" },
+            path: { type: "string" },
+            sourceKey: { type: "string" },
+            source: { type: "string" },
+            state: { type: "string", enum: ["active", "cleared"] },
+            severity: { $ref: "#/components/schemas/Severity" },
+            message: { type: "string" },
+            eventType: { type: "string" },
+            occurredAt: { type: "string", format: "date-time" },
+            startedAt: { type: "string", format: "date-time" },
+            clearedAt: { type: "string", format: "date-time" },
+            payload: {},
+          },
+          additionalProperties: false,
         },
         Notifier: {
           type: "object",

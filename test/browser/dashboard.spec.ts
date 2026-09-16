@@ -43,6 +43,14 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await expect(fridge).toBeVisible();
   await fridge.click();
   await expect(page.locator("#detail-drawer")).toHaveClass(/is-open/);
+  await expect(
+    page.getByRole("heading", { name: "Recent occurrences" }),
+  ).toBeVisible();
+  const recentOccurrences = page.locator(".recent-occurrence");
+  expect(await recentOccurrences.count()).toBeGreaterThan(0);
+  expect(await recentOccurrences.count()).toBeLessThanOrEqual(5);
+  await expect(recentOccurrences.first()).toContainText("Occurrence");
+  await expect(recentOccurrences.first().locator("time")).not.toHaveText("—");
   await page.getByRole("button", { name: "Alert settings" }).click();
   await expect(page.locator("#policy-dialog")).toBeVisible();
   await expect(
@@ -58,9 +66,10 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await page.getByRole("button", { name: "Cancel" }).click();
   await page.locator("#drawer-close").click();
 
-  await page.getByText("More filters").click();
+  const alertsPanel = page.locator("#alerts-panel");
+  await alertsPanel.getByText("More filters").click();
   await page.locator("#source-filter").fill("demo.fridge.sensor");
-  await page.getByRole("button", { name: "Apply" }).click();
+  await alertsPanel.getByRole("button", { name: "Apply" }).click();
   await expect(fridge).toBeVisible();
   await expect(page.locator("#definition-list")).not.toContainText(
     "High water detected",
@@ -77,6 +86,34 @@ test("refreshes from the live event stream without a page reload", async ({
     data: { source: `browser.sse.${Date.now()}`, message: marker },
   });
   await expect(page.locator("#definition-list")).toContainText(marker);
+});
+
+test("shows alert updates in a separate history tab without delivery data", async ({
+  page,
+}) => {
+  await page.goto("/signalk-persistent-notifier/#history");
+  await expect(page.locator("#alert-history-panel")).toBeVisible();
+  await expect(page.locator("#alerts-panel")).toBeHidden();
+  await expect(page.locator("#deliveries-panel")).toBeHidden();
+  await expect(page.locator("#alert-history-list")).toContainText(
+    "Refrigerator temperature",
+  );
+  await expect(page.locator("#alert-history-list")).toContainText("raised");
+  await expect(page.locator("#alert-history-list")).not.toContainText(
+    "Notification service",
+  );
+
+  await page.locator(".alert-history-row").first().click();
+  await expect(page.locator("#detail-drawer")).toHaveClass(/is-open/);
+  await expect(
+    page.getByRole("heading", { name: "Recent occurrences" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Occurrence timeline" }),
+  ).toBeVisible();
+  await expect(page.locator("#drawer-body")).not.toContainText(
+    "Notifier outcomes",
+  );
 });
 
 test("navigates delivery history, opens attempts, and retries one failure", async ({

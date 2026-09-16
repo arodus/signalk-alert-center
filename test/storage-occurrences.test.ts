@@ -49,7 +49,7 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(8);
+    expect(migrated.schemaVersion()).toBe(9);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -312,7 +312,7 @@ describe("occurrence storage", () => {
     expect(db.operationalStatus()).toMatchObject({
       healthy: false,
       schemaVersion: 0,
-      expectedSchemaVersion: 8,
+      expectedSchemaVersion: 9,
     });
   });
 
@@ -353,6 +353,24 @@ describe("occurrence storage", () => {
     expect(db.listDeliveries()).toEqual([]);
   });
 
+  it("records repeated unchanged Signal K updates in alert history", () => {
+    const db = database();
+    const raised = db.ingest(
+      active({ sourcePayload: { state: "alarm", message: "Anchor dragging" } }),
+      [],
+      new Date("2026-01-01T00:00:00Z"),
+    )!;
+    db.ingest(
+      active({ sourcePayload: { state: "alarm", message: "Anchor dragging" } }),
+      [],
+      new Date("2026-01-01T00:01:00Z"),
+    );
+
+    expect(
+      db.listAlertEvents(raised.id).map((event) => event.eventType),
+    ).toEqual(["raised", "updated"]);
+  });
+
   it("resets all stored data and re-initializes the schema", () => {
     const db = database();
     const occurrence = db.ingest(active(), ["ntfy"])!;
@@ -369,7 +387,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(8);
+    expect(db.schemaVersion()).toBe(9);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
@@ -875,6 +893,112 @@ describe("occurrence storage", () => {
       db.queryOccurrences({ path: "notifications.test", source: "gps.two" })
         .items,
     ).toHaveLength(1);
+  });
+
+  it("returns the latest five occurrences for one alert definition", () => {
+    const db = database();
+    const sourceKey = "notifications.test@gps.repeat";
+    for (let index = 0; index < 6; index += 1) {
+      const raisedAt = new Date(Date.UTC(2026, 0, 1, 0, index * 2));
+      db.ingest(
+        active({
+          sourceKey,
+          path: "notifications.test",
+          source: "gps.repeat",
+        }),
+        [],
+        raisedAt,
+      );
+      db.ingest(
+        active({
+          sourceKey,
+          path: "notifications.test",
+          source: "gps.repeat",
+          state: "cleared",
+          severity: "normal",
+        }),
+        [],
+        new Date(raisedAt.getTime() + 60_000),
+      );
+    }
+
+    const page = db.queryOccurrences({
+      definitionId: `recognized:${sourceKey}`,
+      limit: 5,
+    });
+    expect(page.items.map((item) => item.occurrenceNumber)).toEqual([
+      6, 5, 4, 3, 2,
+    ]);
+    expect(page.nextCursor).toBe(page.items[4].id);
+  });
+
+  it("pages global alert events with occurrence context and no delivery data", () => {
+    const db = database();
+    const sourceKey = "notifications.test@gps.history";
+    const first = db.ingest(
+      active({
+        sourceKey,
+        path: "notifications.test",
+        source: "gps.history",
+        severity: "warn",
+        message: "Getting warm",
+      }),
+      ["ntfy"],
+      new Date("2026-01-01T00:00:00Z"),
+    )!;
+    db.ingest(
+      active({
+        sourceKey,
+        path: "notifications.test",
+        source: "gps.history",
+        severity: "alarm",
+        message: "Too hot",
+      }),
+      ["ntfy"],
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    db.ingest(
+      active({
+        sourceKey,
+        path: "notifications.test",
+        source: "gps.history",
+        state: "cleared",
+        severity: "normal",
+      }),
+      ["ntfy"],
+      new Date("2026-01-01T00:02:00Z"),
+    );
+
+    const page = db.queryAlertHistory({
+      definitionId: first.definitionId,
+      source: "gps.history",
+      limit: 2,
+    });
+    expect(page.items).toHaveLength(2);
+    expect(page.items[0]).toMatchObject({
+      alertId: first.id,
+      definitionId: first.definitionId,
+      name: "notifications.test",
+      path: "notifications.test",
+      source: "gps.history",
+      eventType: "cleared",
+    });
+    expect(page.items[0]).not.toHaveProperty("deliveries");
+    expect(page.nextCursor).toBe(String(page.items[1].id));
+
+    const next = db.queryAlertHistory({
+      definitionId: first.definitionId,
+      source: "gps.history",
+      cursor: page.nextCursor,
+      limit: 2,
+    });
+    expect(next.items.map((item) => item.eventType)).toEqual([
+      "severity_changed",
+      "raised",
+    ]);
+    expect(
+      db.queryAlertHistory({ eventType: "severity_changed" }).items,
+    ).toMatchObject([{ severity: "alarm" }]);
   });
 
   it("removes an inactive stored alert and all definition-owned data", () => {

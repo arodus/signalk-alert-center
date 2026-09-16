@@ -141,6 +141,15 @@ assert.equal(
   events.items.some((event) => event.eventType === "raised"),
   true,
 );
+const alertHistory = await json(
+  `${signalkUrl}/plugins/signalk-persistent-notifier/alert-history?definitionId=${encodeURIComponent(definition.id)}&limit=20`,
+);
+const raisedHistory = alertHistory.items.find(
+  (event) => event.alertId === occurrence.id && event.eventType === "raised",
+);
+assert.equal(Boolean(raisedHistory), true);
+assert.equal(raisedHistory.message, "Acceptance alert");
+assert.equal(Object.hasOwn(raisedHistory, "deliveries"), false);
 const activeRemoval = await fetch(
   `${signalkUrl}/plugins/signalk-persistent-notifier/definitions/${encodeURIComponent(definition.id)}`,
   { method: "DELETE" },
@@ -156,7 +165,7 @@ assert.equal(
   true,
 );
 assert.equal(status.database.healthy, true);
-assert.equal(status.database.schemaVersion, 8);
+assert.equal(status.database.schemaVersion, 9);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);

@@ -393,6 +393,7 @@ The plugin API is mounted by Signal K under `/plugins/signalk-persistent-notifie
 - `GET /notifiers`
 - `GET /occurrences` and `GET /occurrences/:id`
 - `GET /occurrences/:id/events`
+- `GET /alert-history` for the global alert-update feed
 - `POST /occurrences/:id/acknowledge`
 - `POST /occurrences/:id/silence`
 
@@ -450,7 +451,7 @@ cursor ordering remains stable by occurrence start time and id.
 
 The dashboard is served at `/signalk-persistent-notifier`. The default **Alerts**
 tab uses one compact table for all known definitions, with active alerts first. Select an alert to open
-its current information, recent event/notifier timeline, and **Settings**. Acknowledge and
+its current information, five most recent occurrences, selected occurrence timeline, and **Settings**. Acknowledge and
 Silence are available directly in active rows, with completed actions shown disabled.
 Inactive rows use a neutral status badge. Acknowledge and silence apply only
 to active occurrences. Any inactive stored alert can be permanently removed from
@@ -465,6 +466,10 @@ Search matches alert names, paths, sources, and loaded messages.
 Source names are shown in alert details, not in the table.
 Use **More filters** for an exact Signal K path or source and a started-at time
 range. These filters are evaluated by the server and work with **Load more**.
+The separate **Alert history** tab is a newest-first feed of alert lifecycle
+updates across all occurrences. It can be filtered by alert, update type,
+severity, state, source, and time range. It intentionally contains no notifier
+delivery attempts or outcomes; those remain in **Deliveries**.
 Zone definitions share the Alerts table; their threshold ranges appear in the
 detail drawer when you open an alert. Notification services and delivery timing
 are shown in plain language beside each alert. Open the alert and select **Settings**

@@ -5,12 +5,15 @@ const state = {
   activeDefinitionIds: new Set(),
   notifiers: [],
   deliveries: [],
+  alertHistory: [],
   occurrenceCursor: undefined,
   deliveryCursor: undefined,
+  alertHistoryCursor: undefined,
   eventCursor: undefined,
   deliveryAttemptCursor: undefined,
   deliveryAttempts: [],
   selectedOccurrence: undefined,
+  selectedDefinition: undefined,
   selectedDelivery: undefined,
   loading: false,
   reloadQueued: false,
@@ -27,7 +30,9 @@ const elements = {
   diagnostics: $("#diagnostics-list"),
   definitions: $("#definition-list"),
   deliveries: $("#delivery-list"),
+  alertHistory: $("#alert-history-list"),
   moreDeliveries: $("#deliveries-more"),
+  moreAlertHistory: $("#alert-history-more"),
   deliveryTabCount: $("#delivery-tab-count"),
   updated: $("#updated"),
   error: $("#error"),
@@ -409,6 +414,46 @@ function renderDeliveries(deliveries) {
     });
   });
 }
+function eventLabel(eventType) {
+  return String(eventType ?? "updated").replaceAll("_", " ");
+}
+function renderAlertHistory() {
+  elements.alertHistory.innerHTML = state.alertHistory.length
+    ? `<table class="data-table alert-history-table">
+        <thead><tr><th>Alert</th><th>Update</th><th>Severity</th><th>Time</th></tr></thead>
+        <tbody>${state.alertHistory
+          .map((event) => {
+            const title = alertName({
+              name: event.name ?? event.path,
+              pathPattern: event.path,
+            });
+            const message =
+              event.eventType === "severity_changed" && event.payload
+                ? `${event.payload.from ?? "unknown"} → ${event.payload.to ?? event.severity}`
+                : event.eventType === "message_changed" && event.payload
+                  ? `${event.payload.from ?? "No message"} → ${event.payload.to ?? event.message ?? "No message"}`
+                  : event.message;
+            return `<tr class="clickable-row alert-history-row" data-history-occurrence-id="${escapeHtml(event.alertId)}" tabindex="0" aria-label="Open occurrence ${event.occurrenceNumber} of ${escapeHtml(title)}">
+              <td data-label="Alert"><strong class="cell-title">${escapeHtml(title)}</strong><span class="cell-detail compact-detail">Occurrence ${event.occurrenceNumber} · ${escapeHtml(event.path)}</span></td>
+              <td data-label="Update"><strong class="cell-title history-event-type">${escapeHtml(eventLabel(event.eventType))}</strong>${message ? `<span class="cell-detail compact-detail">${escapeHtml(message)}</span>` : ""}</td>
+              <td data-label="Severity"><span class="alert-severity ${escapeHtml(event.severity)}">${escapeHtml(event.severity)}</span></td>
+              <td data-label="Time"><time>${formatDate(event.occurredAt)}</time><span class="cell-detail">${escapeHtml(sourceName(event.sourceKey, event.source))}</span></td>
+            </tr>`;
+          })
+          .join("")}</tbody></table>`
+    : '<div class="empty"><strong>No alert updates found</strong><p>Alert raises, changes, acknowledgements, silences, and clears appear here.</p></div>';
+  elements.moreAlertHistory.hidden = !state.alertHistoryCursor;
+  document.querySelectorAll("[data-history-occurrence-id]").forEach((row) => {
+    const open = () => openOccurrence(row.dataset.historyOccurrenceId);
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+  });
+}
 function occurrenceParams(cursor) {
   const params = new URLSearchParams({ limit: "100" });
   if (cursor) params.set("cursor", cursor);
@@ -419,6 +464,29 @@ function occurrenceParams(cursor) {
   for (const id of ["from", "to"]) {
     const value = $(`#${id}-filter`).value;
     if (value) params.set(id, new Date(value).toISOString());
+  }
+  return params;
+}
+
+function alertHistoryParams(cursor) {
+  const params = new URLSearchParams({ limit: "50" });
+  if (cursor) params.set("cursor", cursor);
+  for (const [field, id] of [
+    ["definitionId", "history-definition-filter"],
+    ["eventType", "history-event-filter"],
+    ["severity", "history-severity-filter"],
+    ["source", "history-source-filter"],
+    ["state", "history-state-filter"],
+  ]) {
+    const value = $(`#${id}`).value.trim();
+    if (value) params.set(field, value);
+  }
+  for (const [field, id] of [
+    ["from", "history-from-filter"],
+    ["to", "history-to-filter"],
+  ]) {
+    const value = $(`#${id}`).value;
+    if (value) params.set(field, new Date(value).toISOString());
   }
   return params;
 }
@@ -444,6 +512,17 @@ function renderPathOptions() {
   if (paths.includes(selected)) select.value = selected;
 }
 
+function renderAlertHistoryDefinitionOptions() {
+  const select = $("#history-definition-filter");
+  const selected = select.value;
+  const definitions = [...state.definitions].sort((left, right) =>
+    alertName(left).localeCompare(alertName(right)),
+  );
+  select.innerHTML = `<option value="">All alerts</option>${definitions.map((definition) => `<option value="${escapeHtml(definition.id)}">${escapeHtml(alertName(definition))}</option>`).join("")}`;
+  if (definitions.some((definition) => definition.id === selected))
+    select.value = selected;
+}
+
 async function loadOccurrences(append = false) {
   const page = await api(
     `/occurrences?${occurrenceParams(append ? state.occurrenceCursor : undefined)}`,
@@ -466,7 +545,17 @@ async function loadDeliveries(append = false) {
   state.deliveryCursor = page.nextCursor;
   renderDeliveries(state.deliveries);
 }
-async function load() {
+async function loadAlertHistory(append = false) {
+  const page = await api(
+    `/alert-history?${alertHistoryParams(append ? state.alertHistoryCursor : undefined)}`,
+  );
+  state.alertHistory = append
+    ? mergeById(state.alertHistory, pageItems(page))
+    : pageItems(page);
+  state.alertHistoryCursor = page.nextCursor;
+  renderAlertHistory();
+}
+async function load(preserveLoadedHistory = false) {
   if (state.loading) {
     state.reloadQueued = true;
     return;
@@ -482,6 +571,7 @@ async function load() {
       notifiers,
       status,
       deliveryPage,
+      alertHistoryPage,
     ] = await Promise.all([
       allPages("/definitions"),
       allPages("/occurrences?state=active"),
@@ -489,18 +579,28 @@ async function load() {
       api("/notifiers"),
       api("/status").catch(() => ({})),
       api("/deliveries?limit=50"),
+      api(`/alert-history?${alertHistoryParams()}`),
     ]);
     state.definitions = definitions;
     state.activeDefinitionIds = new Set(
       activeOccurrences.map((item) => item.definitionId),
     );
     renderPathOptions();
+    renderAlertHistoryDefinitionOptions();
     state.occurrences = hasHistoryFilters()
       ? pageItems(occurrences)
       : mergeById(activeOccurrences, pageItems(occurrences));
     state.notifiers = pageItems(notifiers);
     state.deliveries = pageItems(deliveryPage);
     state.deliveryCursor = deliveryPage.nextCursor;
+    const previousHistoryCursor = state.alertHistoryCursor;
+    state.alertHistory = preserveLoadedHistory
+      ? mergeById(pageItems(alertHistoryPage), state.alertHistory)
+      : pageItems(alertHistoryPage);
+    state.alertHistoryCursor =
+      preserveLoadedHistory && previousHistoryCursor
+        ? previousHistoryCursor
+        : alertHistoryPage.nextCursor;
     state.occurrenceCursor = occurrences.nextCursor;
     elements.activeCount.textContent = activeOccurrences.length;
     elements.definitionCount.textContent =
@@ -519,6 +619,7 @@ async function load() {
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     elements.moreOccurrences.hidden = !state.occurrenceCursor;
     renderDefinitions();
+    renderAlertHistory();
     renderDeliveries(state.deliveries);
     if (state.selectedDelivery) await refreshDeliveryDetail();
   } catch (error) {
@@ -536,7 +637,7 @@ let reloadTimer;
 let fallbackTimer;
 function scheduleReload() {
   clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(() => void load(), 150);
+  reloadTimer = setTimeout(() => void load(true), 150);
 }
 function enableFallbackPolling() {
   if (!fallbackTimer) fallbackTimer = setInterval(() => void load(), 60_000);
@@ -651,27 +752,55 @@ function closeDeliveryDialog() {
   state.deliveryAttempts = [];
   state.deliveryAttemptCursor = undefined;
 }
-function openDefinition(id) {
+function recentOccurrencesMarkup(occurrences, selectedId) {
+  return `<section class="recent-occurrences"><h3>Recent occurrences</h3>${
+    occurrences.length
+      ? `<div class="recent-occurrence-list">${occurrences
+          .map(
+            (occurrence) =>
+              `<button class="recent-occurrence${occurrence.id === selectedId ? " is-selected" : ""}" data-recent-occurrence-id="${escapeHtml(occurrence.id)}" type="button"${occurrence.id === selectedId ? ' aria-current="true"' : ""}><span><strong>Occurrence ${occurrence.occurrenceNumber}</strong><time>${formatDate(occurrence.startedAt)}</time></span><span><span class="alert-severity ${escapeHtml(occurrence.currentSeverity)}">${escapeHtml(occurrence.currentSeverity)}</span><small>${escapeHtml(occurrence.state)}</small></span></button>`,
+          )
+          .join("")}</div>`
+      : '<div class="empty compact-empty">This alert has never fired.</div>'
+  }</section>`;
+}
+function bindRecentOccurrenceLinks() {
+  elements.drawerBody
+    .querySelectorAll("[data-recent-occurrence-id]")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        openOccurrence(button.dataset.recentOccurrenceId),
+      ),
+    );
+}
+async function openDefinition(id) {
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
-  const latest = state.occurrences.find(
-    (occurrence) => occurrence.definitionId === id,
-  );
-  if (latest) return openOccurrence(latest.id);
-  const hasHistory = Boolean(definition.fireCount);
-  state.selectedOccurrence = undefined;
   elements.drawerTitle.textContent = definition.name ?? definition.pathPattern;
-  elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>${hasHistory ? "Inactive" : "Never fired"}</dd></div><div><dt>Last fired</dt><dd>${formatDate(definition.lastFiredAt)}</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${hasHistory ? '<p class="cell-detail">Older history is not loaded. Use Load more to retrieve it.</p>' : ""}<button class="button button-primary drawer-settings" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
-  elements.drawerResult.textContent = "";
-  elements.events.innerHTML = '<div class="empty">No history recorded.</div>';
-  elements.moreEvents.hidden = true;
+  elements.drawerBody.innerHTML = '<div class="empty">Loading alert…</div>';
   elements.backdrop.hidden = false;
   elements.drawer.classList.add("is-open");
   elements.drawer.setAttribute("aria-hidden", "false");
-  elements.drawer.focus();
-  elements.drawerBody
-    .querySelector(".drawer-settings")
-    .addEventListener("click", () => openPolicy(id));
+  try {
+    const page = await api(
+      `/occurrences?definitionId=${encodeURIComponent(id)}&limit=5`,
+    );
+    const recent = pageItems(page);
+    if (recent.length) return openOccurrence(recent[0].id);
+    state.selectedOccurrence = undefined;
+    state.selectedDefinition = id;
+    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
+    elements.drawerResult.textContent = "";
+    elements.events.innerHTML =
+      '<div class="empty">No occurrence timeline.</div>';
+    elements.moreEvents.hidden = true;
+    elements.drawerBody
+      .querySelector(".drawer-settings")
+      .addEventListener("click", () => openPolicy(id));
+    elements.drawer.focus();
+  } catch (error) {
+    showError(error);
+  }
 }
 async function openOccurrence(id) {
   try {
@@ -679,11 +808,17 @@ async function openOccurrence(id) {
     const definition = state.definitions.find(
       (item) => item.id === occurrence.definitionId,
     );
+    const recentPage = await api(
+      `/occurrences?definitionId=${encodeURIComponent(occurrence.definitionId)}&limit=5`,
+    );
+    const recent = pageItems(recentPage);
     state.selectedOccurrence = id;
+    state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>${(occurrence.deliveries ?? []).length ? `<h3>Notifier outcomes</h3>${occurrence.deliveries.map((delivery) => `<div class="delivery-meta"><strong>${escapeHtml(delivery.notifierId ?? delivery.transportInstanceId)}</strong> · ${escapeHtml(delivery.operation ?? "notify")} · ${escapeHtml(delivery.state)}${(delivery.attempts ?? []).map((attempt) => `<div>Attempt ${attempt.attemptNumber} · ${escapeHtml(attempt.outcome)} · ${formatDate(attempt.startedAt)}${attempt.errorMessage ? ` · ${escapeHtml(attempt.errorMessage)}` : ""}</div>`).join("")}</div>`).join("")}` : ""}`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
     elements.drawerResult.textContent = "";
+    bindRecentOccurrenceLinks();
     elements.drawerBody
       .querySelector(".drawer-settings")
       ?.addEventListener("click", () => openPolicy(definition.id));
@@ -725,6 +860,7 @@ function closeDrawer() {
   elements.drawer.setAttribute("aria-hidden", "true");
   elements.backdrop.hidden = true;
   state.selectedOccurrence = undefined;
+  state.selectedDefinition = undefined;
 }
 
 function setPolicyControlValues(policy) {
@@ -936,11 +1072,12 @@ async function resetPolicy() {
 }
 
 function selectView(view, moveFocus = false) {
-  const deliveries = view === "deliveries";
-  $("#alerts-panel").hidden = deliveries;
-  $("#deliveries-panel").hidden = !deliveries;
+  $("#alerts-panel").hidden = view !== "alerts";
+  $("#alert-history-panel").hidden = view !== "history";
+  $("#deliveries-panel").hidden = view !== "deliveries";
   for (const [name, button] of [
     ["alerts", $("#alerts-tab")],
+    ["history", $("#alert-history-tab")],
     ["deliveries", $("#deliveries-tab")],
   ]) {
     const selected = name === view;
@@ -952,18 +1089,35 @@ function selectView(view, moveFocus = false) {
   history.replaceState(
     null,
     "",
-    deliveries ? "#deliveries" : location.pathname,
+    view === "alerts" ? location.pathname : `#${view}`,
   );
 }
 
-$("#refresh").addEventListener("click", load);
+$("#refresh").addEventListener("click", () => void load());
 $("#history-filters").addEventListener("submit", (event) => {
   event.preventDefault();
   void load();
 });
-$("#state-filter").addEventListener("change", load);
+$("#alert-history-filters").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadAlertHistory();
+});
+$("#history-event-filter").addEventListener("change", () =>
+  loadAlertHistory().catch(showError),
+);
+$("#history-severity-filter").addEventListener("change", () =>
+  loadAlertHistory().catch(showError),
+);
+$("#history-definition-filter").addEventListener("change", () =>
+  loadAlertHistory().catch(showError),
+);
+$("#alert-history-clear").addEventListener("click", () => {
+  $("#alert-history-filters").reset();
+  void loadAlertHistory();
+});
+$("#state-filter").addEventListener("change", () => void load());
 $("#alert-search").addEventListener("input", renderDefinitions);
-$("#severity-filter").addEventListener("change", load);
+$("#severity-filter").addEventListener("change", () => void load());
 $("#filters-clear").addEventListener("click", () => {
   $("#history-filters").reset();
   void load();
@@ -973,6 +1127,9 @@ elements.moreOccurrences.addEventListener("click", () =>
 );
 elements.moreDeliveries.addEventListener("click", () =>
   loadDeliveries(true).catch(showError),
+);
+elements.moreAlertHistory.addEventListener("click", () =>
+  loadAlertHistory(true).catch(showError),
 );
 elements.moreEvents.addEventListener("click", () => loadEvents(true));
 elements.moreDeliveryAttempts.addEventListener(
@@ -998,13 +1155,19 @@ $("#policy-reset").addEventListener("click", resetPolicy);
 initializePolicyOverrideControls();
 for (const [view, button] of [
   ["alerts", $("#alerts-tab")],
+  ["history", $("#alert-history-tab")],
   ["deliveries", $("#deliveries-tab")],
 ]) {
   button.addEventListener("click", () => selectView(view));
   button.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    selectView(view === "alerts" ? "deliveries" : "alerts", true);
+    const views = ["alerts", "history", "deliveries"];
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    selectView(
+      views[(views.indexOf(view) + offset + views.length) % views.length],
+      true,
+    );
   });
 }
 $("#delivery-dialog-close").addEventListener("click", closeDeliveryDialog);
@@ -1040,6 +1203,12 @@ $("#retry").addEventListener("click", async () => {
     $("#retry").disabled = false;
   }
 });
-selectView(location.hash === "#deliveries" ? "deliveries" : "alerts");
+selectView(
+  location.hash === "#deliveries"
+    ? "deliveries"
+    : location.hash === "#history"
+      ? "history"
+      : "alerts",
+);
 connectLiveUpdates();
 void load();

@@ -28,6 +28,15 @@ export interface EventQuery {
   cursor?: string;
   eventType?: string;
 }
+export interface AlertHistoryQuery extends EventQuery {
+  definitionId?: string;
+  path?: string;
+  source?: string;
+  state?: "active" | "cleared";
+  severity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  from?: Date;
+  to?: Date;
+}
 export interface DeliveryQuery {
   limit: number;
   cursor?: string;
@@ -69,6 +78,7 @@ export interface AlertCenterRepository {
     id: string,
     query: EventQuery,
   ): MaybePromise<Page<unknown> | undefined>;
+  listAlertHistory(query: AlertHistoryQuery): MaybePromise<Page<unknown>>;
   listDeliveries(query: DeliveryQuery): MaybePromise<Page<unknown>>;
   getDelivery(id: string): MaybePromise<unknown | undefined>;
   listDeliveryAttempts(
@@ -274,6 +284,30 @@ function parseOccurrences(request: RequestLike): OccurrenceQuery {
       "alarm",
       "emergency",
     ] as const),
+    from,
+    to,
+  };
+}
+function parseAlertHistory(request: RequestLike): AlertHistoryQuery {
+  const q = request.query ?? {};
+  const from = dateParam(q.from, "from");
+  const to = dateParam(q.to, "to");
+  if (from && to && from > to)
+    throw new ApiError(400, "INVALID_QUERY", "from must not be after to");
+  return {
+    ...pagination(q),
+    definitionId: textParam(q.definitionId, "definitionId"),
+    path: textParam(q.path, "path"),
+    source: textParam(q.source, "source"),
+    state: enumParam(q.state, "state", ["active", "cleared"] as const),
+    severity: enumParam(q.severity, "severity", [
+      "normal",
+      "warn",
+      "alert",
+      "alarm",
+      "emergency",
+    ] as const),
+    eventType: textParam(q.eventType, "eventType"),
     from,
     to,
   };
@@ -564,6 +598,15 @@ export function registerAlertCenterRoutes(
           ? await dependencies.listNotifiers()
           : [],
       }),
+    ),
+  );
+  addRoute(
+    router,
+    "get",
+    "/alert-history",
+    "readonly",
+    wrap(async (req, res) =>
+      res.json(await repo().listAlertHistory(parseAlertHistory(req))),
     ),
   );
   addRoute(

@@ -889,6 +889,7 @@ export class PersistentNotifierRuntime {
           items = items.filter((event) => event.eventType === query.eventType);
         return this.page(items, query.limit, query.cursor);
       },
+      listAlertHistory: (query) => this.db().queryAlertHistory(query),
       listDeliveries: (query) => {
         const page = this.db().queryDeliveries(query.limit, query.cursor);
         return {

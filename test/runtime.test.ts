@@ -174,7 +174,7 @@ describe("PersistentNotifierRuntime", () => {
           rejected: 0,
         },
         scheduler: { running: false, activeRequests: 0 },
-        database: { healthy: true, schemaVersion: 8, expectedSchemaVersion: 8 },
+        database: { healthy: true, schemaVersion: 9, expectedSchemaVersion: 9 },
         services: [
           {
             id: "warning",

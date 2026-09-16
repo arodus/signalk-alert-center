@@ -57,6 +57,39 @@ export interface AlertEventRecord {
   payload?: unknown;
 }
 
+export interface AlertHistoryRecord extends AlertEventRecord {
+  definitionId: string;
+  occurrenceNumber: number;
+  name: string;
+  path: string;
+  sourceKey: string;
+  source?: string;
+  state: AlertState;
+  severity: Severity;
+  message?: string;
+  startedAt: Date;
+  clearedAt?: Date;
+}
+
+export interface AlertHistoryQuery {
+  definitionId?: string;
+  path?: string;
+  source?: string;
+  state?: AlertState;
+  severity?: Severity;
+  eventType?: string;
+  from?: Date;
+  to?: Date;
+  /** Exclusive event id cursor in reverse chronological order. */
+  cursor?: string;
+  limit?: number;
+}
+
+export interface AlertHistoryPage {
+  items: AlertHistoryRecord[];
+  nextCursor?: string;
+}
+
 export interface AlertDefinitionRecord {
   id: string;
   sourceType: "zone" | "recognized";
