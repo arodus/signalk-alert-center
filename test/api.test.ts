@@ -99,6 +99,19 @@ function fixture() {
     },
     getOccurrence: () => undefined,
     listOccurrenceEvents: () => ({ items: [] }),
+    listAlertHistory(query) {
+      queries.push(query);
+      return {
+        items: [
+          {
+            id: 3,
+            alertId: "occurrence-1",
+            eventType: "raised",
+          },
+        ],
+        nextCursor: "3",
+      };
+    },
     listDeliveries(query) {
       queries.push(query);
       return { items: [{ id: "delivery-1" }], nextCursor: "delivery-1" };
@@ -163,7 +176,7 @@ describe("alert-center routes", () => {
     const { access } = fixture();
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
-    expect(access.filter((value) => value === "readonly")).toHaveLength(10);
+    expect(access.filter((value) => value === "readonly")).toHaveLength(11);
     expect(access.filter((value) => value === "readwrite")).toHaveLength(6);
   });
 
@@ -258,6 +271,40 @@ describe("alert-center routes", () => {
       state: "active",
     });
     expect((queries[0] as { from: Date }).from).toBeInstanceOf(Date);
+  });
+
+  it("pages and filters alert updates separately from deliveries", async () => {
+    const { invoke, queries } = fixture();
+    const response = await invoke("GET", "/alert-history", {
+      query: {
+        limit: "20",
+        cursor: "8",
+        definitionId: "anchor",
+        source: "gps.primary",
+        state: "cleared",
+        severity: "alarm",
+        eventType: "severity_changed",
+        from: "2026-09-01T00:00:00Z",
+        to: "2026-09-02T00:00:00Z",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      items: [{ id: 3, alertId: "occurrence-1", eventType: "raised" }],
+      nextCursor: "3",
+    });
+    expect(queries.at(-1)).toMatchObject({
+      limit: 20,
+      cursor: "8",
+      definitionId: "anchor",
+      source: "gps.primary",
+      state: "cleared",
+      severity: "alarm",
+      eventType: "severity_changed",
+    });
+    expect((queries.at(-1) as { from: Date }).from).toBeInstanceOf(Date);
+    expect((queries.at(-1) as { to: Date }).to).toBeInstanceOf(Date);
   });
 
   it("returns structured errors for invalid filters", async () => {

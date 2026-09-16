@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 8;
+export const currentSchemaVersion = 9;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -188,6 +188,13 @@ DROP TABLE audio_playbacks;
 ALTER TABLE alert_policies DROP COLUMN audio_policy_json;
 `,
   },
+  {
+    version: 9,
+    sql: `
+CREATE INDEX IF NOT EXISTS alert_events_global_history_idx
+  ON alert_events(occurred_at DESC, id DESC);
+`,
+  },
 ];
 
 export const schema = `
@@ -274,6 +281,8 @@ CREATE TABLE IF NOT EXISTS alert_events (
 
 CREATE INDEX IF NOT EXISTS alert_events_history_idx
   ON alert_events(alert_id, occurred_at, id);
+CREATE INDEX IF NOT EXISTS alert_events_global_history_idx
+  ON alert_events(occurred_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS occurrence_notifiers (
   alert_id TEXT NOT NULL REFERENCES alert_occurrences(id) ON DELETE CASCADE,

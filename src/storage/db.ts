@@ -3,6 +3,9 @@ import { DatabaseSync } from "node:sqlite";
 import {
   AlertDefinitionRecord,
   AlertEventRecord,
+  AlertHistoryPage,
+  AlertHistoryQuery,
+  AlertHistoryRecord,
   AlertPolicyRecord,
   AlertPolicyField,
   AlertRecord,
@@ -104,6 +107,52 @@ const deliveryAttemptRecord = (row: Row): DeliveryAttemptRecord => ({
   errorMessage: row.error_message ? String(row.error_message) : undefined,
   remoteId: row.remote_id ? String(row.remote_id) : undefined,
 });
+
+const alertHistoryRecord = (row: Row): AlertHistoryRecord => {
+  const payload = json(row.payload_json);
+  const payloadRecord =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : undefined;
+  const payloadSeverity =
+    typeof payloadRecord?.state === "string" &&
+    ["normal", "warn", "alert", "alarm", "emergency"].includes(
+      payloadRecord.state,
+    )
+      ? payloadRecord.state
+      : undefined;
+  const severity =
+    row.event_type === "severity_changed" &&
+    typeof payloadRecord?.to === "string"
+      ? payloadRecord.to
+      : (payloadSeverity ?? row.max_severity);
+  return {
+    id: Number(row.id),
+    alertId: String(row.alert_id),
+    definitionId: String(row.definition_id),
+    occurrenceNumber: Number(row.occurrence_number),
+    name: String(row.definition_name ?? row.path),
+    path: String(row.path),
+    sourceKey: String(row.source_key),
+    source: row.source ? String(row.source) : undefined,
+    state: row.current_state as AlertHistoryRecord["state"],
+    severity: severity as AlertHistoryRecord["severity"],
+    message:
+      row.event_type === "message_changed" &&
+      typeof payloadRecord?.to === "string"
+        ? payloadRecord.to
+        : typeof payloadRecord?.message === "string"
+          ? payloadRecord.message
+          : row.message
+            ? String(row.message)
+            : undefined,
+    startedAt: new Date(String(row.started_at)),
+    clearedAt: date(row.cleared_at),
+    eventType: String(row.event_type),
+    occurredAt: new Date(String(row.occurred_at)),
+    payload,
+  };
+};
 
 export class AlertDatabase {
   readonly db: DatabaseSync;
@@ -806,6 +855,12 @@ export class AlertDatabase {
             to: alert.message,
           });
         }
+        if (
+          !clearing &&
+          previousSeverity === alert.severity &&
+          previousMessage === alert.message
+        )
+          this.addEvent(id, "updated", now, alert.sourcePayload);
         if (suppression) this.addEvent(id, "suppressed_before_activation", now);
         if (clearing) this.addEvent(id, "cleared", now, alert.sourcePayload);
 
@@ -1173,6 +1228,75 @@ export class AlertDatabase {
       occurredAt: new Date(String(row.occurred_at)),
       payload: json(row.payload_json),
     }));
+  }
+
+  queryAlertHistory(query: AlertHistoryQuery = {}): AlertHistoryPage {
+    const clauses: string[] = [];
+    const parameters: Array<string | number> = [];
+    if (query.definitionId) {
+      clauses.push("o.definition_id=?");
+      parameters.push(query.definitionId);
+    }
+    if (query.path) {
+      clauses.push("o.path=?");
+      parameters.push(query.path);
+    }
+    if (query.source) {
+      clauses.push("o.source=?");
+      parameters.push(query.source);
+    }
+    if (query.state) {
+      clauses.push("o.current_state=?");
+      parameters.push(query.state);
+    }
+    if (query.severity) {
+      clauses.push("o.max_severity=?");
+      parameters.push(query.severity);
+    }
+    if (query.eventType) {
+      clauses.push("e.event_type=?");
+      parameters.push(query.eventType);
+    }
+    if (query.from) {
+      clauses.push("e.occurred_at >= ?");
+      parameters.push(query.from.toISOString());
+    }
+    if (query.to) {
+      clauses.push("e.occurred_at <= ?");
+      parameters.push(query.to.toISOString());
+    }
+    if (query.cursor) {
+      const cursor = this.db
+        .prepare("SELECT occurred_at, id FROM alert_events WHERE id=?")
+        .get(query.cursor) as Row | undefined;
+      if (!cursor) throw new Error("Invalid alert history cursor");
+      clauses.push("(e.occurred_at < ? OR (e.occurred_at = ? AND e.id < ?))");
+      parameters.push(
+        String(cursor.occurred_at),
+        String(cursor.occurred_at),
+        Number(cursor.id),
+      );
+    }
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
+    parameters.push(limit + 1);
+    const rows = this.db
+      .prepare(
+        `SELECT e.*, o.definition_id, o.occurrence_number, o.source_key,
+           o.path, o.source, o.current_state, o.max_severity, o.message,
+           o.started_at, o.cleared_at, f.name AS definition_name
+         FROM alert_events e
+         JOIN alert_occurrences o ON o.id=e.alert_id
+         LEFT JOIN alert_definitions f ON f.id=o.definition_id
+         ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
+         ORDER BY e.occurred_at DESC, e.id DESC LIMIT ?`,
+      )
+      .all(...parameters) as Row[];
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit).map(alertHistoryRecord);
+    return {
+      items,
+      nextCursor: hasMore ? String(items.at(-1)?.id) : undefined,
+    };
   }
 
   listAlerts(): AlertRecord[] {

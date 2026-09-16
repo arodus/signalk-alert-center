@@ -53,6 +53,16 @@
           Alerts
         </button>
         <button
+          id="alert-history-tab"
+          class="view-tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="alert-history-panel"
+        >
+          Alert history
+        </button>
+        <button
           id="deliveries-tab"
           class="view-tab"
           type="button"
@@ -151,6 +161,97 @@
       </section>
 
       <section
+        id="alert-history-panel"
+        class="workspace tab-panel"
+        role="tabpanel"
+        aria-labelledby="alert-history-tab"
+        hidden
+      >
+        <div class="section-heading">
+          <div>
+            <h2>Alert history</h2>
+            <p>
+              Signal K alert updates in chronological order. Notification
+              delivery attempts remain in Deliveries.
+            </p>
+          </div>
+        </div>
+        <form id="alert-history-filters" class="filter-row">
+          <label for="history-definition-filter">Alert</label>
+          <select id="history-definition-filter" name="definitionId">
+            <option value="">All alerts</option>
+          </select>
+          <label for="history-event-filter">Update</label>
+          <select id="history-event-filter" name="eventType">
+            <option value="">All updates</option>
+            <option value="raised">Raised</option>
+            <option value="cleared">Cleared</option>
+            <option value="severity_changed">Severity changed</option>
+            <option value="message_changed">Message changed</option>
+            <option value="updated">Updated</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="silenced">Silenced</option>
+            <option value="rearmed">Rearmed</option>
+          </select>
+          <label for="history-severity-filter">Severity</label>
+          <select id="history-severity-filter" name="severity">
+            <option value="">All</option>
+            <option>emergency</option>
+            <option>alarm</option>
+            <option>alert</option>
+            <option>warn</option>
+            <option>normal</option>
+          </select>
+          <details class="advanced-filters">
+            <summary>More filters</summary>
+            <div class="advanced-filter-fields">
+              <label for="history-source-filter">Signal K source</label>
+              <input
+                id="history-source-filter"
+                name="source"
+                placeholder="Exact source"
+              />
+              <label for="history-state-filter">Current state</label>
+              <select id="history-state-filter" name="state">
+                <option value="">Any state</option>
+                <option value="active">Active</option>
+                <option value="cleared">Cleared</option>
+              </select>
+              <label for="history-from-filter">Updated after</label>
+              <input
+                id="history-from-filter"
+                name="from"
+                type="datetime-local"
+              />
+              <label for="history-to-filter">Updated before</label>
+              <input id="history-to-filter" name="to" type="datetime-local" />
+            </div>
+          </details>
+          <button class="button button-primary button-small" type="submit">
+            Apply
+          </button>
+          <button
+            id="alert-history-clear"
+            class="button button-quiet button-small"
+            type="button"
+          >
+            Clear
+          </button>
+        </form>
+        <div id="alert-history-list" class="table-shell" aria-live="polite">
+          <div class="empty">Loading alert history…</div>
+        </div>
+        <button
+          id="alert-history-more"
+          class="button button-quiet load-more"
+          type="button"
+          hidden
+        >
+          Load more updates
+        </button>
+      </section>
+
+      <section
         id="deliveries-panel"
         class="workspace tab-panel delivery-section"
         role="tabpanel"
@@ -221,7 +322,7 @@
       </div>
       <div id="drawer-body"></div>
       <p id="drawer-result" class="form-result" role="status"></p>
-      <h3>Recent history</h3>
+      <h3>Occurrence timeline</h3>
       <div id="event-list" class="event-list" aria-live="polite"></div>
       <button
         id="events-more"
