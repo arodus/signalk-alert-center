@@ -302,7 +302,7 @@ export const pluginConfigSchema = {
       type: "array",
       title: "Notification services",
       description:
-        "Add each ntfy, PagerDuty, Discord, or Signal K Wyoming speech service once. Alerts select these connections by their service name.",
+        "Optionally add each ntfy, PagerDuty, Discord, or Signal K Wyoming speech service once. Alert Center works without any notification service. Alerts select configured services by name.",
       default: [],
       items: {
         type: "object",

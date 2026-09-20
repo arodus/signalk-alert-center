@@ -1,7 +1,8 @@
 # Signal K Alert Center
 
-An offline-first Signal K plugin for durable alert delivery through ntfy,
-PagerDuty, Discord, and spoken announcements through signalk-wyoming. Alerts
+An offline-first Signal K plugin for durable alert delivery through optional
+notification services: ntfy, PagerDuty, Discord, and spoken announcements through
+signalk-wyoming. Alert Center does not require any of these integrations. Alerts
 and independent per-service delivery rows are stored in SQLite before delivery
 begins.
 
@@ -432,14 +433,20 @@ Database maintenance appears last in the plugin settings. Each notification
 service has one **Service type** selector. Changing it immediately replaces the
 connection fields with those required by ntfy, PagerDuty, Discord, or Wyoming.
 
-### Spoken alerts with signalk-wyoming
+### Optional spoken alerts with signalk-wyoming
 
-Spoken alerts require signalk-wyoming and a working text-to-speech service. For a
-TTS-only setup, install and enable `signalk-container`, `signalk-piper`, and
-`signalk-wyoming`, then configure a local or remote Wyoming satellite with a
-speaker. At the time of writing signalk-wyoming requires Node 24 or newer; follow
-its own requirements if they are newer than this plugin's minimum. Verify playback
-from the **Voice (Wyoming)** webapp before testing it from Alert Center.
+Wyoming is an optional notifier type, just like ntfy, PagerDuty, and Discord. Alert
+Center starts and handles alerts normally when signalk-wyoming is not installed or
+configured. It subscribes to the Wyoming API only when at least one enabled Wyoming
+notification service exists.
+
+If you choose to use spoken alerts, that integration requires signalk-wyoming and a
+working text-to-speech service. Install and enable `signalk-container`,
+`signalk-piper`, and `signalk-wyoming`, then configure a local or remote Wyoming
+satellite with a speaker. At the time of writing signalk-wyoming itself requires
+Node 24 or newer; follow its requirements if they are newer than Alert Center's
+minimum. Verify playback from the **Voice (Wyoming)** webapp before testing the
+optional service from Alert Center.
 
 Add one or more **Signal K Wyoming speech** notification services globally. An
 empty target list speaks on every configured satellite. An optional voice overrides
