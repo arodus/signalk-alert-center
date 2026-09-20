@@ -49,11 +49,12 @@ describe("occurrence storage", () => {
 
     const migrated = new AlertDatabase(filename);
     databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(9);
+    expect(migrated.schemaVersion()).toBe(10);
     const columns = migrated.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("source");
+    expect(columns.map((column) => column.name)).toContain("speech_template");
     const indexes = migrated.db
       .prepare("PRAGMA index_list(alert_occurrences)")
       .all() as Array<{ name: string }>;
@@ -78,6 +79,24 @@ describe("occurrence storage", () => {
         .all()
         .map((column) => (column as { name: string }).name),
     ).not.toContain("audio_policy_json");
+    expect(
+      migrated.db
+        .prepare("PRAGMA table_info(alert_policies)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toEqual(
+      expect.arrayContaining([
+        "speech_minimum_severity",
+        "speech_template",
+        "speech_announce_clear",
+      ]),
+    );
+    expect(
+      migrated.db
+        .prepare("PRAGMA table_info(occurrence_notifiers)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toContain("supports_acknowledgement");
     expect(
       migrated.db
         .prepare(
@@ -312,7 +331,7 @@ describe("occurrence storage", () => {
     expect(db.operationalStatus()).toMatchObject({
       healthy: false,
       schemaVersion: 0,
-      expectedSchemaVersion: 9,
+      expectedSchemaVersion: 10,
     });
   });
 
@@ -387,7 +406,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(9);
+    expect(db.schemaVersion()).toBe(10);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);
@@ -509,6 +528,37 @@ describe("occurrence storage", () => {
     expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
       { operation: "trigger", state: "delivered" },
       { operation: "acknowledge", state: "pending", attemptCount: 0 },
+    ]);
+  });
+
+  it("announces a Wyoming clear without creating an acknowledgement delivery", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const occurrence = db.ingest(active(), ["speech"], raisedAt, {
+      resolvingNotifierIds: ["speech"],
+      acknowledgingNotifierIds: [],
+      speechTemplate: "{name}: {message}",
+    })!;
+    const trigger = db.listDeliveries()[0];
+    expect(db.getAlert(occurrence.id).speechTemplate).toBe("{name}: {message}");
+    expect(db.claimDelivery(trigger.id, raisedAt)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "salon", raisedAt);
+
+    db.acknowledgeAlert(occurrence.id, new Date("2026-01-01T00:01:00Z"));
+    expect(db.listDeliveriesForAlert(occurrence.id)).toHaveLength(1);
+
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["speech"],
+      new Date("2026-01-01T00:02:00Z"),
+      {
+        resolvingNotifierIds: ["speech"],
+        acknowledgingNotifierIds: [],
+      },
+    );
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+      { operation: "resolve", state: "pending" },
     ]);
   });
 

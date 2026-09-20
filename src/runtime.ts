@@ -14,6 +14,8 @@ import {
   AlertPolicyField,
   AlertRecord,
   DeliveryRecord,
+  Severity,
+  severityRank,
 } from "./alerts/types";
 import { listConfiguredZones } from "./alerts/zones";
 import {
@@ -28,7 +30,7 @@ import {
   registerAlertCenterRoutes,
   registerRoutes,
 } from "./api/routes";
-import { PluginConfig, validateConfig } from "./config";
+import { NotifierConfig, PluginConfig, validateConfig } from "./config";
 import { ConnectivityManager } from "./connectivity/manager";
 import { createInternetProbe } from "./connectivity/internet";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
@@ -44,6 +46,7 @@ import { DiscordTransport } from "./transports/discord";
 import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
 import { NotificationTransport } from "./transports/transport";
+import { WyomingSayApi, WyomingTransport } from "./transports/wyoming";
 import {
   NotificationTestOperation,
   NotificationTestResult,
@@ -55,6 +58,17 @@ const UPSTREAM_ACTION_TIMEOUT_MS = 5_000;
 const DEFAULT_INGESTION_QUEUE_LIMIT = 2_000;
 const DEFAULT_INGESTION_BATCH_SIZE = 100;
 const QUEUE_WARNING_INTERVAL_MS = 60_000;
+
+interface PropertyValueEntry {
+  value?: unknown;
+}
+
+interface PropertyValueApp {
+  onPropertyValues?(
+    name: string,
+    callback: (history: PropertyValueEntry[]) => void,
+  ): (() => void) | void;
+}
 
 interface DefinitionView extends AlertDefinitionRecord {
   description?: string;
@@ -93,6 +107,8 @@ export class AlertCenterRuntime {
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
   private notifierTests = new Set<string>();
+  private wyomingApi?: WyomingSayApi;
+  private wyomingUnsubscribe?: () => void;
   private changeRevision = 0;
   private changeListeners = new Set<(change: AlertCenterChange) => void>();
   private retentionState?: {
@@ -536,6 +552,18 @@ export class AlertCenterRuntime {
       const notifier = configuredNotifiers.get(id);
       return Boolean(notifier && notifier.enabled !== false);
     });
+    const hasRemoteNotifier = notifierIds.some(
+      (id) => configuredNotifiers.get(id)?.type !== "wyoming",
+    );
+    const notifierMinimumSeverity = (id: string): Severity => {
+      const notifier = configuredNotifiers.get(id);
+      const configured = notifier?.minSeverity ?? "normal";
+      if (notifier?.type !== "wyoming") return configured;
+      return severityRank(configured) >=
+        severityRank(policy.speechMinimumSeverity)
+        ? configured
+        : policy.speechMinimumSeverity;
+    };
     const occurrence = new AlertLifecycle(this.db(), []).ingest(
       normalized,
       policy.enabled ? notifierIds : [],
@@ -543,19 +571,26 @@ export class AlertCenterRuntime {
       {
         definitionId: this.policies().ensureDefinitionForPath(normalized.path),
         activationDelaySeconds: policy.activationDelaySeconds,
-        connectivity: policy.connectivity,
+        // Local Wyoming speech must never wake an Internet connection by itself.
+        connectivity: hasRemoteNotifier
+          ? policy.connectivity
+          : { mode: "queue" },
         minimumSeverity: policy.minimumSeverity,
         oneTime: policy.oneTime,
         rearmAfterSeconds: policy.rearmAfterSeconds,
         notifierMinimumSeverities: Object.fromEntries(
-          notifierIds.map((id) => [
-            id,
-            configuredNotifiers.get(id)?.minSeverity ?? "normal",
-          ]),
+          notifierIds.map((id) => [id, notifierMinimumSeverity(id)]),
         ),
         resolvingNotifierIds: notifierIds.filter(
+          (id) =>
+            configuredNotifiers.get(id)?.type === "pagerduty" ||
+            (configuredNotifiers.get(id)?.type === "wyoming" &&
+              policy.speechAnnounceClear),
+        ),
+        acknowledgingNotifierIds: notifierIds.filter(
           (id) => configuredNotifiers.get(id)?.type === "pagerduty",
         ),
+        speechTemplate: policy.speechTemplate,
       },
     );
     if (!occurrence) return undefined;
@@ -811,6 +846,12 @@ export class AlertCenterRuntime {
         if (patch.connectivity !== undefined)
           changedFields.push("connectivity");
         if (patch.notifierIds !== undefined) changedFields.push("notifierIds");
+        if (patch.speechMinimumSeverity !== undefined)
+          changedFields.push("speechMinimumSeverity");
+        if (patch.speechTemplate !== undefined)
+          changedFields.push("speechTemplate");
+        if (patch.speechAnnounceClear !== undefined)
+          changedFields.push("speechAnnounceClear");
         const overrideFields = patch.overrideFields
           ? [...patch.overrideFields]
           : [...new Set([...previousOverrides, ...changedFields])];
@@ -837,6 +878,11 @@ export class AlertCenterRuntime {
               : (patch.rearmAfterSeconds ?? current.policy.rearmAfterSeconds),
           connectivity: patch.connectivity ?? current.policy.connectivity,
           notifierIds: patch.notifierIds ?? current.policy.notifierIds,
+          speechMinimumSeverity:
+            patch.speechMinimumSeverity ?? current.policy.speechMinimumSeverity,
+          speechTemplate: patch.speechTemplate ?? current.policy.speechTemplate,
+          speechAnnounceClear:
+            patch.speechAnnounceClear ?? current.policy.speechAnnounceClear,
           overrideFields,
         });
         const updated = this.getDefinition(id);
@@ -964,7 +1010,7 @@ export class AlertCenterRuntime {
     validateConfig(options);
     if (this.database)
       throw new Error(
-        "Persistent notifier is already started; stop it before starting again",
+        "Signal K Alert Center is already started; stop it before starting again",
       );
     this.stopping = false;
     const generation = ++this.runtimeGeneration;
@@ -991,6 +1037,36 @@ export class AlertCenterRuntime {
     this.lastQueueWarningAt = 0;
 
     this.transports = new Map<string, NotificationTransport>();
+    const propertyApp = this.app as ServerAPI & PropertyValueApp;
+    if (
+      (options.notifiers ?? []).some(
+        (notifier) => notifier.enabled !== false && notifier.type === "wyoming",
+      ) &&
+      typeof propertyApp.onPropertyValues === "function"
+    ) {
+      const unsubscribe = propertyApp.onPropertyValues(
+        "signalk-wyoming.api",
+        (history) => {
+          const candidate = [...history]
+            .reverse()
+            .map((entry) => entry?.value)
+            .find((value): value is WyomingSayApi =>
+              Boolean(
+                value &&
+                typeof value === "object" &&
+                (value as WyomingSayApi).version === 1 &&
+                typeof (value as WyomingSayApi).say === "function",
+              ),
+            );
+          if (!candidate) return;
+          this.wyomingApi = candidate;
+          this.debug("Connected to signalk-wyoming spoken-announcement API");
+          this.requestDeliveryRun();
+        },
+      );
+      this.wyomingUnsubscribe =
+        typeof unsubscribe === "function" ? unsubscribe : undefined;
+    }
     for (const notifier of options.notifiers ?? []) {
       if (notifier.enabled === false) continue;
       if (notifier.type === "ntfy")
@@ -1011,6 +1087,24 @@ export class AlertCenterRuntime {
         this.transports.set(
           notifier.name,
           new DiscordTransport(String(notifier.webhookUrl)),
+        );
+      if (notifier.type === "wyoming")
+        this.transports.set(
+          notifier.name,
+          new WyomingTransport({
+            api: () => this.wyomingApi,
+            targets: notifier.targets,
+            voice: notifier.voice,
+            urgentAt: notifier.urgentAt,
+            definitionName: (definitionId) => {
+              if (!definitionId) return undefined;
+              try {
+                return this.database?.getDefinition(definitionId).name;
+              } catch {
+                return undefined;
+              }
+            },
+          }),
         );
     }
     this.scheduler = new DeliveryScheduler(
@@ -1192,10 +1286,13 @@ export class AlertCenterRuntime {
           (this.config.delivery?.requestTimeoutSeconds ?? 15) * 1_000,
         ),
       );
-      const result = await testNotificationService(notifier, {
-        timeoutMs,
-        operation,
-      });
+      const result =
+        notifier.type === "wyoming"
+          ? await this.testWyomingService(notifier, timeoutMs)
+          : await testNotificationService(notifier, {
+              timeoutMs,
+              operation,
+            });
       this.debug(
         `Manual service test: service=${notifier.name}, type=${notifier.type}, operation=${operation}, outcome=${result.category}, durationMs=${result.durationMs}`,
       );
@@ -1211,6 +1308,43 @@ export class AlertCenterRuntime {
     }
   }
 
+  private async testWyomingService(
+    notifier: Extract<NotifierConfig, { type: "wyoming" }>,
+    timeoutMs: number,
+  ): Promise<NotificationTestResult> {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    timeout.unref?.();
+    const transport = new WyomingTransport({
+      api: () => this.wyomingApi,
+      targets: notifier.targets,
+      voice: notifier.voice,
+      urgentAt: notifier.urgentAt,
+    });
+    try {
+      const result = await transport.announce(
+        "Test announcement from Signal K Alert Center.",
+        "normal",
+        controller.signal,
+      );
+      return {
+        status: result.kind === "success" ? "success" : "error",
+        category: result.kind === "success" ? "success" : "transport",
+        message:
+          result.kind === "success"
+            ? "signalk-wyoming queued the spoken test announcement."
+            : result.message,
+        ...(result.kind === "success" ? {} : { technicalDetail: result.code }),
+        durationMs: Date.now() - startedAt,
+        operation: "send",
+        service: { id: notifier.name, type: notifier.type },
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async stop(): Promise<void> {
     this.debug("Stopping");
     this.stopping = true;
@@ -1220,6 +1354,9 @@ export class AlertCenterRuntime {
     this.ingestionQueue.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.wyomingUnsubscribe?.();
+    this.wyomingUnsubscribe = undefined;
+    this.wyomingApi = undefined;
     if (this.startupImmediate) clearImmediate(this.startupImmediate);
     if (this.ingestionImmediate) clearImmediate(this.ingestionImmediate);
     if (this.deliveryImmediate) clearImmediate(this.deliveryImmediate);

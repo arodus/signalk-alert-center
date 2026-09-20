@@ -91,6 +91,9 @@ const policyFieldNames = {
   rearmAfterSeconds: "repeat while active",
   connectivity: "internet connection behavior",
   notifierIds: "notification services",
+  speechMinimumSeverity: "lowest severity spoken",
+  speechTemplate: "spoken alert text",
+  speechAnnounceClear: "clear announcement",
 };
 
 async function api(path, options = {}) {
@@ -923,6 +926,10 @@ function setPolicyControlValues(policy) {
   $("#rearm-after").value = policy.rearmAfterSeconds ?? "";
   $("#connectivity-mode").value = policy.connectivity?.mode ?? "queue";
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
+  $("#speech-minimum-severity").value = policy.speechMinimumSeverity ?? "warn";
+  $("#speech-template").value =
+    policy.speechTemplate ?? "{name}. {severity}. {message}";
+  $("#speech-announce-clear").checked = policy.speechAnnounceClear === true;
 }
 
 function applyDefaultForField(field) {
@@ -946,6 +953,13 @@ function applyDefaultForField(field) {
         input.checked = defaults.notifierIds.includes(input.value);
       });
     },
+    speechMinimumSeverity: () =>
+      ($("#speech-minimum-severity").value = defaults.speechMinimumSeverity),
+    speechTemplate: () =>
+      ($("#speech-template").value = defaults.speechTemplate),
+    speechAnnounceClear: () =>
+      ($("#speech-announce-clear").checked =
+        defaults.speechAnnounceClear === true),
   };
   setters[field]?.();
 }
@@ -1081,6 +1095,9 @@ async function savePolicy(event) {
     notifierIds: [
       ...document.querySelectorAll('input[name="notifier"]:checked'),
     ].map((item) => item.value),
+    speechMinimumSeverity: $("#speech-minimum-severity").value,
+    speechTemplate: $("#speech-template").value,
+    speechAnnounceClear: $("#speech-announce-clear").checked,
     connectivity:
       mode === "wake_after"
         ? { mode, delaySeconds: Number($("#wake-delay").value) }

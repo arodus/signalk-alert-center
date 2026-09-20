@@ -18,6 +18,9 @@ export interface PolicyValues {
   rearmAfterSeconds?: number;
   connectivity: ConnectivityMode;
   notifierIds: string[];
+  speechMinimumSeverity: Severity;
+  speechTemplate: string;
+  speechAnnounceClear: boolean;
 }
 
 export interface EffectivePolicy extends PolicyValues {
@@ -44,6 +47,11 @@ export class AlertPolicyResolver {
       rearmAfterSeconds: this.config.defaults?.rearmAfterSeconds,
       connectivity: this.config.defaults?.connectivity ?? { mode: "queue" },
       notifierIds: [...(this.config.defaults?.notifiers ?? [])],
+      speechMinimumSeverity:
+        this.config.defaults?.speechMinimumSeverity ?? "warn",
+      speechTemplate:
+        this.config.defaults?.speechTemplate ?? "{name}. {severity}. {message}",
+      speechAnnounceClear: this.config.defaults?.speechAnnounceClear ?? false,
     };
   }
 
@@ -76,6 +84,15 @@ export class AlertPolicyResolver {
       // The mask distinguishes an explicit empty list from inheritance.
       if (fields.has("notifierIds"))
         effective.notifierIds = [...stored.notifierIds];
+      if (fields.has("speechMinimumSeverity") && stored.speechMinimumSeverity)
+        effective.speechMinimumSeverity = stored.speechMinimumSeverity;
+      if (fields.has("speechTemplate") && stored.speechTemplate)
+        effective.speechTemplate = stored.speechTemplate;
+      if (
+        fields.has("speechAnnounceClear") &&
+        stored.speechAnnounceClear !== undefined
+      )
+        effective.speechAnnounceClear = stored.speechAnnounceClear;
     }
     const overriddenFields = [...fields];
     return {
