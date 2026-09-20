@@ -491,6 +491,41 @@
           </p>
           <div id="notifier-options"></div>
         </fieldset>
+        <label class="form-field" data-policy-field="speechMinimumSeverity"
+          ><span
+            >Lowest severity spoken
+            <small class="field-help"
+              >Applies only when a Signal K Wyoming speech service is selected
+              above. Its global severity floor can still require a higher
+              level.</small
+            ></span
+          ><select id="speech-minimum-severity">
+            <option>normal</option>
+            <option>warn</option>
+            <option>alert</option>
+            <option>alarm</option>
+            <option>emergency</option>
+          </select></label
+        >
+        <label class="form-field" data-policy-field="speechTemplate"
+          ><span
+            >Spoken alert text
+            <small class="field-help"
+              >Passed to signalk-wyoming when the alert fires. Available:
+              {name}, {severity}, {message}, {path}, and {state}.</small
+            ></span
+          ><input id="speech-template" type="text" maxlength="500" required
+        /></label>
+        <div class="form-field" data-policy-field="speechAnnounceClear">
+          <label class="check-label"
+            ><input id="speech-announce-clear" type="checkbox" /> Announce when
+            this alert clears</label
+          >
+          <small class="field-help"
+            >The clear announcement is queued only after the original Wyoming
+            announcement was accepted.</small
+          >
+        </div>
         <label class="form-field" data-policy-field="connectivity"
           ><span
             >Internet connection behavior
@@ -515,12 +550,12 @@
         /></label>
         <div class="form-field" data-policy-field="enabled">
           <label class="check-label"
-            ><input id="policy-enabled" type="checkbox" /> Send remote
+            ><input id="policy-enabled" type="checkbox" /> Deliver
             notifications</label
           >
           <small class="field-help"
             >Turn this off to keep tracking the alert without creating new ntfy,
-            PagerDuty, or Discord deliveries.</small
+            PagerDuty, Discord, or Wyoming speech deliveries.</small
           >
         </div>
         <p id="policy-result" class="form-result" role="status"></p>

@@ -20,6 +20,15 @@ export type NotifierConfig =
   | (NotifierBaseConfig & {
       type: "discord";
       webhookUrl: string;
+    })
+  | (NotifierBaseConfig & {
+      type: "wyoming";
+      /** Satellite ids; an empty list lets signalk-wyoming target all satellites. */
+      targets?: string[];
+      /** Empty uses signalk-wyoming's configured Piper voice. */
+      voice?: string;
+      /** Alerts at or above this level bypass voice mute and interrupt playback. */
+      urgentAt?: Severity;
     });
 export interface PluginConfig {
   storage?: { path?: string };
@@ -55,6 +64,9 @@ export interface PluginConfig {
     rearmAfterSeconds?: number;
     connectivity?: ConnectivityMode;
     notifiers?: string[];
+    speechMinimumSeverity?: Severity;
+    speechTemplate?: string;
+    speechAnnounceClear?: boolean;
   };
   connectivity?: {
     enabled?: boolean;
@@ -88,7 +100,7 @@ export function validateConfig(config: PluginConfig): void {
     normalizedNotifierNames.add(normalizedName);
     if (
       !notifier.type ||
-      !["ntfy", "pagerduty", "discord"].includes(notifier.type)
+      !["ntfy", "pagerduty", "discord", "wyoming"].includes(notifier.type)
     )
       throw new Error(`Invalid notification service type: ${notifier.name}`);
     if (
@@ -127,6 +139,25 @@ export function validateConfig(config: PluginConfig): void {
         notifier.webhookUrl,
         `Notification service ${notifier.name} has an invalid Discord webhook URL`,
       );
+    }
+    if (notifier.type === "wyoming") {
+      if (
+        notifier.targets !== undefined &&
+        (!Array.isArray(notifier.targets) ||
+          notifier.targets.some(
+            (target) => typeof target !== "string" || !target.trim(),
+          ))
+      )
+        throw new Error(
+          `Notification service ${notifier.name} has invalid Wyoming satellite targets`,
+        );
+      if (
+        notifier.urgentAt !== undefined &&
+        !severities.includes(notifier.urgentAt)
+      )
+        throw new Error(
+          `Notification service ${notifier.name} has an invalid Wyoming urgent severity`,
+        );
     }
   }
   validateRetry(config.retry);
@@ -239,6 +270,9 @@ function validatePolicy(
         | "rearmAfterSeconds"
         | "notifiers"
         | "minSeverity"
+        | "speechMinimumSeverity"
+        | "speechTemplate"
+        | "speechAnnounceClear"
       >
     | PluginConfig["defaults"],
   label: string,
@@ -257,6 +291,20 @@ function validatePolicy(
     !severities.includes(policy.minSeverity)
   )
     throw new Error(`${label} has an invalid minimum severity`);
+  if (
+    policy.speechMinimumSeverity !== undefined &&
+    !severities.includes(policy.speechMinimumSeverity)
+  )
+    throw new Error(`${label} has an invalid spoken-alert minimum severity`);
+  if (
+    policy.speechTemplate !== undefined &&
+    (typeof policy.speechTemplate !== "string" ||
+      policy.speechTemplate.trim().length === 0 ||
+      policy.speechTemplate.length > 500)
+  )
+    throw new Error(
+      `${label} spoken-alert template must contain 1 to 500 characters`,
+    );
   if (policy.notifiers?.some((id) => !notifierIds.has(id)))
     throw new Error(`${label} references an unknown notifier`);
 }

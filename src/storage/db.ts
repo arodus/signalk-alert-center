@@ -574,13 +574,17 @@ export class AlertDatabase {
           `INSERT INTO alert_policies
             (definition_id, enabled, minimum_severity, connectivity_json,
              one_time, activation_delay_seconds, rearm_after_seconds,
+             speech_minimum_severity, speech_template, speech_announce_clear,
              override_fields_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(definition_id) DO UPDATE SET
             enabled=excluded.enabled, minimum_severity=excluded.minimum_severity,
             connectivity_json=excluded.connectivity_json, one_time=excluded.one_time,
             activation_delay_seconds=excluded.activation_delay_seconds,
             rearm_after_seconds=excluded.rearm_after_seconds,
+            speech_minimum_severity=excluded.speech_minimum_severity,
+            speech_template=excluded.speech_template,
+            speech_announce_clear=excluded.speech_announce_clear,
             override_fields_json=excluded.override_fields_json,
             updated_at=excluded.updated_at`,
         )
@@ -594,6 +598,11 @@ export class AlertDatabase {
           policy.oneTime === undefined ? null : Number(policy.oneTime),
           policy.activationDelaySeconds ?? null,
           policy.rearmAfterSeconds ?? null,
+          policy.speechMinimumSeverity ?? null,
+          policy.speechTemplate ?? null,
+          policy.speechAnnounceClear === undefined
+            ? null
+            : Number(policy.speechAnnounceClear),
           JSON.stringify([...new Set(policy.overrideFields)]),
           timestamp,
         );
@@ -642,6 +651,18 @@ export class AlertDatabase {
         row.rearm_after_seconds === null
           ? undefined
           : Number(row.rearm_after_seconds),
+      speechMinimumSeverity: row.speech_minimum_severity
+        ? (String(
+            row.speech_minimum_severity,
+          ) as AlertPolicyRecord["speechMinimumSeverity"])
+        : undefined,
+      speechTemplate: row.speech_template
+        ? String(row.speech_template)
+        : undefined,
+      speechAnnounceClear:
+        row.speech_announce_clear === null
+          ? undefined
+          : Boolean(row.speech_announce_clear),
       notifierIds: notifiers.map((item) => String(item.transport_instance_id)),
       overrideFields:
         (json(row.override_fields_json) as AlertPolicyField[] | undefined) ??
@@ -686,7 +707,8 @@ export class AlertDatabase {
           affectedAlerts.add(String(row.alert_id));
         this.db
           .prepare(
-            `UPDATE occurrence_notifiers SET supports_resolution=1
+            `UPDATE occurrence_notifiers
+             SET supports_resolution=1, supports_acknowledgement=1
              WHERE transport_instance_id=?`,
           )
           .run(transportId);
@@ -704,13 +726,9 @@ export class AlertDatabase {
           )
           .get(alertId) as Row | undefined;
         if (occurrence?.acknowledged_at)
-          this.createPagerDutyActionDeliveryIntents(
-            alertId,
-            "acknowledge",
-            now,
-          );
+          this.createActionDeliveryIntents(alertId, "acknowledge", now);
         if (occurrence?.current_state === "cleared")
-          this.createPagerDutyActionDeliveryIntents(alertId, "resolve", now);
+          this.createActionDeliveryIntents(alertId, "resolve", now);
       }
       this.db.exec("COMMIT");
     } catch (error) {
@@ -806,7 +824,11 @@ export class AlertDatabase {
       let id: string;
       if (active) {
         id = String(active.id);
-        this.enableResolutionForNotifiers(id, options.resolvingNotifierIds);
+        this.enableLifecycleActionsForNotifiers(
+          id,
+          options.resolvingNotifierIds,
+          options.acknowledgingNotifierIds ?? options.resolvingNotifierIds,
+        );
         const previousSeverity = String(active.current_severity);
         const previousMessage = active.message
           ? String(active.message)
@@ -871,10 +893,9 @@ export class AlertDatabase {
             )
             .run(timestamp, timestamp, id);
           this.addEvent(id, "acknowledged", now);
-          this.createPagerDutyActionDeliveryIntents(id, "acknowledge", now);
+          this.createActionDeliveryIntents(id, "acknowledge", now);
         }
-        if (clearing)
-          this.createPagerDutyActionDeliveryIntents(id, "resolve", now);
+        if (clearing) this.createActionDeliveryIntents(id, "resolve", now);
 
         if (!clearing) {
           const qualifies =
@@ -966,9 +987,10 @@ export class AlertDatabase {
                source_timestamp, received_at, last_seen_at, cleared_at, current_state,
                current_severity, max_severity, message, source_payload_json,
                notification_id, one_time, minimum_severity,
-               activation_delay_seconds, rearm_after_seconds, connectivity_json,
-               activation_due_at, activation_state, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               activation_delay_seconds, rearm_after_seconds, speech_template,
+               connectivity_json, activation_due_at, activation_state,
+               created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -992,6 +1014,7 @@ export class AlertDatabase {
             minimumSeverity,
             delaySeconds,
             options.rearmAfterSeconds ?? null,
+            options.speechTemplate ?? null,
             JSON.stringify(connectivity),
             activationDueAt,
             activationState,
@@ -1016,14 +1039,21 @@ export class AlertDatabase {
           this.db
             .prepare(
               `INSERT INTO occurrence_notifiers
-                (alert_id, transport_instance_id, supports_resolution)
-               VALUES (?, ?, ?)`,
+                (alert_id, transport_instance_id, supports_resolution,
+                 supports_acknowledgement)
+               VALUES (?, ?, ?, ?)`,
             )
             .run(
               id,
               transportId,
               Number(
                 options.resolvingNotifierIds?.includes(transportId) ?? false,
+              ),
+              Number(
+                (
+                  options.acknowledgingNotifierIds ??
+                  options.resolvingNotifierIds
+                )?.includes(transportId) ?? false,
               ),
             );
           this.db
@@ -1086,26 +1116,38 @@ export class AlertDatabase {
     }
   }
 
-  private enableResolutionForNotifiers(
+  private enableLifecycleActionsForNotifiers(
     alertId: string,
-    transportIds: string[] | undefined,
+    resolvingIds: string[] | undefined,
+    acknowledgingIds: string[] | undefined,
   ): void {
-    if (!transportIds?.length) return;
-    const enable = this.db.prepare(
+    const lifecycleIds = new Set([
+      ...(resolvingIds ?? []),
+      ...(acknowledgingIds ?? []),
+    ]);
+    if (!lifecycleIds.size) return;
+    const enableResolution = this.db.prepare(
       `UPDATE occurrence_notifiers SET supports_resolution=1
+       WHERE alert_id=? AND transport_instance_id=?`,
+    );
+    const enableAcknowledgement = this.db.prepare(
+      `UPDATE occurrence_notifiers SET supports_acknowledgement=1
        WHERE alert_id=? AND transport_instance_id=?`,
     );
     const markTrigger = this.db.prepare(
       `UPDATE deliveries SET operation='trigger'
        WHERE alert_id=? AND transport_instance_id=? AND operation='notify'`,
     );
-    for (const transportId of new Set(transportIds)) {
-      enable.run(alertId, transportId);
+    for (const transportId of lifecycleIds) {
+      if (resolvingIds?.includes(transportId))
+        enableResolution.run(alertId, transportId);
+      if (acknowledgingIds?.includes(transportId))
+        enableAcknowledgement.run(alertId, transportId);
       markTrigger.run(alertId, transportId);
     }
   }
 
-  private createPagerDutyActionDeliveryIntents(
+  private createActionDeliveryIntents(
     alertId: string,
     operation: "acknowledge" | "resolve",
     now: Date,
@@ -1120,9 +1162,13 @@ export class AlertDatabase {
           AND trigger_delivery.transport_instance_id=n.transport_instance_id
           AND trigger_delivery.operation='trigger'
           AND trigger_delivery.state='delivered'
-         WHERE n.alert_id=? AND n.supports_resolution=1`,
+         WHERE n.alert_id=?
+           AND CASE WHEN ?='acknowledge'
+             THEN n.supports_acknowledgement=1
+             ELSE n.supports_resolution=1
+           END`,
       )
-      .all(alertId) as Row[];
+      .all(alertId, operation) as Row[];
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO deliveries
         (id, alert_id, transport_instance_id, operation, state,
@@ -1414,12 +1460,15 @@ export class AlertDatabase {
       connectivity: json(row.connectivity_json) as AlertRecord["connectivity"],
       activationDueAt: date(row.activation_due_at),
       activationState: row.activation_state as AlertRecord["activationState"],
+      speechTemplate: row.speech_template
+        ? String(row.speech_template)
+        : undefined,
     };
   }
 
   acknowledgeAlert(id: string, now = new Date()): void {
     this.markOccurrence(id, "acknowledged_at", "acknowledged", now);
-    this.createPagerDutyActionDeliveryIntents(id, "acknowledge", now);
+    this.createActionDeliveryIntents(id, "acknowledge", now);
   }
 
   silenceAlert(id: string, now = new Date()): void {
@@ -1778,13 +1827,13 @@ export class AlertDatabase {
         );
       if (outcome === "delivered" && row.operation === "trigger") {
         if (row.acknowledged_at)
-          this.createPagerDutyActionDeliveryIntents(
+          this.createActionDeliveryIntents(
             String(row.alert_id),
             "acknowledge",
             now,
           );
         if (row.current_state === "cleared")
-          this.createPagerDutyActionDeliveryIntents(
+          this.createActionDeliveryIntents(
             String(row.alert_id),
             "resolve",
             now,

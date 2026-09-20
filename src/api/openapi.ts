@@ -474,6 +474,11 @@ export function getAlertCenterOpenApi() {
               maximum: 604800,
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
+            speechMinimumSeverity: {
+              $ref: "#/components/schemas/Severity",
+            },
+            speechTemplate: { type: "string", minLength: 1, maxLength: 500 },
+            speechAnnounceClear: { type: "boolean" },
             connectivity: { $ref: "#/components/schemas/Connectivity" },
           },
         },
@@ -508,6 +513,9 @@ export function getAlertCenterOpenApi() {
             "rearmAfterSeconds",
             "connectivity",
             "notifierIds",
+            "speechMinimumSeverity",
+            "speechTemplate",
+            "speechAnnounceClear",
           ],
         },
         PolicyPatch: {
@@ -539,6 +547,11 @@ export function getAlertCenterOpenApi() {
               maximum: 604800,
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
+            speechMinimumSeverity: {
+              $ref: "#/components/schemas/Severity",
+            },
+            speechTemplate: { type: "string", minLength: 1, maxLength: 500 },
+            speechAnnounceClear: { type: "boolean" },
             connectivity: { $ref: "#/components/schemas/Connectivity" },
           },
         },

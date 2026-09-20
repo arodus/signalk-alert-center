@@ -15,7 +15,13 @@ describe("AlertPolicyResolver", () => {
           topic: "boat",
         },
       ],
-      defaults: { minSeverity: "warn", notifiers: ["primary"] },
+      defaults: {
+        minSeverity: "warn",
+        notifiers: ["primary"],
+        speechMinimumSeverity: "alert",
+        speechTemplate: "{name}: {message}",
+        speechAnnounceClear: true,
+      },
     };
     const resolver = new AlertPolicyResolver(database, config);
     resolver.seedDefinitions([]);
@@ -28,6 +34,9 @@ describe("AlertPolicyResolver", () => {
     ).toMatchObject({
       minimumSeverity: "warn",
       notifierIds: ["primary"],
+      speechMinimumSeverity: "alert",
+      speechTemplate: "{name}: {message}",
+      speechAnnounceClear: true,
       provenance: "default",
     });
     database.setPolicy(pathDefinitionId("notifications.navigation.anchor"), {

@@ -9,17 +9,19 @@ describe("validateConfig", () => {
     const notifierItems = pluginConfigSchema.properties.notifiers.items;
     const variants = notifierItems.dependencies.type.oneOf;
     expect(pluginConfigSchema.properties.notifiers.type).toBe("array");
-    expect(variants).toHaveLength(3);
+    expect(variants).toHaveLength(4);
     expect(notifierItems.properties.type.enum).toEqual([
       "ntfy",
       "pagerduty",
       "discord",
+      "wyoming",
     ]);
     expect(notifierItems.properties.type.default).toBe("ntfy");
     expect(variants.map((variant) => variant.properties.type.enum[0])).toEqual([
       "ntfy",
       "pagerduty",
       "discord",
+      "wyoming",
     ]);
   });
 
@@ -110,6 +112,42 @@ describe("validateConfig", () => {
         ],
       }),
     ).toThrow("requires an ntfy topic");
+  });
+
+  it("validates Signal K Wyoming speech services and defaults", () => {
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Bridge speakers",
+            type: "wyoming",
+            targets: ["bridge"],
+            voice: "en_US-lessac-medium",
+            urgentAt: "alarm",
+          },
+        ],
+        defaults: {
+          notifiers: ["Bridge speakers"],
+          speechMinimumSeverity: "warn",
+          speechTemplate: "{name}. {message}",
+          speechAnnounceClear: true,
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Bridge speakers",
+            type: "wyoming",
+            targets: [""],
+          },
+        ],
+      }),
+    ).toThrow("invalid Wyoming satellite targets");
+    expect(() => validateConfig({ defaults: { speechTemplate: "" } })).toThrow(
+      "spoken-alert template",
+    );
   });
 
   it("rejects invalid retry ranges and incomplete connectivity config", () => {

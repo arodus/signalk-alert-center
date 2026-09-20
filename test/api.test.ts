@@ -366,13 +366,22 @@ describe("alert-center routes", () => {
       {
         params: { id: "bilge" },
         body: {
-          overrideFields: ["notifierIds", "notifierIds"],
+          overrideFields: [
+            "notifierIds",
+            "notifierIds",
+            "speechMinimumSeverity",
+            "speechTemplate",
+            "speechAnnounceClear",
+          ],
           enabled: true,
           oneTime: true,
           rearmAfterSeconds: 3600,
           notifierIds: ["ntfy-main", "ntfy-main"],
           activationDelaySeconds: 30,
           minimumSeverity: "alarm",
+          speechMinimumSeverity: "alert",
+          speechTemplate: "{name}. {message}",
+          speechAnnounceClear: true,
           connectivity: { mode: "wake_after", delaySeconds: 60 },
         },
       },
@@ -380,9 +389,17 @@ describe("alert-center routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       policy: {
-        overrideFields: ["notifierIds"],
+        overrideFields: [
+          "notifierIds",
+          "speechMinimumSeverity",
+          "speechTemplate",
+          "speechAnnounceClear",
+        ],
         notifierIds: ["ntfy-main"],
         activationDelaySeconds: 30,
+        speechMinimumSeverity: "alert",
+        speechTemplate: "{name}. {message}",
+        speechAnnounceClear: true,
       },
     });
   });

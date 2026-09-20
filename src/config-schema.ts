@@ -27,8 +27,8 @@ const serviceType = {
   title: "Service type",
   description:
     "Choose where this service sends notifications. The matching connection fields appear below.",
-  enum: ["ntfy", "pagerduty", "discord"],
-  enumNames: ["ntfy", "PagerDuty", "Discord"],
+  enum: ["ntfy", "pagerduty", "discord", "wyoming"],
+  enumNames: ["ntfy", "PagerDuty", "Discord", "Signal K Wyoming speech"],
   default: "ntfy",
 };
 
@@ -209,9 +209,9 @@ export const pluginConfigSchema = {
       properties: {
         enabled: {
           type: "boolean",
-          title: "Send remote notifications by default",
+          title: "Deliver notifications by default",
           description:
-            "Newly discovered alerts inherit this value until their Settings are changed in the Alert center.",
+            "Newly discovered alerts inherit this value until their Settings are changed in the Alert center. This covers remote services and Wyoming speech.",
           default: true,
         },
         minSeverity: {
@@ -272,13 +272,37 @@ export const pluginConfigSchema = {
             title: "Service name",
           },
         },
+        speechMinimumSeverity: {
+          type: "string",
+          title: "Lowest severity spoken by default",
+          description:
+            "Applies only to selected Signal K Wyoming speech services. A service's own severity floor can still require a higher level.",
+          enum: [...severities],
+          default: "warn",
+        },
+        speechTemplate: {
+          type: "string",
+          title: "Default spoken alert text",
+          description:
+            "Template passed to signalk-wyoming. Available placeholders: {name}, {severity}, {message}, {path}, and {state}. Maximum 500 characters.",
+          minLength: 1,
+          maxLength: 500,
+          default: "{name}. {severity}. {message}",
+        },
+        speechAnnounceClear: {
+          type: "boolean",
+          title: "Announce clears by default",
+          description:
+            "When enabled, selected Wyoming speech services also say when an alert clears.",
+          default: false,
+        },
       },
     },
     notifiers: {
       type: "array",
       title: "Notification services",
       description:
-        "Add each ntfy, PagerDuty, or Discord connection once. Alerts select these connections by their service name.",
+        "Add each ntfy, PagerDuty, Discord, or Signal K Wyoming speech service once. Alerts select these connections by their service name.",
       default: [],
       items: {
         type: "object",
@@ -343,6 +367,37 @@ export const pluginConfigSchema = {
                   },
                 },
                 required: ["webhookUrl"],
+              },
+              {
+                properties: {
+                  type: { enum: ["wyoming"] },
+                  targets: {
+                    type: "array",
+                    title: "Wyoming satellite targets",
+                    description:
+                      "Optional signalk-wyoming satellite IDs. Leave empty to speak on all configured satellites.",
+                    uniqueItems: true,
+                    items: {
+                      type: "string",
+                      minLength: 1,
+                      title: "Satellite ID",
+                    },
+                  },
+                  voice: {
+                    type: "string",
+                    title: "Piper voice override",
+                    description:
+                      "Optional voice name. Leave empty to use the default configured in signalk-wyoming.",
+                  },
+                  urgentAt: {
+                    type: "string",
+                    title: "Urgent playback starts at",
+                    description:
+                      "Alerts at or above this severity interrupt normal playback and bypass signalk-wyoming mute.",
+                    enum: [...severities],
+                    default: "alarm",
+                  },
+                },
               },
             ],
           },

@@ -1,6 +1,6 @@
 /** Clean occurrence-based schema. The repository is pre-release, so there is no
  * compatibility layer for the discarded prototype schema. */
-export const currentSchemaVersion = 9;
+export const currentSchemaVersion = 10;
 
 export const migrations: Array<{ version: number; sql: string }> = [
   {
@@ -193,6 +193,19 @@ ALTER TABLE alert_policies DROP COLUMN audio_policy_json;
     sql: `
 CREATE INDEX IF NOT EXISTS alert_events_global_history_idx
   ON alert_events(occurred_at DESC, id DESC);
+`,
+  },
+  {
+    version: 10,
+    sql: `
+ALTER TABLE alert_policies ADD COLUMN speech_minimum_severity TEXT;
+ALTER TABLE alert_policies ADD COLUMN speech_template TEXT;
+ALTER TABLE alert_policies ADD COLUMN speech_announce_clear INTEGER;
+ALTER TABLE alert_occurrences ADD COLUMN speech_template TEXT;
+ALTER TABLE occurrence_notifiers
+  ADD COLUMN supports_acknowledgement INTEGER NOT NULL DEFAULT 0;
+UPDATE occurrence_notifiers
+SET supports_acknowledgement = supports_resolution;
 `,
   },
 ];

@@ -53,6 +53,9 @@ export interface AlertPolicyPatch {
   notifierIds?: string[];
   activationDelaySeconds?: number;
   minimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  speechMinimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  speechTemplate?: string;
+  speechAnnounceClear?: boolean;
   connectivity?:
     { mode: "queue" | "wake" } | { mode: "wake_after"; delaySeconds: number };
 }
@@ -339,6 +342,9 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
     "minimumSeverity",
     "connectivity",
     "overrideFields",
+    "speechMinimumSeverity",
+    "speechTemplate",
+    "speechAnnounceClear",
   ]);
   const extra = Object.keys(value).filter((key) => !allowed.has(key));
   if (extra.length)
@@ -420,6 +426,42 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       throw new ApiError(400, "INVALID_BODY", "minimumSeverity is invalid");
     patch.minimumSeverity =
       value.minimumSeverity as AlertPolicyPatch["minimumSeverity"];
+  }
+  if (value.speechMinimumSeverity !== undefined) {
+    if (
+      !["normal", "warn", "alert", "alarm", "emergency"].includes(
+        String(value.speechMinimumSeverity),
+      )
+    )
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "speechMinimumSeverity is invalid",
+      );
+    patch.speechMinimumSeverity =
+      value.speechMinimumSeverity as AlertPolicyPatch["speechMinimumSeverity"];
+  }
+  if (value.speechTemplate !== undefined) {
+    if (
+      typeof value.speechTemplate !== "string" ||
+      value.speechTemplate.trim().length === 0 ||
+      value.speechTemplate.length > 500
+    )
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "speechTemplate must contain 1 to 500 characters",
+      );
+    patch.speechTemplate = value.speechTemplate.trim();
+  }
+  if (value.speechAnnounceClear !== undefined) {
+    if (typeof value.speechAnnounceClear !== "boolean")
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "speechAnnounceClear must be boolean",
+      );
+    patch.speechAnnounceClear = value.speechAnnounceClear;
   }
   if (value.connectivity !== undefined) {
     if (!value.connectivity || typeof value.connectivity !== "object")

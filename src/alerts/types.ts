@@ -45,6 +45,8 @@ export interface AlertRecord {
   connectivity: ConnectivityMode;
   activationDueAt?: Date;
   activationState?: ActivationState;
+  /** Template snapshotted for Wyoming speech deliveries. */
+  speechTemplate?: string;
 }
 
 export type ActivationState = "pending" | "eligible" | "suppressed";
@@ -109,6 +111,9 @@ export interface AlertPolicyRecord {
   activationDelaySeconds?: number;
   rearmAfterSeconds?: number;
   notifierIds: string[];
+  speechMinimumSeverity?: Severity;
+  speechTemplate?: string;
+  speechAnnounceClear?: boolean;
   overrideFields: AlertPolicyField[];
   updatedAt: Date;
 }
@@ -121,6 +126,9 @@ export const alertPolicyFields = [
   "rearmAfterSeconds",
   "connectivity",
   "notifierIds",
+  "speechMinimumSeverity",
+  "speechTemplate",
+  "speechAnnounceClear",
 ] as const;
 
 export type AlertPolicyField = (typeof alertPolicyFields)[number];
@@ -200,6 +208,10 @@ export interface IngestOptions {
   notifierMinimumSeverities?: Record<string, Severity>;
   /** Notifiers, such as PagerDuty, that require a trigger followed by resolve. */
   resolvingNotifierIds?: string[];
+  /** Notifiers, such as PagerDuty, that accept an acknowledgement action. */
+  acknowledgingNotifierIds?: string[];
+  /** Spoken-alert template resolved when this occurrence starts. */
+  speechTemplate?: string;
 }
 
 export interface OccurrenceQuery {

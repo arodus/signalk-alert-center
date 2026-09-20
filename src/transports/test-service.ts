@@ -102,6 +102,10 @@ function requestFor(
       },
       successMessage: "Discord accepted the manual test notification.",
     };
+  if (notifier.type === "wyoming")
+    throw new Error(
+      "Wyoming tests use the in-process signalk-wyoming announcement API",
+    );
   const dedupKey = `signalk-alert-center-test:${createHash("sha256")
     .update(notifier.name)
     .digest("hex")

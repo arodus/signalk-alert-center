@@ -1,8 +1,9 @@
 # Signal K Alert Center
 
 An offline-first Signal K plugin for durable alert delivery through ntfy,
-PagerDuty, and Discord. Alerts and independent per-notifier delivery rows are
-stored in SQLite before external work begins.
+PagerDuty, Discord, and spoken announcements through signalk-wyoming. Alerts
+and independent per-service delivery rows are stored in SQLite before delivery
+begins.
 
 ## Alert center
 
@@ -24,8 +25,12 @@ remains available in history, and a later raise creates a distinct occurrence.
 Per-definition settings cover enabled state, minimum severity, notifiers,
 activation delay, repeat intervals, and connectivity mode.
 
-Local playback is intentionally outside this plugin. The former playback
-implementation is preserved on the `archive/local-playback` branch.
+Direct local playback is intentionally outside this plugin. The former playback
+implementation is preserved on the `archive/local-playback` branch. Spoken alerts
+are delegated to
+[signalk-wyoming](https://github.com/hoeken/signalk-wyoming), which performs
+text-to-speech through [signalk-piper](https://github.com/hoeken/signalk-piper)
+and routes audio to its configured satellites.
 
 See the [gap assessment and acceptance scenarios](IMPLEMENTATION_BRIEF.md#product-goal-and-gap-assessment-2026-09-06)
 for verified source findings, required behavior, and unresolved scope decisions.
@@ -51,6 +56,7 @@ following boundaries explicit:
 | Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                |
 | Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                            |
 | PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                   |
+| Spoken alerts   | Selected Wyoming services use signalk-wyoming's in-process announcement API. Speech text and lifecycle delivery state are durable here; synthesis, playback queues, mute, voice, and satellite routing remain owned by signalk-wyoming.                           |
 | API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                           |
 
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player)
@@ -324,6 +330,14 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
       "type": "discord",
       "webhookUrl": "https://discord.com/api/webhooks/...",
       "minSeverity": "alert"
+    },
+    {
+      "name": "Bridge speakers",
+      "type": "wyoming",
+      "targets": ["bridge"],
+      "voice": "en_US-lessac-medium",
+      "urgentAt": "alarm",
+      "minSeverity": "warn"
     }
   ],
   "defaults": {
@@ -331,7 +345,10 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
     "minSeverity": "warn",
     "activationDelaySeconds": 0,
     "connectivity": { "mode": "queue" },
-    "notifiers": ["Crew ntfy"]
+    "notifiers": ["Crew ntfy", "Bridge speakers"],
+    "speechMinimumSeverity": "warn",
+    "speechTemplate": "{name}. {severity}. {message}",
+    "speechAnnounceClear": false
   },
   "delivery": {
     "batchSize": 50,
@@ -413,10 +430,41 @@ including notification service secrets, is retained.
 
 Database maintenance appears last in the plugin settings. Each notification
 service has one **Service type** selector. Changing it immediately replaces the
-connection fields with those required by ntfy, PagerDuty, or Discord.
+connection fields with those required by ntfy, PagerDuty, Discord, or Wyoming.
 
-Per-alert notifier selection, minimum severity, activation delay, repeat interval,
-and connectivity policy are stored from the Alert center's
+### Spoken alerts with signalk-wyoming
+
+Spoken alerts require signalk-wyoming and a working text-to-speech service. For a
+TTS-only setup, install and enable `signalk-container`, `signalk-piper`, and
+`signalk-wyoming`, then configure a local or remote Wyoming satellite with a
+speaker. At the time of writing signalk-wyoming requires Node 24 or newer; follow
+its own requirements if they are newer than this plugin's minimum. Verify playback
+from the **Voice (Wyoming)** webapp before testing it from Alert Center.
+
+Add one or more **Signal K Wyoming speech** notification services globally. An
+empty target list speaks on every configured satellite. An optional voice overrides
+signalk-wyoming's default. Alerts at or above **Urgent playback starts at** use
+Wyoming's urgent priority, which interrupts normal playback and bypasses Wyoming's
+mute switch. Choose the service in an alert's Settings dialog, then configure the
+minimum spoken severity, text template, and optional clear announcement there.
+Supported template fields are `{name}`, `{severity}`, `{message}`, `{path}`, and
+`{state}`; rendered text is limited to 500 characters.
+
+Alert Center uses the in-process `signalk-wyoming.api` version 1 interface. It does
+not invoke Piper directly, run shell commands, or use browser speech. A delivery is
+complete when signalk-wyoming confirms that it queued the announcement, not when
+the speaker finishes playing it. Normal announcements suppressed by Wyoming mute
+are recorded as intentionally completed so they are not replayed much later.
+Acknowledging, silencing, deleting, or clearing an alert cannot cancel speech that
+Wyoming already accepted because its current API has no cancellation or playback-
+completion events. A clear announcement, when enabled, is separate durable work
+and is queued only after the original speech was accepted. A timeout before queue
+confirmation is retried, but the missing cancellation/idempotency contract means a
+late acceptance can theoretically cause duplicate speech. Wyoming-only services
+never request managed Internet connectivity.
+
+Per-alert service selection, minimum severity, activation delay, repeat interval,
+speech policy, and connectivity policy are stored from the Alert center's
 **Settings** dialog. A
 notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
 that notifier send at a lower severity.
@@ -533,7 +581,9 @@ rejected while the first is running. Results distinguish credential, configurati
 timeout, network, and remote-service failures without returning or logging tokens,
 webhook addresses, routing keys, or remote response bodies.
 
-ntfy and Discord receive an unmistakably marked manual test notification.
+ntfy and Discord receive an unmistakably marked manual test notification. A
+Wyoming test queues “Test announcement from Signal K Alert Center” at normal
+priority using that service's saved satellite and voice settings.
 PagerDuty's **Test alert** sends a real warning trigger and therefore opens or
 updates a clearly marked test incident. **Test resolve** is a separate action that
 uses the same stable test deduplication key to resolve that test incident. Service
