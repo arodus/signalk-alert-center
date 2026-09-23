@@ -294,21 +294,47 @@ test("saves a notification service after changing its type", async ({
 
   await page.goto("/admin/#/apps/configuration/signalk-alert-center");
   await expect(
-    page.getByText("Enable local audio playback", { exact: true }),
-  ).toHaveCount(0);
-  const services = page.locator("#root_configuration_notifiers");
-  await services.getByRole("button").last().click();
-  await page.locator("#root_configuration_notifiers_0_name").fill("Bridge");
-  await page
-    .locator("#root_configuration_notifiers_0_type")
-    .selectOption({ label: "PagerDuty" });
-  await page
-    .locator("#root_configuration_notifiers_0_routingKey")
-    .fill("browser-test-integration-key");
-  await page.getByRole("button", { name: "Save Configuration" }).click();
-
-  await expect(
-    page.getByText("Configuration saved successfully!"),
+    page.getByRole("heading", { name: "Alert Center settings" }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Notification services", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Add notification service" }).click();
+  const service = page.getByTestId("notification-service").last();
+  await service.getByLabel("Service name").fill("Bridge");
+  await service.getByLabel("Service type").selectOption("pagerduty");
+  await service
+    .getByLabel("Events API integration key")
+    .fill("browser-test-integration-key");
+  await page
+    .getByRole("button", { name: "Alert defaults", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: /Default notification services/ })
+    .click();
+  await page.getByRole("checkbox", { name: /Bridge/ }).check();
+  const savedRequest = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .includes("/skServer/plugins/signalk-alert-center/config") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save changes" }).click();
+  expect((await savedRequest).ok()).toBe(true);
+  await expect(page.getByText("Save requested.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Errors" })).toHaveCount(0);
+});
+
+test("offers database reset as a confirmed action", async ({ page }) => {
+  await page.goto("/admin/#/apps/configuration/signalk-alert-center");
+  await page.getByRole("button", { name: "Storage & advanced" }).click();
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("permanently deletes");
+    await dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "Reset database" }).click();
+  await expect(
+    page.getByRole("button", { name: "Reset database" }),
+  ).toBeEnabled();
 });

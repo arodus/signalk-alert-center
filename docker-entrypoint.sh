@@ -27,10 +27,6 @@ install_plugin() {
 }
 
 install_plugin /opt/signalk-alert-center signalk-alert-center
-# Development images before the rename installed the old package into the
-# persistent data volume. Remove only that obsolete package copy; its database
-# and configuration are handled separately below.
-rm -rf /home/node/.signalk/node_modules/signalk-persistent-notifier
 if [ -d /opt/signalk-test-fixture ]; then
   install_plugin /opt/signalk-test-fixture signalk-test-fixture
 fi
@@ -46,22 +42,14 @@ EOF
 fi
 
 mkdir -p /home/node/.signalk/plugin-config-data
-old_config=/home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json
 new_config=/home/node/.signalk/plugin-config-data/signalk-alert-center.json
-if [ ! -f "$new_config" ] && [ -f "$old_config" ]; then
-  mv "$old_config" "$new_config"
-  echo "Migrated Signal K Alert Center configuration to the new plugin id"
-elif [ -f "$new_config" ] && [ -f "$old_config" ]; then
-  echo "Both old and new Alert Center configurations exist; leaving the old file untouched" >&2
-fi
-
 if [ ! -f "$new_config" ]; then
   zone_refresh_seconds="${SIGNALK_ZONE_REFRESH_SECONDS:-300}"
   cat > "$new_config" <<EOF
 {
   "enabled": true,
   "configuration": {
-    "storage": { "path": "/home/node/.signalk/persistent-notifier.sqlite" },
+    "storage": { "path": "/home/node/.signalk/alert-center.sqlite" },
     "discovery": { "zoneRefreshSeconds": $zone_refresh_seconds },
     "connectivity": { "enabled": false },
     "notifiers": []
@@ -69,21 +57,6 @@ if [ ! -f "$new_config" ]; then
 }
 EOF
 fi
-
-# Convert the pre-list development format without dropping locally stored
-# credentials. New installations and the Signal K form always write an array.
-node - "$new_config" <<'NODE'
-const fs = require("node:fs");
-const filename = process.argv[2];
-const saved = JSON.parse(fs.readFileSync(filename, "utf8"));
-const notifiers = saved.configuration?.notifiers;
-if (notifiers && !Array.isArray(notifiers) && typeof notifiers === "object") {
-  saved.configuration.notifiers = Object.entries(notifiers).map(
-    ([name, configuration]) => ({ name, ...configuration }),
-  );
-  fs.writeFileSync(filename, `${JSON.stringify(saved, null, 2)}\n`);
-}
-NODE
 
 if [ -d /opt/signalk-test-fixture ]; then
   fixture_seed_on_start="${SIGNALK_FIXTURE_SEED_ON_START:-false}"

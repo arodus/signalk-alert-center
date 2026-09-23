@@ -4,7 +4,7 @@ ARG SIGNALK_SERVER_IMAGE=cr.signalk.io/signalk/signalk-server:v2.31.1
 # particular, never put the persistent Signal K data directory in an image.
 FROM node:22.14.0-alpine3.21 AS build
 WORKDIR /build
-COPY package.json package-lock.json tsconfig.json ./
+COPY package.json package-lock.json tsconfig.json webpack.config.cjs ./
 RUN npm ci
 COPY src ./src
 COPY public ./public

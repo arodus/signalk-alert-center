@@ -58,9 +58,8 @@ requireValue(
 );
 requireValue(existsSync("LICENSE"), "LICENSE file is required");
 requireValue(
-  packageJson.bin?.["signalk-alert-center-migrate"] ===
-    "scripts/migrate-name.mjs",
-  "configuration migration command is required",
+  existsSync("public/remoteEntry.js"),
+  "custom settings panel is missing public/remoteEntry.js",
 );
 
 const npmCache = mkdtempSync(join(tmpdir(), "alert-center-npm-cache-"));
@@ -95,12 +94,11 @@ if (packed.status !== 0) {
       "public/index.html",
       "public/app.js",
       "public/styles.css",
-      "scripts/migrate-name.mjs",
+      "public/remoteEntry.js",
     ])
       requireValue(paths.includes(required), `package is missing ${required}`);
 
-    const allowed =
-      /^(LICENSE|README\.md|package\.json|dist\/|public\/|scripts\/migrate-name\.mjs$)/;
+    const allowed = /^(LICENSE|README\.md|package\.json|dist\/|public\/)/;
     for (const path of paths)
       requireValue(allowed.test(path), `unexpected packaged file: ${path}`);
 

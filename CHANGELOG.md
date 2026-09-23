@@ -13,7 +13,12 @@ Versioning while it remains pre-1.0.
 - Added validated npm package creation, clean-install smoke testing, and protected
   tag-based npm and GitHub release automation.
 - Renamed the package, Signal K plugin, dashboard, and API to Signal K Alert
-  Center, with a guarded migration command for existing development settings.
+  Center as a clean version-one installation.
+- Removed all pre-release database and package-name migrations. Signal K Alert
+  Center now initializes one complete schema in `alert-center.sqlite`.
+- Added a modern, sectioned Signal K settings panel with service-type controls,
+  a configured-service default picker, unsaved-change handling, and a confirmed
+  database-reset action.
 
 Future changes intended for the next release belong here until a release pull
 request moves them into a dated version section.

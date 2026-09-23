@@ -34,7 +34,7 @@ describe("validateConfig", () => {
 
   it("uses a portable database filename by default", () => {
     const storagePath = pluginConfigSchema.properties.storage.properties.path;
-    expect(storagePath.default).toBe("persistent-notifier.sqlite");
+    expect(storagePath.default).toBe("alert-center.sqlite");
     expect(storagePath.description).toContain("Signal K's data directory");
   });
 

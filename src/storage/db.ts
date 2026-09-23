@@ -19,7 +19,7 @@ import {
   OccurrenceQuery,
   severityRank,
 } from "../alerts/types";
-import { currentSchemaVersion, migrations, schema } from "./schema";
+import { currentSchemaVersion, schema } from "./schema";
 
 type Row = Record<string, unknown>;
 
@@ -163,21 +163,6 @@ export class AlertDatabase {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.exec(schema);
-      this.db
-        .prepare(
-          "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-        )
-        .run(1, new Date().toISOString());
-      const applied = this.schemaVersion();
-      for (const migration of migrations) {
-        if (migration.version <= applied) continue;
-        this.db.exec(migration.sql);
-        this.db
-          .prepare(
-            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-          )
-          .run(migration.version, new Date().toISOString());
-      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -205,17 +190,11 @@ export class AlertDatabase {
         "alert_policies",
         "alert_definitions",
         "connectivity_sessions",
-        "schema_migrations",
       ])
         this.db.exec(`DELETE FROM ${table}`);
       this.db.exec(
         "DELETE FROM sqlite_sequence WHERE name IN ('alert_events', 'delivery_attempts')",
       );
-      this.db
-        .prepare(
-          "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-        )
-        .run(currentSchemaVersion, new Date().toISOString());
       // Keep this operation valid as new idempotent schema objects are added.
       this.db.exec(schema);
       this.db.exec("COMMIT");
@@ -226,10 +205,7 @@ export class AlertDatabase {
   }
 
   schemaVersion(): number {
-    const row = this.db
-      .prepare("SELECT MAX(version) AS version FROM schema_migrations")
-      .get() as Row;
-    return Number(row.version ?? 0);
+    return currentSchemaVersion;
   }
 
   operationalStatus(now = new Date()): DatabaseOperationalStatus {
@@ -272,10 +248,9 @@ export class AlertDatabase {
            AND a.outcome IN ('failed_retryable', 'failed_terminal', 'interrupted')
          ORDER BY a.finished_at DESC, a.id DESC LIMIT 1`,
       );
-      const version = this.schemaVersion();
       return {
-        healthy: version === currentSchemaVersion,
-        schemaVersion: version,
+        healthy: true,
+        schemaVersion: currentSchemaVersion,
         expectedSchemaVersion: currentSchemaVersion,
         oldestPendingDeliveryAt: date(queue.oldest),
         oldestDueDeliveryAt: date(queue.oldest_due),

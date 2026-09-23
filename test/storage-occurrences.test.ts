@@ -1,11 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { NormalizedAlert } from "../src/alerts/types";
 import { AlertDatabase } from "../src/storage/db";
-import { migrations, schema } from "../src/storage/schema";
 
 const active = (overrides: Partial<NormalizedAlert> = {}): NormalizedAlert => ({
   sourceKey: "notifications.navigation.anchor",
@@ -34,53 +32,31 @@ describe("occurrence storage", () => {
     return result;
   };
 
-  it("migrates a version-one database and installs history indexes", () => {
-    const directory = mkdtempSync(join(tmpdir(), "notifier-migration-"));
-    directories.push(directory);
-    const filename = join(directory, "alerts.sqlite");
-    const legacy = new DatabaseSync(filename);
-    legacy.exec(schema);
-    legacy
-      .prepare(
-        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
-      )
-      .run(new Date("2026-01-01T00:00:00Z").toISOString());
-    legacy.close();
+  it("creates the complete version-one schema directly", () => {
+    const db = database();
 
-    const migrated = new AlertDatabase(filename);
-    databases.push(migrated);
-    expect(migrated.schemaVersion()).toBe(10);
-    const columns = migrated.db
+    expect(db.schemaVersion()).toBe(1);
+    const occurrenceColumns = db.db
       .prepare("PRAGMA table_info(alert_occurrences)")
-      .all() as Array<{ name: string }>;
-    expect(columns.map((column) => column.name)).toContain("source");
-    expect(columns.map((column) => column.name)).toContain("speech_template");
-    const indexes = migrated.db
-      .prepare("PRAGMA index_list(alert_occurrences)")
-      .all() as Array<{ name: string }>;
-    expect(indexes.map((index) => index.name)).toEqual(
+      .all()
+      .map((column) => (column as { name: string }).name);
+    expect(occurrenceColumns).toEqual(
       expect.arrayContaining([
-        "occurrence_path_history_idx",
-        "occurrence_source_history_idx",
+        "source",
+        "activation_due_at",
+        "speech_template",
       ]),
     );
-    const deliveryIndexes = migrated.db
-      .prepare("PRAGMA index_list(deliveries)")
-      .all() as Array<{ name: string }>;
-    expect(deliveryIndexes.map((index) => index.name)).toEqual(
-      expect.arrayContaining([
-        "deliveries_service_state_idx",
-        "deliveries_service_success_idx",
-      ]),
-    );
+    expect(occurrenceColumns).not.toContain("dismissed_at");
     expect(
-      migrated.db
-        .prepare("PRAGMA table_info(alert_policies)")
-        .all()
-        .map((column) => (column as { name: string }).name),
-    ).not.toContain("audio_policy_json");
+      db.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
+        )
+        .all(),
+    ).toEqual([]);
     expect(
-      migrated.db
+      db.db
         .prepare("PRAGMA table_info(alert_policies)")
         .all()
         .map((column) => (column as { name: string }).name),
@@ -92,247 +68,12 @@ describe("occurrence storage", () => {
       ]),
     );
     expect(
-      migrated.db
+      db.db
         .prepare("PRAGMA table_info(occurrence_notifiers)")
         .all()
         .map((column) => (column as { name: string }).name),
     ).toContain("supports_acknowledgement");
-    expect(
-      migrated.db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'audio_%'",
-        )
-        .all(),
-    ).toEqual([]);
-  });
-
-  it("preserves version-four stored values as explicit overrides", () => {
-    const directory = mkdtempSync(join(tmpdir(), "notifier-policy-migration-"));
-    directories.push(directory);
-    const filename = join(directory, "alerts.sqlite");
-    const legacy = new DatabaseSync(filename);
-    legacy.exec(schema);
-    legacy
-      .prepare(
-        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
-      )
-      .run("2026-01-01T00:00:00.000Z");
-    for (const migration of migrations.filter((item) => item.version <= 4)) {
-      legacy.exec(migration.sql);
-      legacy
-        .prepare(
-          "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-        )
-        .run(migration.version, "2026-01-01T00:00:00.000Z");
-    }
-    legacy
-      .prepare(
-        `INSERT INTO alert_definitions
-          (id, source_type, path_pattern, name, created_at, updated_at)
-         VALUES (?, 'recognized', ?, 'Anchor', ?, ?)`,
-      )
-      .run(
-        "anchor",
-        "notifications.navigation.anchor",
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:00.000Z",
-      );
-    legacy
-      .prepare(
-        `INSERT INTO alert_policies
-          (definition_id, enabled, minimum_severity, activation_delay_seconds,
-           updated_at)
-         VALUES ('anchor', 0, 'alarm', 30, ?)`,
-      )
-      .run("2026-01-01T00:00:00.000Z");
-    legacy.close();
-
-    const migrated = new AlertDatabase(filename);
-    databases.push(migrated);
-    expect(migrated.getPolicy("anchor")).toMatchObject({
-      enabled: false,
-      minimumSeverity: "alarm",
-      activationDelaySeconds: 30,
-      overrideFields: [
-        "enabled",
-        "minimumSeverity",
-        "activationDelaySeconds",
-        "notifierIds",
-      ],
-    });
-  });
-
-  it("preserves deliveries while removing obsolete playback data", () => {
-    const directory = mkdtempSync(join(tmpdir(), "notifier-v6-migration-"));
-    directories.push(directory);
-    const filename = join(directory, "alerts.sqlite");
-    const legacy = new DatabaseSync(filename);
-    legacy.exec(schema);
-    legacy
-      .prepare(
-        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)",
-      )
-      .run("2026-01-01T00:00:00.000Z");
-    for (const migration of migrations.filter((item) => item.version <= 5)) {
-      legacy.exec(migration.sql);
-      legacy
-        .prepare(
-          "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-        )
-        .run(migration.version, "2026-01-01T00:00:00.000Z");
-    }
-    legacy
-      .prepare(
-        `INSERT INTO alert_definitions
-          (id, source_type, path_pattern, name, created_at, updated_at)
-         VALUES ('anchor', 'recognized', ?, 'Anchor', ?, ?)`,
-      )
-      .run(
-        "notifications.navigation.anchor",
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:00.000Z",
-      );
-    legacy
-      .prepare(
-        `INSERT INTO alert_occurrences
-          (id, definition_id, occurrence_number, source_key, path, started_at,
-           received_at, last_seen_at, current_state, current_severity,
-           max_severity, one_time, minimum_severity, activation_delay_seconds,
-           connectivity_json, activation_state, created_at, updated_at)
-         VALUES ('occurrence', 'anchor', 1, ?, ?, ?, ?, ?, 'active', 'alarm',
-                 'alarm', 0, 'normal', 0, '{"mode":"queue"}', 'eligible', ?, ?)`,
-      )
-      .run(
-        "notifications.navigation.anchor",
-        "notifications.navigation.anchor",
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:00.000Z",
-      );
-    legacy
-      .prepare(
-        `INSERT INTO deliveries
-          (id, alert_id, transport_instance_id, state, attempt_count,
-           last_attempt_at, delivered_at, remote_id, created_at, updated_at)
-         VALUES ('delivery', 'occurrence', 'pagerduty', 'delivered', 1,
-                 ?, ?, 'remote', ?, ?)`,
-      )
-      .run(
-        "2026-01-01T00:00:01.000Z",
-        "2026-01-01T00:00:02.000Z",
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:02.000Z",
-      );
-    legacy
-      .prepare(
-        `INSERT INTO delivery_attempts
-          (delivery_id, attempt_number, started_at, finished_at, outcome,
-           remote_id)
-         VALUES ('delivery', 1, ?, ?, 'delivered', 'remote')`,
-      )
-      .run("2026-01-01T00:00:01.000Z", "2026-01-01T00:00:02.000Z");
-    legacy
-      .prepare("UPDATE alert_occurrences SET dismissed_at=? WHERE id=?")
-      .run("2026-01-01T00:00:03.000Z", "occurrence");
-    legacy
-      .prepare(
-        "INSERT INTO alert_events(alert_id, event_type, occurred_at) VALUES (?, ?, ?), (?, ?, ?)",
-      )
-      .run(
-        "occurrence",
-        "raised",
-        "2026-01-01T00:00:00.000Z",
-        "occurrence",
-        "dismissed",
-        "2026-01-01T00:00:03.000Z",
-      );
-    legacy
-      .prepare(
-        `INSERT INTO alert_policies
-          (definition_id, audio_policy_json, override_fields_json, updated_at)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(
-        "anchor",
-        JSON.stringify({
-          enabled: true,
-          sound: "warning",
-          minimumSeverity: "warn",
-          mode: "once",
-          repeatIntervalSeconds: 60,
-          stopOn: {
-            clear: true,
-            acknowledge: true,
-            silence: true,
-            dismiss: true,
-          },
-        }),
-        JSON.stringify(["audio.stopOn.dismiss"]),
-        "2026-01-01T00:00:00.000Z",
-      );
-    legacy
-      .prepare(
-        `INSERT INTO audio_playbacks
-          (id, alert_id, state, sound, minimum_severity, mode,
-           repeat_interval_seconds, stop_on_json, created_at, updated_at)
-         VALUES (?, ?, 'completed', 'warning', 'warn', 'once', 60, ?, ?, ?)`,
-      )
-      .run(
-        "audio",
-        "occurrence",
-        JSON.stringify({
-          clear: true,
-          acknowledge: true,
-          silence: true,
-          dismiss: true,
-        }),
-        "2026-01-01T00:00:00.000Z",
-        "2026-01-01T00:00:00.000Z",
-      );
-    legacy.close();
-
-    const migrated = new AlertDatabase(filename);
-    databases.push(migrated);
-    expect(migrated.getDelivery("delivery")).toMatchObject({
-      operation: "notify",
-      state: "delivered",
-      remoteId: "remote",
-    });
-    expect(migrated.listDeliveryAttempts("delivery")).toMatchObject([
-      { attemptNumber: 1, outcome: "delivered", remoteId: "remote" },
-    ]);
-    expect(migrated.listOccurrences()).toHaveLength(1);
-    expect(
-      migrated.listAlertEvents("occurrence").map((event) => event.eventType),
-    ).toEqual(["raised"]);
-    expect(migrated.getPolicy("anchor")?.overrideFields).toEqual([]);
-    expect(
-      migrated.db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'audio_%'",
-        )
-        .all(),
-    ).toEqual([]);
-    expect(
-      migrated.db
-        .prepare("PRAGMA table_info(alert_occurrences)")
-        .all()
-        .map((column) => (column as { name: string }).name),
-    ).not.toContain("dismissed_at");
-    expect(migrated.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
-  });
-
-  it("reports a schema health fault without throwing from status", () => {
-    const db = database();
-    db.db.exec("DELETE FROM schema_migrations");
-
-    expect(db.operationalStatus()).toMatchObject({
-      healthy: false,
-      schemaVersion: 0,
-      expectedSchemaVersion: 10,
-    });
+    expect(db.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   it("stores raise-clear-raise as distinct visible occurrences", () => {
@@ -406,7 +147,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(10);
+    expect(db.schemaVersion()).toBe(1);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);

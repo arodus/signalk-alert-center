@@ -112,8 +112,8 @@ An activation delay is different from `wake_after`:
 ## Implementation status and roadmap
 
 The initial alert-center implementation followed these phases. This is a new
-project: the prototype SQLite schema was not a compatibility contract and was
-replaced rather than migrated. Released schema changes must use migrations.
+version-one project: prototype databases and configuration from the former
+package are not supported and should be removed before installation.
 
 ### 1. Signal K boundary — implemented
 
@@ -128,7 +128,7 @@ replaced rather than migrated. Released schema changes must use migrations.
 
 ### 2. Occurrence-based schema — implemented
 
-Create a clean schema, recording its version for future migrations, with:
+Create the complete version-one schema directly, with:
 
 - `alert_definitions`: zone/discovered identity and display metadata;
 - `alert_policies` plus a normalized definition-to-notifier mapping;
@@ -139,10 +139,9 @@ Create a clean schema, recording its version for future migrations, with:
   work and append-only results;
 - persisted activation and connectivity deadlines.
 
-Do not add migration code for the discarded prototype schema. Development databases
-created by earlier commits should be deleted and recreated. Add indexes for
-current-list lookup and stable, cursor-based history order (`occurred_at`, unique
-id); future released schema changes must use transactional migrations.
+Development databases created by earlier commits should be deleted and recreated.
+Add indexes for current-list lookup and stable, cursor-based history order
+(`occurred_at`, unique id).
 
 ### 3. Recurrence and delay state machines — implemented
 
@@ -174,7 +173,7 @@ POST  /occurrences/:id/acknowledge
 POST  /occurrences/:id/silence
 ```
 
-Keep the existing status/delivery/retry endpoints during migration. Use cursors,
+Keep the status/delivery/retry endpoints stable. Use cursors,
 bounded limits, filter validation, stable ordering, and structured error bodies.
 Expose effective policy, the current global defaults, overridden field names,
 and provenance (`default`, `partial`, or `override`). Register
@@ -211,11 +210,11 @@ Signal K router API, and publish the complete contract through `getOpenApi()`.
 - Await and audit Signal K notification API actions after checking `canSilence`,
   `canAcknowledge`, and `canClear`; show unsupported and failed actions honestly.
 - Expand status with oldest pending work, last success/error per notifier, overdue
-  activation counts, migration version, and database health.
+  activation counts, schema version, and database health.
 - Default history retention to unlimited. If bounded retention is added, purge in
   small transactions, never remove pending work, and expose policy/status clearly.
 - Replace the inline partial OpenAPI object with a validated complete document and
-  add CI for formatting, type checking, unit tests, migrations, integration tests,
+  add CI for formatting, type checking, unit tests, schema creation, integration tests,
   and the Docker smoke test.
 
 ## Local Docker testing
@@ -223,7 +222,7 @@ Signal K router API, and publish the complete contract through `getOpenApi()`.
 Use three layers rather than relying on manual clicks alone:
 
 1. Run `npm test`, `npm run typecheck`, and `npm run format:check` on Node 22 for
-   fast state-machine, migration, and fake-clock coverage.
+   fast state-machine, storage, and fake-clock coverage.
 2. Run `npm run test:integration` for deterministic transport contract tests
    against the existing local mock HTTP service.
 3. Run a real pinned Signal K server with the plugin installed and a persistent
@@ -378,60 +377,35 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
 }
 ```
 
-By default, the database is `persistent-notifier.sqlite` inside Signal K's data
+By default, the database is `alert-center.sqlite` inside Signal K's data
 directory, so the configuration works across native and container installations.
 When `storage.path` is relative, it is resolved from that data directory. An absolute
 path remains supported when you intentionally manage the database elsewhere.
-The database filename intentionally keeps its old name so an upgrade retains all
-definitions, per-alert settings, occurrences, and delivery history without copying
-or rewriting SQLite data.
 
-### Migrating a development installation from the old name
+There is intentionally no migration from `signalk-persistent-notifier`. Remove its
+old package, configuration file, and `persistent-notifier.sqlite` database before
+installing Signal K Alert Center. The new package creates its complete schema and
+discovers current Signal K definitions from scratch.
 
-The rename changes the npm package, Signal K plugin id, settings filename,
-dashboard URL, and API URL. Stop Signal K before migrating. Install the new package,
-move the saved settings with the included guarded command, remove the old package,
-and then restart Signal K:
+The custom Signal K settings panel contains only global configuration. It separates
+alert defaults, notification services, connectivity, and storage/advanced settings
+into focused sections. The default-service picker lists the configured services by
+their human-readable names instead of requiring internal identifiers. Each
+notification service has one **Service type** selector; changing it immediately
+shows only the connection fields required by ntfy, PagerDuty, Discord, or
+Signal K Wyoming speech.
 
-```sh
-npm install --prefix ~/.signalk ./signalk-alert-center-X.Y.Z.tgz
-~/.signalk/node_modules/.bin/signalk-alert-center-migrate --data-dir ~/.signalk
-npm uninstall --prefix ~/.signalk signalk-persistent-notifier
-```
+Optional **History retention** removes only cleared occurrences older than the
+configured age, in bounded batches. It is disabled by default and always protects
+active alerts, pending/retryable/in-flight deliveries, and persisted wake requests.
+Retention status and the most recent cleanup counts are available from `/status`.
 
-The migration command moves
-`plugin-config-data/signalk-persistent-notifier.json` to
-`plugin-config-data/signalk-alert-center.json` without reading or printing its
-notification-service secrets. It refuses to overwrite anything when both files
-exist. The configured database path is not changed, so stored alert data and
-per-alert policy remain in place. After restart, use `/signalk-alert-center` rather
-than the former dashboard URL.
-
-The provided Docker entrypoint performs the same settings-file move automatically
-inside an existing named volume before Signal K starts. It retains
-`persistent-notifier.sqlite`. Back up the Signal K data directory before any manual
-upgrade; if migration must be reversed, stop Signal K and move the configuration
-file back to its former name before reinstalling the old development package.
-
-The Signal K plugin form contains only global configuration: storage/discovery,
-bounded ingestion and delivery limits, retry behavior, notifier connections and
-secrets, and optional connectivity management. Optional **History retention** removes only
-cleared occurrences older than the configured age, in bounded batches. It is
-disabled by default and always protects active alerts, pending/retryable/in-flight
-deliveries, and persisted wake requests. Retention status and the most recent
-cleanup counts are available from `/status`.
-
-The form also contains a destructive, one-shot database reset
-under **Database maintenance**. Enable **Reset database when Save Configuration is
-clicked**, then click Signal K's **Save Configuration** button. The plugin deletes
-all alert definitions, occurrences, event and delivery history, and per-alert policy;
-re-initializes the schema; discovers current Signal K definitions again; and
-automatically turns the reset control back off. Global plugin configuration,
-including notification service secrets, is retained.
-
-Database maintenance appears last in the plugin settings. Each notification
-service has one **Service type** selector. Changing it immediately replaces the
-connection fields with those required by ntfy, PagerDuty, Discord, or Wyoming.
+The **Storage & advanced** section ends with a danger zone containing an explicit
+**Reset database** button. After confirmation, the plugin deletes all alert
+definitions, occurrences, event and delivery history, and per-alert policy;
+re-initializes the schema; discovers current Signal K definitions again; and clears
+the internal one-shot reset request. Global plugin configuration, including
+notification service secrets, is retained.
 
 ### Optional spoken alerts with signalk-wyoming
 

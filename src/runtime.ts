@@ -142,7 +142,7 @@ export class AlertCenterRuntime {
 
   private databasePath(options: PluginConfig): string {
     const configuredPath =
-      options.storage?.path?.trim() || "persistent-notifier.sqlite";
+      options.storage?.path?.trim() || "alert-center.sqlite";
     return path.isAbsolute(configuredPath)
       ? configuredPath
       : path.join(this.app.getDataDirPath(), configuredPath);
