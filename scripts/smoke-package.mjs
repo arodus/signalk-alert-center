@@ -54,12 +54,16 @@ try {
   );
   if (installedPackage.signalKPlugin?.id !== "signalk-alert-center")
     throw new Error("Installed package has the wrong Signal K plugin id");
+  if (installedPackage.signalk?.appIcon !== "./icon-192.png")
+    throw new Error("Installed package has the wrong Signal K app icon");
   for (const required of [
     installedPackage.main,
     "public/index.html",
     "public/app.js",
     "public/styles.css",
     "public/remoteEntry.js",
+    "public/icon-192.png",
+    "public/icon-512.png",
   ])
     if (!existsSync(join(installedRoot, required)))
       throw new Error(`Installed package is missing ${required}`);

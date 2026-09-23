@@ -74,5 +74,9 @@
   "signalKPlugin": {
     "id": "signalk-alert-center"
   },
+  "signalk": {
+    "appIcon": "./icon-192.png",
+    "displayName": "Signal K Alert Center"
+  },
   "signalk-plugin-enabled-by-default": false
 }

@@ -1,5 +1,9 @@
 # Signal K Alert Center
 
+<p align="center">
+  <img src="./public/icon-192.png" alt="Signal K Alert Center logo" width="144" height="144" />
+</p>
+
 An offline-first Signal K plugin for durable alert delivery through optional
 notification services: ntfy, PagerDuty, Discord, Telegram, and spoken announcements
 through signalk-wyoming. Alert Center does not require any of these integrations. Alerts

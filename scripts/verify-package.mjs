@@ -45,6 +45,14 @@ requireValue(
   "Signal K plugin id must match the package name",
 );
 requireValue(
+  packageJson.signalk?.appIcon === "./icon-192.png",
+  "Signal K app icon must reference public/icon-192.png",
+);
+requireValue(
+  packageJson.signalk?.displayName === "Signal K Alert Center",
+  "Signal K display name is required",
+);
+requireValue(
   packageJson.engines?.node === ">=22.5",
   "Node compatibility must be explicit",
 );
@@ -95,6 +103,8 @@ if (packed.status !== 0) {
       "public/app.js",
       "public/styles.css",
       "public/remoteEntry.js",
+      "public/icon-192.png",
+      "public/icon-512.png",
     ])
       requireValue(paths.includes(required), `package is missing ${required}`);
 
