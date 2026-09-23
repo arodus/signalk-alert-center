@@ -1,8 +1,8 @@
 # Signal K Alert Center
 
 An offline-first Signal K plugin for durable alert delivery through optional
-notification services: ntfy, PagerDuty, Discord, and spoken announcements through
-signalk-wyoming. Alert Center does not require any of these integrations. Alerts
+notification services: ntfy, PagerDuty, Discord, Telegram, and spoken announcements
+through signalk-wyoming. Alert Center does not require any of these integrations. Alerts
 and independent per-service delivery rows are stored in SQLite before delivery
 begins.
 
@@ -57,6 +57,7 @@ following boundaries explicit:
 | Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                |
 | Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                            |
 | PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                   |
+| Telegram        | Bot API text messages support chats, channels, optional forum topics, silent delivery, durable retry, and manual service tests.                                                                                                                                   |
 | Spoken alerts   | Selected Wyoming services use signalk-wyoming's in-process announcement API. Speech text and lifecycle delivery state are durable here; synthesis, playback queues, mute, voice, and satellite routing remain owned by signalk-wyoming.                           |
 | API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                           |
 
@@ -332,6 +333,15 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
       "minSeverity": "alert"
     },
     {
+      "name": "Crew Telegram",
+      "type": "telegram",
+      "botToken": "123456:secret",
+      "chatId": "-1001234567890",
+      "messageThreadId": 42,
+      "disableNotification": false,
+      "minSeverity": "warn"
+    },
+    {
       "name": "Bridge speakers",
       "type": "wyoming",
       "targets": ["bridge"],
@@ -392,7 +402,7 @@ alert defaults, notification services, connectivity, and storage/advanced settin
 into focused sections. The default-service picker lists the configured services by
 their human-readable names instead of requiring internal identifiers. Each
 notification service has one **Service type** selector; changing it immediately
-shows only the connection fields required by ntfy, PagerDuty, Discord, or
+shows only the connection fields required by ntfy, PagerDuty, Discord, Telegram, or
 Signal K Wyoming speech.
 
 Optional **History retention** removes only cleared occurrences older than the
@@ -406,6 +416,20 @@ definitions, occurrences, event and delivery history, and per-alert policy;
 re-initializes the schema; discovers current Signal K definitions again; and clears
 the internal one-shot reset request. Global plugin configuration, including
 notification service secrets, is retained.
+
+### Telegram notifications
+
+Create a bot with Telegram's BotFather, add it to the destination chat or channel,
+and configure a **Telegram** notification service with the bot token and target
+chat ID. Public channels may use an `@channel_name`; private chats, groups, and
+supergroups use their numeric chat ID. A forum supergroup topic can be targeted
+with its optional message-thread ID. **Send silently** uses Telegram's silent
+notification option while preserving the message in the chat.
+
+Alert Center sends plain text through the HTTPS Bot API and stores Telegram's
+returned message ID with the completed delivery. Failed and rate-limited requests
+use the same durable retry policy as other remote services. Bot tokens are treated
+as secrets and are never written to plugin logs or API responses.
 
 ### Optional spoken alerts with signalk-wyoming
 
@@ -519,8 +543,8 @@ Rapidly increasing Signal K memory, heap-limit restarts, a queue at its configur
 limit, or an old active delivery request indicate that input or a notification service
 is not keeping up. Disable this plugin on the affected server and restart Signal K to
 release retained process memory. Preserve the database and logs; deleting the database
-is not required. Before re-enabling it, verify the configured ntfy, PagerDuty, and
-Discord endpoints are reachable and review `/status` for ingestion and scheduler
+is not required. Before re-enabling it, verify the configured ntfy, PagerDuty,
+Discord, and Telegram endpoints are reachable and review `/status` for ingestion and scheduler
 diagnostics. Do not increase the queue or request timeout as a first response because
 that permits more work to remain resident.
 
@@ -599,7 +623,7 @@ never arrives.
 
 Docker-backed HTTP integration tests are available with
 `npm run test:integration`. They start a local scripted HTTP service and exercise
-ntfy, PagerDuty, and Discord without contacting external services.
+ntfy, PagerDuty, Discord, and Telegram without contacting external services.
 
 For a real Signal K acceptance run:
 

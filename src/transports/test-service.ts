@@ -25,6 +25,7 @@ interface TestOptions {
   timeoutMs: number;
   fetch?: typeof fetch;
   pagerDutyEndpoint?: string;
+  telegramApiBase?: string;
   now?: () => number;
   operation?: NotificationTestOperation;
 }
@@ -68,6 +69,7 @@ function requestFor(
   signal: AbortSignal,
   operation: NotificationTestOperation,
   pagerDutyEndpoint: string,
+  telegramApiBase: string,
 ): { url: string; init: RequestInit; successMessage: string } {
   if (notifier.type === "ntfy") {
     const headers: Record<string, string> = {
@@ -106,6 +108,24 @@ function requestFor(
     throw new Error(
       "Wyoming tests use the in-process signalk-wyoming announcement API",
     );
+  if (notifier.type === "telegram")
+    return {
+      url: `${telegramApiBase.replace(/\/$/, "")}/bot${notifier.botToken}/sendMessage`,
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: notifier.chatId,
+          text: `${testTitle}\n\n${testBody}`,
+          ...(notifier.messageThreadId === undefined
+            ? {}
+            : { message_thread_id: notifier.messageThreadId }),
+          disable_notification: notifier.disableNotification === true,
+        }),
+        signal,
+      },
+      successMessage: "Telegram accepted the manual test notification.",
+    };
   const dedupKey = `signalk-alert-center-test:${createHash("sha256")
     .update(notifier.name)
     .digest("hex")
@@ -171,6 +191,7 @@ export async function testNotificationService(
       controller.signal,
       operation,
       options.pagerDutyEndpoint ?? "https://events.pagerduty.com/v2/enqueue",
+      options.telegramApiBase ?? "https://api.telegram.org",
     );
     const response = await (options.fetch ?? fetch)(request.url, request.init);
     if (!response.ok) return finish(classifyFailure(response.status));

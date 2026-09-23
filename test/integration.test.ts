@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DiscordTransport } from "../src/transports/discord";
 import { NtfyTransport } from "../src/transports/ntfy";
 import { PagerDutyTransport } from "../src/transports/pagerduty";
+import { TelegramTransport } from "../src/transports/telegram";
 import { AlertRecord, DeliveryRecord } from "../src/alerts/types";
 import { createInternetProbe } from "../src/connectivity/internet";
 
@@ -73,7 +74,7 @@ describe.skipIf(!enabled)("Docker HTTP transport integration", () => {
     );
   });
 
-  it("delivers ntfy, PagerDuty, and Discord payloads over HTTP", async () => {
+  it("delivers ntfy, PagerDuty, Discord, and Telegram payloads over HTTP", async () => {
     await expect(
       createInternetProbe({ url: `${baseUrl}/health` })(),
     ).resolves.toBe(true);
@@ -81,6 +82,10 @@ describe.skipIf(!enabled)("Docker HTTP transport integration", () => {
       new NtfyTransport({ server: baseUrl, topic: "ntfy-topic" }),
       new PagerDutyTransport("routing-key", `${baseUrl}/pagerduty`),
       new DiscordTransport(`${baseUrl}/discord`),
+      new TelegramTransport(
+        { botToken: "test-token", chatId: "test-chat" },
+        baseUrl,
+      ),
     ];
     for (const transport of transports) {
       expect((await transport.send(alert, delivery, context)).kind).toBe(
@@ -88,11 +93,12 @@ describe.skipIf(!enabled)("Docker HTTP transport integration", () => {
       );
     }
     const requests = await (await fetch(`${baseUrl}/requests`)).json();
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(4);
     expect(requests.map((request: { url: string }) => request.url)).toEqual([
       "/ntfy-topic",
       "/pagerduty",
       "/discord",
+      "/bottest-token/sendMessage",
     ]);
   });
 });

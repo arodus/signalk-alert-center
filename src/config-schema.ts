@@ -27,8 +27,14 @@ const serviceType = {
   title: "Service type",
   description:
     "Choose where this service sends notifications. The matching connection fields appear below.",
-  enum: ["ntfy", "pagerduty", "discord", "wyoming"],
-  enumNames: ["ntfy", "PagerDuty", "Discord", "Signal K Wyoming speech"],
+  enum: ["ntfy", "pagerduty", "discord", "telegram", "wyoming"],
+  enumNames: [
+    "ntfy",
+    "PagerDuty",
+    "Discord",
+    "Telegram",
+    "Signal K Wyoming speech",
+  ],
   default: "ntfy",
 };
 
@@ -302,7 +308,7 @@ export const pluginConfigSchema = {
       type: "array",
       title: "Notification services",
       description:
-        "Optionally add each ntfy, PagerDuty, Discord, or Signal K Wyoming speech service once. Alert Center works without any notification service. Alerts select configured services by name.",
+        "Optionally add each ntfy, PagerDuty, Discord, Telegram, or Signal K Wyoming speech service once. Alert Center works without any notification service. Alerts select configured services by name.",
       default: [],
       items: {
         type: "object",
@@ -367,6 +373,39 @@ export const pluginConfigSchema = {
                   },
                 },
                 required: ["webhookUrl"],
+              },
+              {
+                properties: {
+                  type: { enum: ["telegram"] },
+                  botToken: {
+                    type: "string",
+                    title: "Telegram bot token",
+                    description:
+                      "Bot token created by BotFather. Alert Center uses it only for Telegram Bot API requests.",
+                    format: "password",
+                  },
+                  chatId: {
+                    type: "string",
+                    title: "Telegram chat ID",
+                    description:
+                      "Numeric chat ID or public channel username such as @boat_alerts.",
+                  },
+                  messageThreadId: {
+                    type: "integer",
+                    minimum: 1,
+                    title: "Telegram topic ID",
+                    description:
+                      "Optional message-thread ID for a topic inside a forum supergroup.",
+                  },
+                  disableNotification: {
+                    type: "boolean",
+                    title: "Send silently",
+                    description:
+                      "Deliver Telegram messages without a notification sound.",
+                    default: false,
+                  },
+                },
+                required: ["botToken", "chatId"],
               },
               {
                 properties: {

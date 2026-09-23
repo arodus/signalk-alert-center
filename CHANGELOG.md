@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Added Telegram Bot API notifications with chat, forum-topic, silent-delivery,
+  manual-test, and durable retry support.
 - Added signalk-wyoming as an optional notification service for durable spoken
   alerts, including global satellite, voice, severity, and urgency settings;
   per-alert speech templates, severity thresholds, optional clear announcements;

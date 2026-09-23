@@ -45,6 +45,7 @@ import { AlertDatabase } from "./storage/db";
 import { DiscordTransport } from "./transports/discord";
 import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
+import { TelegramTransport } from "./transports/telegram";
 import { NotificationTransport } from "./transports/transport";
 import { WyomingSayApi, WyomingTransport } from "./transports/wyoming";
 import {
@@ -1087,6 +1088,16 @@ export class AlertCenterRuntime {
         this.transports.set(
           notifier.name,
           new DiscordTransport(String(notifier.webhookUrl)),
+        );
+      if (notifier.type === "telegram")
+        this.transports.set(
+          notifier.name,
+          new TelegramTransport({
+            botToken: notifier.botToken,
+            chatId: notifier.chatId,
+            messageThreadId: notifier.messageThreadId,
+            disableNotification: notifier.disableNotification,
+          }),
         );
       if (notifier.type === "wyoming")
         this.transports.set(

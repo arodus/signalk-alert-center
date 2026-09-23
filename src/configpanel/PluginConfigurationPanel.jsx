@@ -5,6 +5,7 @@ const notifierTypes = [
   { value: "ntfy", label: "ntfy" },
   { value: "pagerduty", label: "PagerDuty" },
   { value: "discord", label: "Discord" },
+  { value: "telegram", label: "Telegram" },
   { value: "wyoming", label: "Signal K Wyoming speech" },
 ];
 const tabs = [
@@ -573,6 +574,19 @@ function NotificationServices({ config, update }) {
                       },
                       true,
                     );
+                  if (type === "telegram")
+                    change(
+                      index,
+                      {
+                        ...shared,
+                        botToken: service.botToken ?? "",
+                        chatId: service.chatId ?? "",
+                        messageThreadId: service.messageThreadId,
+                        disableNotification:
+                          service.disableNotification ?? false,
+                      },
+                      true,
+                    );
                   if (type === "wyoming")
                     change(
                       index,
@@ -679,6 +693,57 @@ function NotificationServices({ config, update }) {
                   }
                 />
               </Field>
+            )}
+            {service.type === "telegram" && (
+              <>
+                <Field
+                  label="Telegram bot token"
+                  hint="Create the bot and copy its token from BotFather."
+                >
+                  <input
+                    style={styles.input}
+                    type="password"
+                    value={service.botToken ?? ""}
+                    onChange={(event) =>
+                      change(index, { botToken: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field
+                  label="Telegram chat ID"
+                  hint="Use a numeric chat ID or a public channel username such as @boat_alerts."
+                >
+                  <input
+                    style={styles.input}
+                    value={service.chatId ?? ""}
+                    onChange={(event) =>
+                      change(index, { chatId: event.target.value })
+                    }
+                  />
+                </Field>
+                <NumberField
+                  label="Telegram topic ID"
+                  hint="Optional message-thread ID for a forum supergroup topic."
+                  min={1}
+                  value={service.messageThreadId}
+                  onChange={(messageThreadId) =>
+                    change(index, { messageThreadId })
+                  }
+                />
+                <label style={{ ...styles.checkLabel, alignSelf: "center" }}>
+                  <input
+                    style={styles.checkbox}
+                    type="checkbox"
+                    checked={service.disableNotification === true}
+                    onChange={(event) =>
+                      change(index, {
+                        disableNotification: event.target.checked,
+                      })
+                    }
+                  />
+                  Send Telegram messages silently
+                </label>
+              </>
             )}
             {service.type === "wyoming" && (
               <>

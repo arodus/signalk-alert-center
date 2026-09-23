@@ -149,4 +149,39 @@ describe("manual notification-service tests", () => {
     expect(resolve.message).toContain("resolve event");
     expect(JSON.stringify([trigger, resolve])).not.toContain("routing-key");
   });
+
+  it("sends a Telegram test to the saved chat without returning the bot token", async () => {
+    const fetch = vi.fn(async () => new Response('{"ok":true}'));
+    const result = await testNotificationService(
+      {
+        name: "Crew Telegram",
+        type: "telegram",
+        botToken: "123456:private-token",
+        chatId: "-1001234567890",
+        messageThreadId: 42,
+        disableNotification: true,
+      },
+      {
+        timeoutMs: 1_000,
+        fetch,
+        telegramApiBase: "https://telegram.example",
+      },
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://telegram.example/bot123456:private-token/sendMessage",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const request = fetch.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      chat_id: "-1001234567890",
+      message_thread_id: 42,
+      disable_notification: true,
+    });
+    expect(result).toMatchObject({
+      status: "success",
+      service: { id: "Crew Telegram", type: "telegram" },
+    });
+    expect(JSON.stringify(result)).not.toContain("private-token");
+  });
 });
