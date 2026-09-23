@@ -301,7 +301,12 @@ test("saves a Telegram service and selects it as a default", async ({
     .click();
   await page.getByRole("button", { name: "Add notification service" }).click();
   const service = page.getByTestId("notification-service").last();
+  await expect(service.getByText(/^Service \d+$/)).toBeVisible();
+  await expect(
+    service.getByText("Unnamed service", { exact: true }),
+  ).toBeVisible();
   await service.getByLabel("Service name").fill("Bridge");
+  await expect(service.getByText("Bridge", { exact: true })).toBeVisible();
   await service.getByLabel("Service type").selectOption("telegram");
   await service
     .getByLabel("Telegram bot token")

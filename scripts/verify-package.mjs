@@ -52,6 +52,11 @@ requireValue(
   packageJson.signalk?.displayName === "Signal K Alert Center",
   "Signal K display name is required",
 );
+for (const optionalPlugin of ["signalk-piper", "signalk-wyoming"])
+  requireValue(
+    packageJson.signalk?.recommends?.includes(optionalPlugin),
+    `Signal K optional recommendation is missing ${optionalPlugin}`,
+  );
 requireValue(
   packageJson.engines?.node === ">=22.5",
   "Node compatibility must be explicit",

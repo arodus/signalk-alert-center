@@ -450,6 +450,11 @@ Node 24 or newer; follow its requirements if they are newer than Alert Center's
 minimum. Verify playback from the **Voice (Wyoming)** webapp before testing the
 optional service from Alert Center.
 
+The package declares `signalk-wyoming` and `signalk-piper` as optional Signal K
+recommendations so compatible App Store views can surface them alongside Alert
+Center. Neither plugin is installed as an npm dependency or required unless spoken
+alerts are configured.
+
 Add one or more **Signal K Wyoming speech** notification services globally. An
 empty target list speaks on every configured satellite. An optional voice overrides
 signalk-wyoming's default. Alerts at or above **Urgent playback starts at** use

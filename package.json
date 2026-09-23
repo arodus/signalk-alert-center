@@ -76,7 +76,11 @@
   },
   "signalk": {
     "appIcon": "./icon-192.png",
-    "displayName": "Signal K Alert Center"
+    "displayName": "Signal K Alert Center",
+    "recommends": [
+      "signalk-piper",
+      "signalk-wyoming"
+    ]
   },
   "signalk-plugin-enabled-by-default": false
 }
