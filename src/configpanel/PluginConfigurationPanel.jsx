@@ -124,6 +124,38 @@ const styles = {
     marginBottom: 14,
     boxShadow: "0 1px 2px rgba(20, 40, 48, .04)",
   },
+  serviceCard: {
+    background: colors.soft,
+    border: `1px solid #b7cbd2`,
+    borderLeft: `4px solid ${colors.brand}`,
+    borderRadius: 10,
+    padding: "16px clamp(12px, 2vw, 20px)",
+    marginBottom: 14,
+    boxShadow: "0 2px 5px rgba(20, 40, 48, .07)",
+  },
+  serviceHeader: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14,
+  },
+  serviceNumber: {
+    color: colors.brandDark,
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: ".04em",
+    textTransform: "uppercase",
+  },
+  serviceName: { fontSize: 16, fontWeight: 750 },
+  serviceType: {
+    color: colors.muted,
+    background: "white",
+    border: `1px solid ${colors.line}`,
+    borderRadius: 999,
+    padding: "2px 8px",
+    fontSize: 12,
+  },
   sectionTitle: { margin: "0 0 3px", fontSize: 18 },
   sectionHelp: { color: colors.muted, margin: "0 0 16px", lineHeight: 1.45 },
   grid: {
@@ -515,11 +547,18 @@ function NotificationServices({ config, update }) {
         <div
           key={index}
           data-testid="notification-service"
-          style={{
-            borderTop: index ? `1px solid ${colors.line}` : 0,
-            padding: "16px 0",
-          }}
+          style={styles.serviceCard}
         >
+          <div style={styles.serviceHeader}>
+            <span style={styles.serviceNumber}>Service {index + 1}</span>
+            <span style={styles.serviceName}>
+              {service.name?.trim() || "Unnamed service"}
+            </span>
+            <span style={styles.serviceType}>
+              {notifierTypes.find((item) => item.value === service.type)
+                ?.label ?? service.type}
+            </span>
+          </div>
           <div style={styles.grid}>
             <Field
               label="Service name"
