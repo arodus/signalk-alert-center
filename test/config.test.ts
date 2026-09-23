@@ -9,11 +9,12 @@ describe("validateConfig", () => {
     const notifierItems = pluginConfigSchema.properties.notifiers.items;
     const variants = notifierItems.dependencies.type.oneOf;
     expect(pluginConfigSchema.properties.notifiers.type).toBe("array");
-    expect(variants).toHaveLength(4);
+    expect(variants).toHaveLength(5);
     expect(notifierItems.properties.type.enum).toEqual([
       "ntfy",
       "pagerduty",
       "discord",
+      "telegram",
       "wyoming",
     ]);
     expect(notifierItems.properties.type.default).toBe("ntfy");
@@ -21,6 +22,7 @@ describe("validateConfig", () => {
       "ntfy",
       "pagerduty",
       "discord",
+      "telegram",
       "wyoming",
     ]);
   });
@@ -148,6 +150,48 @@ describe("validateConfig", () => {
     expect(() => validateConfig({ defaults: { speechTemplate: "" } })).toThrow(
       "spoken-alert template",
     );
+  });
+
+  it("validates Telegram destinations", () => {
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Crew Telegram",
+            type: "telegram",
+            botToken: "123456:private-token",
+            chatId: "-1001234567890",
+            messageThreadId: 42,
+            disableNotification: true,
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Crew Telegram",
+            type: "telegram",
+            botToken: "token",
+            chatId: "",
+          },
+        ],
+      }),
+    ).toThrow("requires a Telegram chat ID");
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Crew Telegram",
+            type: "telegram",
+            botToken: "token",
+            chatId: "@boat_alerts",
+            messageThreadId: 0,
+          },
+        ],
+      }),
+    ).toThrow("invalid Telegram topic ID");
   });
 
   it("rejects invalid retry ranges and incomplete connectivity config", () => {

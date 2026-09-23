@@ -22,6 +22,13 @@ export type NotifierConfig =
       webhookUrl: string;
     })
   | (NotifierBaseConfig & {
+      type: "telegram";
+      botToken: string;
+      chatId: string;
+      messageThreadId?: number;
+      disableNotification?: boolean;
+    })
+  | (NotifierBaseConfig & {
       type: "wyoming";
       /** Satellite ids; an empty list lets signalk-wyoming target all satellites. */
       targets?: string[];
@@ -100,7 +107,9 @@ export function validateConfig(config: PluginConfig): void {
     normalizedNotifierNames.add(normalizedName);
     if (
       !notifier.type ||
-      !["ntfy", "pagerduty", "discord", "wyoming"].includes(notifier.type)
+      !["ntfy", "pagerduty", "discord", "telegram", "wyoming"].includes(
+        notifier.type,
+      )
     )
       throw new Error(`Invalid notification service type: ${notifier.name}`);
     if (
@@ -139,6 +148,28 @@ export function validateConfig(config: PluginConfig): void {
         notifier.webhookUrl,
         `Notification service ${notifier.name} has an invalid Discord webhook URL`,
       );
+    }
+    if (notifier.type === "telegram") {
+      requireString(
+        notifier.botToken,
+        `Notification service ${notifier.name} requires a Telegram bot token`,
+      );
+      if (/\s/.test(notifier.botToken))
+        throw new Error(
+          `Notification service ${notifier.name} has an invalid Telegram bot token`,
+        );
+      requireString(
+        notifier.chatId,
+        `Notification service ${notifier.name} requires a Telegram chat ID`,
+      );
+      if (
+        notifier.messageThreadId !== undefined &&
+        (!Number.isInteger(notifier.messageThreadId) ||
+          notifier.messageThreadId <= 0)
+      )
+        throw new Error(
+          `Notification service ${notifier.name} has an invalid Telegram topic ID`,
+        );
     }
     if (notifier.type === "wyoming") {
       if (
