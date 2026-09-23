@@ -13,18 +13,15 @@
   },
   "main": "dist/plugin.js",
   "types": "dist/plugin.d.ts",
-  "bin": {
-    "signalk-alert-center-migrate": "scripts/migrate-name.mjs"
-  },
   "files": [
     "dist",
     "public",
-    "scripts/migrate-name.mjs",
     "README.md",
     "LICENSE"
   ],
   "keywords": [
     "signalk-node-server-plugin",
+    "signalk-plugin-configurator",
     "signalk-webapp",
     "signalk-category-notifications",
     "signalk",
@@ -40,7 +37,8 @@
   },
   "scripts": {
     "clean": "node scripts/clean-dist.mjs",
-    "build": "npm run clean && tsc -p tsconfig.json",
+    "build": "npm run clean && tsc -p tsconfig.json && npm run build:panel",
+    "build:panel": "webpack --config webpack.config.cjs --stats errors-only",
     "demo": "docker compose -f docker-compose.live.yml -f docker-compose.demo.yml up --build -d",
     "test": "vitest run",
     "test:integration": "RUN_DOCKER_INTEGRATION=1 vitest run test/integration.test.ts",
@@ -55,17 +53,23 @@
     "format:check": "prettier --check .",
     "package:check": "node scripts/verify-package.mjs",
     "package:smoke": "node scripts/smoke-package.mjs",
-    "migrate:name": "node scripts/migrate-name.mjs",
     "release:check": "npm run format:check && npm run typecheck && npm test && npm run build && npm run package:check && npm run package:smoke",
     "prepack": "npm run build"
   },
   "devDependencies": {
+    "@babel/core": "^7.28.4",
+    "@babel/preset-react": "^7.27.1",
     "@playwright/test": "^1.55.0",
     "@signalk/server-api": "^2.31.1",
     "@types/node": "^22.10.1",
+    "babel-loader": "^10.0.0",
     "prettier": "^3.9.6",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "webpack": "^5.101.3",
+    "webpack-cli": "^6.0.1"
   },
   "signalKPlugin": {
     "id": "signalk-alert-center"

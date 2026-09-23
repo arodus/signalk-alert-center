@@ -59,7 +59,7 @@ try {
     "public/index.html",
     "public/app.js",
     "public/styles.css",
-    "scripts/migrate-name.mjs",
+    "public/remoteEntry.js",
   ])
     if (!existsSync(join(installedRoot, required)))
       throw new Error(`Installed package is missing ${required}`);

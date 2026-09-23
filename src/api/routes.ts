@@ -850,7 +850,7 @@ export function registerAlertCenterRoutes(
     );
 }
 
-/** Legacy status/queue endpoints retained during the schema migration. */
+/** Status, delivery queue, retry, notifier and maintenance endpoints. */
 export function registerRoutes(
   router: RouterLike,
   database: () => AlertDatabase | undefined,

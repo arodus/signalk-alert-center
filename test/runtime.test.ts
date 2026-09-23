@@ -70,9 +70,7 @@ describe("AlertCenterRuntime", () => {
     ).databasePath.bind(runtime);
     const absolutePath = join(tmpdir(), "external-alerts.sqlite");
 
-    expect(databasePath({})).toBe(
-      join(dataDirectory, "persistent-notifier.sqlite"),
-    );
+    expect(databasePath({})).toBe(join(dataDirectory, "alert-center.sqlite"));
     expect(databasePath({ storage: { path: "notifier/alerts.sqlite" } })).toBe(
       join(dataDirectory, "notifier/alerts.sqlite"),
     );
@@ -213,11 +211,7 @@ describe("AlertCenterRuntime", () => {
           rejected: 0,
         },
         scheduler: { running: false, activeRequests: 0 },
-        database: {
-          healthy: true,
-          schemaVersion: 10,
-          expectedSchemaVersion: 10,
-        },
+        database: { healthy: true, schemaVersion: 1, expectedSchemaVersion: 1 },
         services: [
           {
             id: "warning",

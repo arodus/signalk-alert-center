@@ -87,39 +87,12 @@ try {
     (page) => page.items?.some((item) => item.id === "Restart mock"),
     "mock notifier configuration",
   );
-  run(["stop", "signalk"]);
-  run([
-    "run",
-    "--rm",
-    "--no-deps",
-    "--entrypoint",
-    "sh",
-    "signalk",
-    "-c",
-    "mv /home/node/.signalk/plugin-config-data/signalk-alert-center.json /home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json",
-  ]);
-  run(["up", "-d", "--wait", "signalk"]);
-  run([
-    "exec",
-    "-T",
-    "signalk",
-    "test",
-    "-f",
-    "/home/node/.signalk/plugin-config-data/signalk-alert-center.json",
-  ]);
-  run([
-    "exec",
-    "-T",
-    "signalk",
-    "test",
-    "!",
-    "-e",
-    "/home/node/.signalk/plugin-config-data/signalk-persistent-notifier.json",
-  ]);
+  run(["restart", "signalk"]);
+  await eventually(() => json(`${base}/signalk`), Boolean, "Signal K restart");
   await eventually(
     () => json(`${api}/notifiers`),
     (page) => page.items?.some((item) => item.id === "Restart mock"),
-    "notifier retained after plugin-id migration",
+    "notifier retained after restart",
   );
   await json(`${api}/definitions/${encodeURIComponent(definition.id)}/policy`, {
     method: "PATCH",
