@@ -153,7 +153,9 @@ Create the complete version-one schema directly, with:
   work and append-only results;
 - persisted activation and connectivity deadlines.
 
-Development databases created by earlier commits should be deleted and recreated.
+Databases created by the immediately preceding Alert Center build are upgraded
+in place to the per-service repeat schema. The migration preserves definitions,
+per-alert settings, occurrences, events, deliveries, attempts, and wake requests.
 Add indexes for current-list lookup and stable, cursor-based history order
 (`occurred_at`, unique id).
 

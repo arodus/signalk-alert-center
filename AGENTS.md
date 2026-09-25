@@ -80,10 +80,11 @@ the persisted deadline and active state after restart. Do not implement this as 
 in-memory timer, and do not confuse it with `wake_after`, which controls when to
 power connectivity after delivery has already become eligible.
 
-This repository is pre-release and the occurrence schema is the first supported
-schema. Do not add compatibility code for the discarded prototype SQLite layout;
-recreate development databases instead. Any schema change after the first release
-must use a transactional, restart-safe migration.
+Do not add compatibility code for the discarded prototype SQLite layout. Preserve
+the immediately preceding Alert Center schema with focused, shape-detected,
+transactional migrations when an upgrade would otherwise require users to reset
+stored data. Any schema change after the first release must use a versioned,
+restart-safe migration.
 
 For end-to-end changes, run the real-server acceptance environment with
 `npm run test:acceptance`, then clean it up with

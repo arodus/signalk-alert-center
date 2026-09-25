@@ -86,6 +86,39 @@ export interface PluginConfig {
   };
 }
 
+/** Converts the removed alert-wide default into per-service defaults once. */
+export function migrateLegacyRepeatConfig(
+  config: PluginConfig,
+): PluginConfig | undefined {
+  const defaults = config.defaults as
+    | (NonNullable<PluginConfig["defaults"]> & {
+        rearmAfterSeconds?: unknown;
+      })
+    | undefined;
+  if (
+    !defaults ||
+    !Object.prototype.hasOwnProperty.call(defaults, "rearmAfterSeconds")
+  )
+    return undefined;
+  const legacyInterval = defaults.rearmAfterSeconds;
+  const { rearmAfterSeconds: _removed, ...nextDefaults } = defaults;
+  const validInterval =
+    Number.isInteger(legacyInterval) &&
+    Number(legacyInterval) >= 0 &&
+    Number(legacyInterval) <= 31536000
+      ? Number(legacyInterval)
+      : undefined;
+  return {
+    ...config,
+    defaults: nextDefaults,
+    notifiers: (config.notifiers ?? []).map((notifier) => ({
+      ...notifier,
+      repeatIntervalSeconds:
+        notifier.repeatIntervalSeconds ?? validInterval ?? 0,
+    })),
+  };
+}
+
 export function validateConfig(config: PluginConfig): void {
   if (config.notifiers !== undefined && !Array.isArray(config.notifiers))
     throw new Error(

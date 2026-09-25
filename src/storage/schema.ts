@@ -1,9 +1,4 @@
-/** Initial Signal K Alert Center schema.
- *
- * Version 1 starts with this complete schema. Pre-release databases from the
- * former package are intentionally not upgraded; delete them or configure a
- * new database path.
- */
+/** Initial Signal K Alert Center schema. */
 export const currentSchemaVersion = 1;
 
 export const schema = `
