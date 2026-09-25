@@ -345,3 +345,24 @@ test("offers database reset as a confirmed action", async ({ page }) => {
     page.getByRole("button", { name: "Reset database" }),
   ).toBeEnabled();
 });
+
+test("explains internet connection control in user-facing terms", async ({
+  page,
+}) => {
+  await page.goto("/admin/#/apps/configuration/signalk-alert-center");
+  await page.getByRole("button", { name: "Connectivity", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Internet connection control" }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Allow Alert Center to control the internet connection"),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel(
+      "Turn off an Alert Center-started connection after (seconds)",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/only when it originally turned it on/),
+  ).toBeVisible();
+});

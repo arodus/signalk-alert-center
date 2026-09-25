@@ -34,6 +34,26 @@ describe("validateConfig", () => {
     ).toBe("https://www.gstatic.com/generate_204");
   });
 
+  it("describes connectivity policy using user-facing actions", () => {
+    const defaultConnectivity =
+      pluginConfigSchema.properties.defaults.properties.connectivity;
+    expect(defaultConnectivity.properties.mode.enumNames).toEqual([
+      "Keep queued until internet is available",
+      "Turn on the configured connection immediately",
+      "Wait, then turn on the configured connection",
+    ]);
+    const connectionControl = pluginConfigSchema.properties.connectivity;
+    expect(connectionControl.title).toBe(
+      "Internet connection control (for example Starlink)",
+    );
+    expect(connectionControl.description).toContain(
+      "only when it originally turned it on",
+    );
+    expect(connectionControl.properties.idleCooldownSeconds.title).not.toMatch(
+      /shutdown/i,
+    );
+  });
+
   it("uses a portable database filename by default", () => {
     const storagePath = pluginConfigSchema.properties.storage.properties.path;
     expect(storagePath.default).toBe("alert-center.sqlite");
