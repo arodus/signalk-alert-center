@@ -193,7 +193,6 @@
             <option value="updated">Updated</option>
             <option value="acknowledged">Acknowledged</option>
             <option value="silenced">Silenced</option>
-            <option value="rearmed">Rearmed</option>
           </select>
           <label for="history-severity-filter">Severity</label>
           <select id="history-severity-filter" name="severity">
@@ -476,20 +475,12 @@
             <option>emergency</option>
           </select></label
         >
-        <label class="form-field" data-policy-field="rearmAfterSeconds"
-          ><span
-            >Repeat while still active (seconds)
-            <small class="field-help"
-              >Start a new occurrence after this many seconds if the condition
-              never clears. Leave blank to disable repeating.</small
-            ></span
-          ><input id="rearm-after" type="number" min="0" max="31536000"
-        /></label>
         <fieldset data-policy-field="notifierIds">
           <legend>Notification services</legend>
           <p class="field-help">
-            Select the globally configured services that should receive this
-            alert.
+            Select the services that should receive this alert. Each service
+            inherits its global repeat interval unless you enter an override;
+            use 0 to send this alert only once through that service.
           </p>
           <div id="notifier-options"></div>
         </fieldset>

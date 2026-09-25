@@ -41,7 +41,6 @@ export interface AlertRecord {
   oneTime: boolean;
   minimumSeverity: Severity;
   activationDelaySeconds: number;
-  rearmAfterSeconds?: number;
   connectivity: ConnectivityMode;
   activationDueAt?: Date;
   activationState?: ActivationState;
@@ -109,8 +108,9 @@ export interface AlertPolicyRecord {
   connectivity?: ConnectivityMode;
   oneTime?: boolean;
   activationDelaySeconds?: number;
-  rearmAfterSeconds?: number;
   notifierIds: string[];
+  /** Per-service values explicitly overriding the global repeat interval. */
+  notifierRepeatOverrides: Record<string, number>;
   speechMinimumSeverity?: Severity;
   speechTemplate?: string;
   speechAnnounceClear?: boolean;
@@ -123,7 +123,6 @@ export const alertPolicyFields = [
   "oneTime",
   "minimumSeverity",
   "activationDelaySeconds",
-  "rearmAfterSeconds",
   "connectivity",
   "notifierIds",
   "speechMinimumSeverity",
@@ -151,6 +150,8 @@ export interface DeliveryRecord {
   operation: DeliveryOperation;
   state: DeliveryState;
   attemptCount: number;
+  /** One-based send cycle for repeated notify/trigger deliveries. */
+  cycle: number;
   nextAttemptAt?: Date;
   lastAttemptAt?: Date;
   deliveredAt?: Date;
@@ -204,8 +205,8 @@ export interface IngestOptions {
   definitionId?: string;
   minimumSeverity?: Severity;
   oneTime?: boolean;
-  rearmAfterSeconds?: number;
   notifierMinimumSeverities?: Record<string, Severity>;
+  notifierRepeatIntervals?: Record<string, number>;
   /** Notifiers, such as PagerDuty, that require a trigger followed by resolve. */
   resolvingNotifierIds?: string[];
   /** Notifiers, such as PagerDuty, that accept an acknowledgement action. */

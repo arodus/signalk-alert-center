@@ -72,7 +72,19 @@ describe("occurrence storage", () => {
         .prepare("PRAGMA table_info(occurrence_notifiers)")
         .all()
         .map((column) => (column as { name: string }).name),
-    ).toContain("supports_acknowledgement");
+    ).toEqual(
+      expect.arrayContaining([
+        "supports_acknowledgement",
+        "repeat_after_seconds",
+        "next_repeat_at",
+      ]),
+    );
+    expect(
+      db.db
+        .prepare("PRAGMA table_info(deliveries)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toContain("cycle");
     expect(db.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
@@ -270,6 +282,43 @@ describe("occurrence storage", () => {
       { operation: "trigger", state: "delivered" },
       { operation: "acknowledge", state: "pending", attemptCount: 0 },
     ]);
+  });
+
+  it("forwards an existing acknowledgement after each repeated PagerDuty trigger", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const occurrence = db.ingest(
+      active({ acknowledged: true }),
+      ["pagerduty"],
+      raisedAt,
+      {
+        resolvingNotifierIds: ["pagerduty"],
+        notifierRepeatIntervals: { pagerduty: 60 },
+      },
+    )!;
+    const firstTrigger = db.listDeliveriesForAlert(occurrence.id)[0];
+    expect(db.claimDelivery(firstTrigger.id, raisedAt)).toBe(true);
+    db.recordDeliverySuccess(firstTrigger.id, "pd-dedup", raisedAt);
+
+    expect(db.processDueRepeats(new Date("2026-01-01T00:01:00Z"))).toBe(1);
+    const secondTrigger = db
+      .listDeliveriesForAlert(occurrence.id)
+      .find(
+        (delivery) => delivery.operation === "trigger" && delivery.cycle === 2,
+      )!;
+    expect(db.claimDelivery(secondTrigger.id)).toBe(true);
+    db.recordDeliverySuccess(
+      secondTrigger.id,
+      "pd-dedup",
+      new Date("2026-01-01T00:01:01Z"),
+    );
+
+    expect(
+      db
+        .listDeliveriesForAlert(occurrence.id)
+        .filter((delivery) => delivery.operation === "acknowledge")
+        .map((delivery) => delivery.cycle),
+    ).toEqual([1, 2]);
   });
 
   it("announces a Wyoming clear without creating an acknowledgement delivery", () => {
@@ -543,7 +592,7 @@ describe("occurrence storage", () => {
     expect(db.listDeliveries()).toEqual([]);
   });
 
-  it("stores policies, explicit rearm, filtered pages, and delivery attempts", () => {
+  it("stores per-service repeat overrides, filtered pages, and delivery attempts", () => {
     const db = database();
     db.upsertDefinition({
       id: "anchor-alert",
@@ -557,11 +606,11 @@ describe("occurrence storage", () => {
       minimumSeverity: "warn",
       connectivity: { mode: "queue" },
       activationDelaySeconds: 0,
-      rearmAfterSeconds: 60,
       notifierIds: ["ntfy"],
-      overrideFields: ["rearmAfterSeconds"],
+      notifierRepeatOverrides: { ntfy: 60 },
+      overrideFields: ["notifierIds"],
     });
-    expect(policy.rearmAfterSeconds).toBe(60);
+    expect(policy.notifierRepeatOverrides).toEqual({ ntfy: 60 });
 
     const first = db.ingest(
       active(),
@@ -569,7 +618,7 @@ describe("occurrence storage", () => {
       new Date("2026-01-01T00:00:00Z"),
       {
         definitionId: "anchor-alert",
-        rearmAfterSeconds: 60,
+        notifierRepeatIntervals: { ntfy: 60 },
       },
     )!;
     const second = db.ingest(
@@ -578,15 +627,15 @@ describe("occurrence storage", () => {
       new Date("2026-01-01T00:01:00Z"),
       {
         definitionId: "anchor-alert",
-        rearmAfterSeconds: 60,
+        notifierRepeatIntervals: { ntfy: 60 },
       },
     )!;
-    expect(second.id).not.toBe(first.id);
+    expect(second.id).toBe(first.id);
     expect(
       db.queryOccurrences({ definitionId: "anchor-alert", limit: 1 }),
     ).toMatchObject({
-      items: [{ id: second.id }],
-      nextCursor: second.id,
+      items: [{ id: first.id }],
+      nextCursor: undefined,
     });
 
     const delivery = db.listDeliveries()[0];
@@ -611,6 +660,70 @@ describe("occurrence storage", () => {
         errorCode: "TIMEOUT",
       },
     ]);
+  });
+
+  it("schedules repeat deliveries independently after each service succeeds", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const occurrence = db.ingest(active(), ["ntfy", "backup"], raisedAt, {
+      notifierRepeatIntervals: { ntfy: 60, backup: 120 },
+    })!;
+    const initial = db.listDeliveries();
+    expect(initial).toHaveLength(2);
+    for (const delivery of initial) {
+      expect(db.claimDelivery(delivery.id, raisedAt)).toBe(true);
+      db.recordDeliverySuccess(delivery.id, undefined, raisedAt);
+    }
+
+    expect(db.nextDeliveryDueAt()).toEqual(new Date("2026-01-01T00:01:00Z"));
+    expect(db.processDueRepeats(new Date("2026-01-01T00:00:59Z"))).toBe(0);
+    expect(db.processDueRepeats(new Date("2026-01-01T00:01:00Z"))).toBe(1);
+    expect(
+      db
+        .listDeliveries()
+        .filter((delivery) => delivery.alertId === occurrence.id)
+        .map((delivery) => [delivery.transportInstanceId, delivery.cycle]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["ntfy", 1],
+        ["backup", 1],
+        ["ntfy", 2],
+      ]),
+    );
+
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      [],
+      new Date("2026-01-01T00:01:30Z"),
+    );
+    expect(db.processDueRepeats(new Date("2026-01-01T00:02:00Z"))).toBe(0);
+  });
+
+  it("recovers a scheduled service repeat after restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-repeat-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const first = new AlertDatabase(filename);
+    const deliveredAt = new Date("2026-01-01T00:00:00Z");
+    first.ingest(active(), ["ntfy"], deliveredAt, {
+      notifierRepeatIntervals: { ntfy: 60 },
+    });
+    const initial = first.listDeliveries()[0];
+    expect(first.claimDelivery(initial.id, deliveredAt)).toBe(true);
+    first.recordDeliverySuccess(initial.id, undefined, deliveredAt);
+    first.close();
+
+    const restarted = new AlertDatabase(filename);
+    databases.push(restarted);
+    expect(restarted.nextDeliveryDueAt()).toEqual(
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    expect(restarted.processDueRepeats(new Date("2026-01-01T00:01:00Z"))).toBe(
+      1,
+    );
+    expect(
+      restarted.listDeliveries().map((delivery) => delivery.cycle),
+    ).toEqual([1, 2]);
   });
 
   it("preserves source time separately from local receipt time", () => {

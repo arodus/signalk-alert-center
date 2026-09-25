@@ -94,9 +94,9 @@ const updatedDefinition = await json(
       oneTime: true,
       minimumSeverity: "alarm",
       activationDelaySeconds: 2,
-      rearmAfterSeconds: null,
       connectivity: { mode: "queue" },
       notifierIds: [],
+      notifierRepeatOverrides: {},
     }),
   },
 );

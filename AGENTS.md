@@ -59,7 +59,7 @@ The dashboard must be an alert center, not just a delivery-queue view.
   activation-delay decisions, and notifier attempts/outcomes.
 - Allow an operator to configure each alert definition from the UI. At minimum,
   policy includes enabled state, selected notifier instances, minimum severity,
-  connectivity behavior, one-time/rearm semantics, and activation delay. Store
+  connectivity behavior, one-time semantics, per-notifier repeat delivery, and activation delay. Store
   dynamic per-definition overrides separately from immutable Signal K zone
   metadata and separately from occurrence state.
 - Resolve policy predictably: an explicit per-definition override wins over plugin

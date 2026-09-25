@@ -136,6 +136,39 @@ describe("validateConfig", () => {
     ).toThrow("requires an ntfy topic");
   });
 
+  it("exposes and validates a global repeat interval for each service", () => {
+    expect(
+      pluginConfigSchema.properties.notifiers.items.properties
+        .repeatIntervalSeconds.title,
+    ).toMatch(/Repeat while the alert remains active/);
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Crew",
+            type: "ntfy",
+            server: "https://ntfy.sh",
+            topic: "boat",
+            repeatIntervalSeconds: 300,
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Crew",
+            type: "ntfy",
+            server: "https://ntfy.sh",
+            topic: "boat",
+            repeatIntervalSeconds: -1,
+          },
+        ],
+      }),
+    ).toThrow("repeat interval");
+  });
+
   it("validates Signal K Wyoming speech services and defaults", () => {
     expect(() =>
       validateConfig({

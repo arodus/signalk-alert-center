@@ -336,6 +336,7 @@ export class AlertCenterRuntime {
   }
 
   private async runScheduler(): Promise<void> {
+    const repeatsCreated = this.database?.processDueRepeats() ?? 0;
     const summary = await this.scheduler?.runOnce();
     if (summary?.processed) {
       const message = `Delivery batch: processed=${summary.processed}, succeeded=${summary.succeeded}, retryableFailures=${summary.retryableFailures}, terminalFailures=${summary.terminalFailures}`;
@@ -346,7 +347,7 @@ export class AlertCenterRuntime {
     if (this.connectivity && this.database?.pendingDeliveryCount() === 0)
       this.connectivity.beginCooldown();
     this.scheduleNextDelivery();
-    if (summary?.processed) this.emitChange("deliveries");
+    if (summary?.processed || repeatsCreated) this.emitChange("deliveries");
   }
 
   private requestDeliveryRun(): void {
@@ -578,7 +579,12 @@ export class AlertCenterRuntime {
           : { mode: "queue" },
         minimumSeverity: policy.minimumSeverity,
         oneTime: policy.oneTime,
-        rearmAfterSeconds: policy.rearmAfterSeconds,
+        notifierRepeatIntervals: Object.fromEntries(
+          notifierIds.map((id) => [
+            id,
+            policy.notifierRepeatIntervals[id] ?? 0,
+          ]),
+        ),
         notifierMinimumSeverities: Object.fromEntries(
           notifierIds.map((id) => [id, notifierMinimumSeverity(id)]),
         ),
@@ -842,11 +848,13 @@ export class AlertCenterRuntime {
           changedFields.push("minimumSeverity");
         if (patch.activationDelaySeconds !== undefined)
           changedFields.push("activationDelaySeconds");
-        if (patch.rearmAfterSeconds !== undefined)
-          changedFields.push("rearmAfterSeconds");
         if (patch.connectivity !== undefined)
           changedFields.push("connectivity");
-        if (patch.notifierIds !== undefined) changedFields.push("notifierIds");
+        if (
+          patch.notifierIds !== undefined ||
+          patch.notifierRepeatOverrides !== undefined
+        )
+          changedFields.push("notifierIds");
         if (patch.speechMinimumSeverity !== undefined)
           changedFields.push("speechMinimumSeverity");
         if (patch.speechTemplate !== undefined)
@@ -873,12 +881,11 @@ export class AlertCenterRuntime {
           activationDelaySeconds:
             patch.activationDelaySeconds ??
             current.policy.activationDelaySeconds,
-          rearmAfterSeconds:
-            patch.rearmAfterSeconds === null
-              ? 0
-              : (patch.rearmAfterSeconds ?? current.policy.rearmAfterSeconds),
           connectivity: patch.connectivity ?? current.policy.connectivity,
           notifierIds: patch.notifierIds ?? current.policy.notifierIds,
+          notifierRepeatOverrides:
+            patch.notifierRepeatOverrides ??
+            current.policy.notifierRepeatOverrides,
           speechMinimumSeverity:
             patch.speechMinimumSeverity ?? current.policy.speechMinimumSeverity,
           speechTemplate: patch.speechTemplate ?? current.policy.speechTemplate,
@@ -1263,6 +1270,7 @@ export class AlertCenterRuntime {
             type: notifier.type,
             enabled: true,
             minimumSeverity: notifier.minSeverity ?? "normal",
+            repeatIntervalSeconds: notifier.repeatIntervalSeconds ?? 0,
           })),
       testNotifier: (id, operation) => this.testNotifier(id, operation),
       subscribeChanges: (listener) => this.subscribeChanges(listener),

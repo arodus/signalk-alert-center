@@ -88,7 +88,6 @@ const policyFieldNames = {
   enabled: "remote notifications",
   minimumSeverity: "lowest severity sent",
   activationDelaySeconds: "wait before sending",
-  rearmAfterSeconds: "repeat while active",
   connectivity: "internet connection behavior",
   notifierIds: "notification services",
   speechMinimumSeverity: "lowest severity spoken",
@@ -449,7 +448,7 @@ function renderDeliveries(deliveries) {
                 : "No retry scheduled";
             return `<tr class="clickable-row delivery-row" data-delivery-id="${escapeHtml(delivery.id)}" tabindex="0" aria-label="Open delivery for ${escapeHtml(alertTitle)}">
               <td data-label="Alert"><strong class="cell-title">${escapeHtml(alertTitle)}</strong><span class="cell-detail">${escapeHtml(alert.path ?? "Occurrence unavailable")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</span></td>
-              <td data-label="Service"><strong class="cell-title">${escapeHtml(service.name ?? delivery.transportInstanceId)}</strong><span class="cell-detail">${escapeHtml(service.type ?? "unknown service")} · ${escapeHtml(delivery.operation ?? "notify")}</span></td>
+              <td data-label="Service"><strong class="cell-title">${escapeHtml(service.name ?? delivery.transportInstanceId)}</strong><span class="cell-detail">${escapeHtml(service.type ?? "unknown service")} · ${escapeHtml(delivery.operation ?? "notify")}${delivery.cycle > 1 ? ` · repeat ${delivery.cycle - 1}` : ""}</span></td>
               <td data-label="Status"><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span>${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
               <td data-label="Timing"><span class="cell-title">${escapeHtml(primaryTime)}</span><span class="cell-detail">${escapeHtml(outcomeTime)}</span>${delivery.lastErrorMessage ? `<span class="cell-detail compact-detail error-detail" title="${escapeHtml(delivery.lastErrorMessage)}">${escapeHtml(delivery.lastErrorMessage)}</span>` : ""}</td>
               <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail">Can retry</span>' : ""}</td>
@@ -754,7 +753,7 @@ function renderDeliveryDetail(delivery) {
     delivery.state,
   );
   elements.deliveryDialogTitle.textContent = alertTitle;
-  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Status</dt><dd><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span></dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>Delivered</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(delivery.remoteId ?? "—")}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}`;
+  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span></dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>Delivered</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(delivery.remoteId ?? "—")}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}`;
   elements.deliveryRetry.hidden = !retryable;
   elements.deliveryRetry.dataset.id = delivery.id;
 }
@@ -923,7 +922,6 @@ function setPolicyControlValues(policy) {
   $("#activation-delay").value = policy.activationDelaySeconds ?? 0;
   $("#minimum-severity").value = policy.minimumSeverity ?? "normal";
   $("#policy-enabled").checked = policy.enabled !== false;
-  $("#rearm-after").value = policy.rearmAfterSeconds ?? "";
   $("#connectivity-mode").value = policy.connectivity?.mode ?? "queue";
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
   $("#speech-minimum-severity").value = policy.speechMinimumSeverity ?? "warn";
@@ -941,8 +939,6 @@ function applyDefaultForField(field) {
       ($("#minimum-severity").value = defaults.minimumSeverity),
     activationDelaySeconds: () =>
       ($("#activation-delay").value = defaults.activationDelaySeconds),
-    rearmAfterSeconds: () =>
-      ($("#rearm-after").value = defaults.rearmAfterSeconds ?? ""),
     connectivity: () => {
       $("#connectivity-mode").value = defaults.connectivity.mode;
       $("#wake-delay").value = defaults.connectivity.delaySeconds ?? 0;
@@ -951,6 +947,9 @@ function applyDefaultForField(field) {
     notifierIds: () => {
       document.querySelectorAll('input[name="notifier"]').forEach((input) => {
         input.checked = defaults.notifierIds.includes(input.value);
+      });
+      document.querySelectorAll(".notifier-repeat").forEach((input) => {
+        input.value = "";
       });
     },
     speechMinimumSeverity: () =>
@@ -962,6 +961,21 @@ function applyDefaultForField(field) {
         defaults.speechAnnounceClear === true),
   };
   setters[field]?.();
+  if (field === "notifierIds") syncNotifierRepeatControls();
+}
+
+function syncNotifierRepeatControls() {
+  const custom =
+    document
+      .querySelector(
+        '[data-policy-field="notifierIds"] > .policy-override-button',
+      )
+      ?.getAttribute("aria-pressed") === "true";
+  document.querySelectorAll(".notifier-policy-option").forEach((option) => {
+    const selected = option.querySelector('input[name="notifier"]')?.checked;
+    const repeat = option.querySelector(".notifier-repeat");
+    if (repeat) repeat.disabled = !custom || !selected;
+  });
 }
 
 function setPolicyOverrideState(field, overridden) {
@@ -978,6 +992,7 @@ function setPolicyOverrideState(field, overridden) {
   host
     .querySelectorAll("input, select")
     .forEach((control) => (control.disabled = !overridden));
+  if (field === "notifierIds") syncNotifierRepeatControls();
   if (field === "connectivity") $("#wake-delay").disabled = !overridden;
   if (!overridden) applyDefaultForField(field);
 }
@@ -1037,10 +1052,23 @@ function openPolicy(id) {
     ? state.notifiers
         .map((notifier) => {
           const id = typeof notifier === "string" ? notifier : notifier.id;
-          return `<label class="check-label"><input type="checkbox" name="notifier" value="${escapeHtml(id)}" ${(policy.notifierIds ?? []).includes(id) ? "checked" : ""} /> ${escapeHtml(notifier.name ?? id)} <small>${escapeHtml(notifier.type ?? "")}${notifier.minimumSeverity ? ` · sends ${escapeHtml(notifier.minimumSeverity)} and above` : ""}</small></label>`;
+          const repeatOverride = policy.notifierRepeatOverrides?.[id];
+          const globalRepeat =
+            policy.defaults?.notifierRepeatIntervals?.[id] ??
+            notifier.repeatIntervalSeconds ??
+            0;
+          const repeatDescription = globalRepeat
+            ? `Global: every ${globalRepeat} seconds`
+            : "Global: send once";
+          return `<div class="notifier-policy-option"><label class="check-label"><input type="checkbox" name="notifier" value="${escapeHtml(id)}" ${(policy.notifierIds ?? []).includes(id) ? "checked" : ""} /><span>${escapeHtml(notifier.name ?? id)} <small>${escapeHtml(notifier.type ?? "")}${notifier.minimumSeverity ? ` · sends ${escapeHtml(notifier.minimumSeverity)} and above` : ""}</small></span></label><label class="notifier-repeat-field"><span>Repeat seconds <small>${escapeHtml(repeatDescription)}</small></span><input class="notifier-repeat" data-notifier-id="${escapeHtml(id)}" type="number" min="0" max="31536000" value="${repeatOverride === undefined ? "" : escapeHtml(repeatOverride)}" placeholder="Inherit" /></label></div>`;
         })
         .join("")
     : '<p class="alert-meta">No notification services are configured. Add one in the Signal K plugin settings first.</p>';
+  document
+    .querySelectorAll('input[name="notifier"]')
+    .forEach((input) =>
+      input.addEventListener("change", syncNotifierRepeatControls),
+    );
   const overridden = new Set(policy.overriddenFields ?? []);
   state.policyHiddenOverrides = [...overridden].filter(
     (field) => !document.querySelector(`[data-policy-field="${field}"]`),
@@ -1053,6 +1081,7 @@ function openPolicy(id) {
         overridden.has(host.dataset.policyField),
       ),
     );
+  syncNotifierRepeatControls();
   updateInheritanceSummary();
   if (!elements.policyDialog.open) elements.policyDialog.showModal();
 }
@@ -1085,16 +1114,24 @@ async function savePolicy(event) {
   event.preventDefault();
   const id = $("#policy-definition-id").value;
   const mode = $("#connectivity-mode").value;
+  const notifierIds = [
+    ...document.querySelectorAll('input[name="notifier"]:checked'),
+  ].map((item) => item.value);
   const body = {
     overrideFields: selectedOverrideFields(),
     enabled: $("#policy-enabled").checked,
-    rearmAfterSeconds:
-      $("#rearm-after").value === "" ? null : Number($("#rearm-after").value),
     activationDelaySeconds: Number($("#activation-delay").value),
     minimumSeverity: $("#minimum-severity").value,
-    notifierIds: [
-      ...document.querySelectorAll('input[name="notifier"]:checked'),
-    ].map((item) => item.value),
+    notifierIds,
+    notifierRepeatOverrides: Object.fromEntries(
+      [...document.querySelectorAll(".notifier-repeat")]
+        .filter(
+          (input) =>
+            input.value !== "" &&
+            notifierIds.includes(input.dataset.notifierId),
+        )
+        .map((input) => [input.dataset.notifierId, Number(input.value)]),
+    ),
     speechMinimumSeverity: $("#speech-minimum-severity").value,
     speechTemplate: $("#speech-template").value,
     speechAnnounceClear: $("#speech-announce-clear").checked,

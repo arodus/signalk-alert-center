@@ -312,6 +312,9 @@ test("saves a Telegram service and selects it as a default", async ({
     .getByLabel("Telegram bot token")
     .fill("123456:browser-test-bot-token");
   await service.getByLabel("Telegram chat ID").fill("-1001234567890");
+  await service
+    .getByLabel("Repeat while the alert remains active (seconds)")
+    .fill("300");
   await service.getByLabel("Send Telegram messages silently").check();
   await page
     .getByRole("button", { name: "Alert defaults", exact: true })
