@@ -20,6 +20,7 @@ import {
   severityRank,
 } from "../alerts/types";
 import { currentSchemaVersion, schema } from "./schema";
+import { migrateLegacyRepeatSchema } from "./migrations";
 
 type Row = Record<string, unknown>;
 
@@ -157,10 +158,12 @@ const alertHistoryRecord = (row: Row): AlertHistoryRecord => {
 
 export class AlertDatabase {
   readonly db: DatabaseSync;
+  readonly migrationApplied: boolean;
 
   constructor(filename = ":memory:") {
     this.db = new DatabaseSync(filename);
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+    this.migrationApplied = migrateLegacyRepeatSchema(this.db);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.exec(schema);

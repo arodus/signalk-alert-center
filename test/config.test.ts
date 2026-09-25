@@ -1,8 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { validateConfig } from "../src/config";
+import { migrateLegacyRepeatConfig, validateConfig } from "../src/config";
 import { pluginConfigSchema } from "../src/config-schema";
 
 describe("validateConfig", () => {
+  it("migrates the former global repeat interval onto each service", () => {
+    const migrated = migrateLegacyRepeatConfig({
+      defaults: { rearmAfterSeconds: 90 } as never,
+      notifiers: [
+        {
+          name: "Inherited",
+          type: "ntfy",
+          server: "https://ntfy.sh",
+          topic: "boat",
+        },
+        {
+          name: "Already custom",
+          type: "ntfy",
+          server: "https://ntfy.sh",
+          topic: "custom",
+          repeatIntervalSeconds: 30,
+        },
+      ],
+    });
+
+    expect(migrated?.defaults).not.toHaveProperty("rearmAfterSeconds");
+    expect(migrated?.notifiers).toMatchObject([
+      { name: "Inherited", repeatIntervalSeconds: 90 },
+      { name: "Already custom", repeatIntervalSeconds: 30 },
+    ]);
+    expect(migrateLegacyRepeatConfig(migrated!)).toBeUndefined();
+  });
+
   it("exposes only global settings in the Signal K plugin form", () => {
     expect(pluginConfigSchema.properties).not.toHaveProperty("rules");
     expect(pluginConfigSchema.properties).not.toHaveProperty("audio");

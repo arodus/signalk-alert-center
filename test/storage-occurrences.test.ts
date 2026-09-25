@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { NormalizedAlert } from "../src/alerts/types";
 import { AlertDatabase } from "../src/storage/db";
+import { schema } from "../src/storage/schema";
 
 const active = (overrides: Partial<NormalizedAlert> = {}): NormalizedAlert => ({
   sourceKey: "notifications.navigation.anchor",
@@ -86,6 +88,146 @@ describe("occurrence storage", () => {
         .map((column) => (column as { name: string }).name),
     ).toContain("cycle");
     expect(db.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("migrates the previous repeat schema without losing stored data", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-legacy-repeat-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const legacySchema = schema
+      .replace(
+        "  speech_minimum_severity TEXT,",
+        "  rearm_after_seconds INTEGER,\n  speech_minimum_severity TEXT,",
+      )
+      .replace("  repeat_override_seconds INTEGER,\n", "")
+      .replace(
+        '  connectivity_json TEXT NOT NULL DEFAULT \'{"mode":"queue"}\',',
+        '  rearm_after_seconds INTEGER,\n  connectivity_json TEXT NOT NULL DEFAULT \'{"mode":"queue"}\',',
+      )
+      .replace("  repeat_after_seconds INTEGER NOT NULL DEFAULT 0,\n", "")
+      .replace("  next_repeat_at TEXT,\n", "")
+      .replace(
+        "CREATE INDEX IF NOT EXISTS occurrence_notifier_repeat_idx\n  ON occurrence_notifiers(next_repeat_at) WHERE next_repeat_at IS NOT NULL;\n\n",
+        "",
+      )
+      .replace("  cycle INTEGER NOT NULL DEFAULT 1,\n", "")
+      .replace(
+        "UNIQUE(alert_id, transport_instance_id, operation, cycle)",
+        "UNIQUE(alert_id, transport_instance_id, operation)",
+      );
+    const legacy = new DatabaseSync(filename);
+    legacy.exec("PRAGMA foreign_keys=ON;");
+    legacy.exec(legacySchema);
+    const timestamp = "2026-01-01T00:00:00.000Z";
+    legacy
+      .prepare(
+        `INSERT INTO alert_definitions
+          (id, source_type, path_pattern, name, created_at, updated_at)
+         VALUES (?, 'recognized', ?, 'Anchor', ?, ?)`,
+      )
+      .run("anchor", active().path, timestamp, timestamp);
+    legacy
+      .prepare(
+        `INSERT INTO alert_policies
+          (definition_id, enabled, rearm_after_seconds, override_fields_json, updated_at)
+         VALUES ('anchor', 1, 60, '["rearmAfterSeconds"]', ?)`,
+      )
+      .run(timestamp);
+    legacy
+      .prepare(
+        `INSERT INTO alert_policy_notifiers
+          (definition_id, transport_instance_id) VALUES ('anchor', 'ntfy')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO alert_occurrences
+          (id, definition_id, occurrence_number, source_key, path, started_at,
+           received_at, last_seen_at, current_state, current_severity,
+           max_severity, message, rearm_after_seconds, activation_state,
+           created_at, updated_at)
+         VALUES ('occurrence-1', 'anchor', 1, ?, ?, ?, ?, ?, 'active', 'alarm',
+                 'alarm', 'Anchor dragging', 60, 'eligible', ?, ?)`,
+      )
+      .run(
+        active().sourceKey,
+        active().path,
+        timestamp,
+        timestamp,
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+    legacy
+      .prepare(
+        `INSERT INTO occurrence_notifiers
+          (alert_id, transport_instance_id) VALUES ('occurrence-1', 'ntfy')`,
+      )
+      .run();
+    legacy
+      .prepare(
+        `INSERT INTO alert_events (alert_id, event_type, occurred_at)
+         VALUES ('occurrence-1', 'raised', ?)`,
+      )
+      .run(timestamp);
+    legacy
+      .prepare(
+        `INSERT INTO deliveries
+          (id, alert_id, transport_instance_id, operation, state, attempt_count,
+           last_attempt_at, delivered_at, remote_id, created_at, updated_at)
+         VALUES ('delivery-1', 'occurrence-1', 'ntfy', 'notify', 'delivered', 1,
+                 ?, ?, 'remote-1', ?, ?)`,
+      )
+      .run(timestamp, timestamp, timestamp, timestamp);
+    legacy
+      .prepare(
+        `INSERT INTO delivery_attempts
+          (delivery_id, attempt_number, started_at, finished_at, outcome, remote_id)
+         VALUES ('delivery-1', 1, ?, ?, 'delivered', 'remote-1')`,
+      )
+      .run(timestamp, timestamp);
+    legacy
+      .prepare(
+        `INSERT INTO wake_requests (alert_id, wake_due_at, updated_at)
+         VALUES ('occurrence-1', '2026-01-01T00:05:00.000Z', ?)`,
+      )
+      .run(timestamp);
+    legacy.close();
+
+    const migrated = new AlertDatabase(filename);
+    databases.push(migrated);
+    expect(migrated.migrationApplied).toBe(true);
+    expect(migrated.listDefinitions()).toHaveLength(1);
+    expect(migrated.getPolicy("anchor")).toMatchObject({
+      notifierIds: ["ntfy"],
+      notifierRepeatOverrides: { ntfy: 60 },
+      overrideFields: ["notifierIds"],
+    });
+    expect(migrated.getAlert("occurrence-1")).toMatchObject({
+      message: "Anchor dragging",
+      currentState: "active",
+    });
+    expect(migrated.listAlertEvents("occurrence-1")).toHaveLength(1);
+    expect(migrated.listDeliveriesForAlert("occurrence-1")).toMatchObject([
+      { id: "delivery-1", cycle: 1, remoteId: "remote-1" },
+    ]);
+    expect(migrated.listDeliveryAttempts("delivery-1")).toHaveLength(1);
+    expect(migrated.listWakeRequests()).toHaveLength(1);
+    expect(migrated.nextDeliveryDueAt()).toEqual(
+      new Date("2026-01-01T00:01:00.000Z"),
+    );
+    expect(
+      migrated.processDueRepeats(new Date("2026-01-01T00:01:00.000Z")),
+    ).toBe(1);
+    expect(migrated.listDeliveriesForAlert("occurrence-1")).toHaveLength(2);
+    expect(migrated.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+
+    migrated.close();
+    databases.length = 0;
+    const reopened = new AlertDatabase(filename);
+    databases.push(reopened);
+    expect(reopened.migrationApplied).toBe(false);
+    expect(reopened.listDeliveriesForAlert("occurrence-1")).toHaveLength(2);
   });
 
   it("stores raise-clear-raise as distinct visible occurrences", () => {

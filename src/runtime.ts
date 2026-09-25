@@ -1028,6 +1028,10 @@ export class AlertCenterRuntime {
     );
     this.config = options;
     this.database = new AlertDatabase(this.databasePath(options));
+    if (this.database.migrationApplied)
+      this.debug(
+        "Migrated the previous repeat schema without removing stored alert data",
+      );
     this.database.configureResolvingNotifiers(
       (options.notifiers ?? [])
         .filter(
