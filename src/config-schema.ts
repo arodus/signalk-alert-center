@@ -245,24 +245,29 @@ export const pluginConfigSchema = {
         },
         connectivity: {
           type: "object",
-          title: "Default Internet connection behavior",
+          title: "When internet is unavailable by default",
           description:
-            "Choose whether new alerts wait for an existing connection or request the configured connection to wake.",
+            "Choose whether new alerts stay queued for an existing internet connection or ask Alert Center to turn on the configured connection.",
           properties: {
             mode: {
               type: "string",
-              title: "Connection action",
+              title: "Action while a remote notification is waiting",
               description:
-                "Queue waits for connectivity, wake starts it immediately, and wake after waits before starting it.",
+                "Turning a connection on also requires Internet connection control to be enabled.",
               enum: ["queue", "wake", "wake_after"],
+              enumNames: [
+                "Keep queued until internet is available",
+                "Turn on the configured connection immediately",
+                "Wait, then turn on the configured connection",
+              ],
               default: "queue",
             },
             delaySeconds: {
               type: "number",
               minimum: 0,
-              title: "Wait before waking (seconds)",
+              title: "Delay before turning on the connection (seconds)",
               description:
-                "Used only with wake after. The alert must remain active for this long before connectivity is requested.",
+                "Used only with the delayed option. The alert must remain active for this long before Alert Center requests the connection.",
             },
           },
           required: ["mode"],
@@ -445,39 +450,55 @@ export const pluginConfigSchema = {
     },
     connectivity: {
       type: "object",
-      title: "Connectivity manager (e.g. Starlink)",
+      title: "Internet connection control (for example Starlink)",
+      description:
+        "Optional. Alert Center can turn a Signal K-controlled connection on when notifications need internet access. It turns the connection off only when it originally turned it on.",
       properties: {
-        enabled: { type: "boolean", title: "Enabled", default: false },
+        enabled: {
+          type: "boolean",
+          title: "Allow Alert Center to control the internet connection",
+          default: false,
+        },
         switch: {
           type: "object",
-          title: "Signal K switch",
+          title: "Signal K connection switch",
+          description:
+            "The Signal K path and values used to turn the connection on and off.",
           properties: {
             path: {
               type: "string",
-              title: "Switch path",
+              title: "Connection switch path",
               default: "electrical.switches.starlink.state",
             },
-            onValue: { type: "number", title: "ON value", default: 1 },
-            offValue: { type: "number", title: "OFF value", default: 0 },
+            onValue: {
+              type: "number",
+              title: "Value that turns the connection on",
+              default: 1,
+            },
+            offValue: {
+              type: "number",
+              title: "Value that turns the connection off",
+              default: 0,
+            },
           },
           required: ["path"],
         },
         probe: {
           type: "object",
-          title: "Internet reachability probe",
+          title: "Internet availability check",
           description:
             "The plugin sends an HTTP HEAD request and considers any 2xx response online. Use a lightweight public endpoint that works without authentication.",
           properties: {
             url: {
               type: "string",
-              title: "Internet check URL",
+              title: "Internet availability check URL",
               description:
                 "URL that accepts HEAD requests and returns a 2xx response when the Internet is reachable.",
               default: "https://www.gstatic.com/generate_204",
             },
             timeoutSeconds: {
               type: "number",
-              title: "Timeout (seconds)",
+              title: "Give up on each check after (seconds)",
               default: 10,
             },
           },
@@ -485,17 +506,19 @@ export const pluginConfigSchema = {
         },
         bootTimeoutSeconds: {
           type: "number",
-          title: "Boot timeout (seconds)",
+          title: "Give up waiting after turning the connection on (seconds)",
           default: 240,
         },
         internetCheckIntervalSeconds: {
           type: "number",
-          title: "Internet check interval (seconds)",
+          title: "Check for internet every (seconds)",
           default: 5,
         },
         idleCooldownSeconds: {
           type: "number",
-          title: "Idle cooldown before shutdown (seconds)",
+          title: "Turn off an Alert Center-started connection after (seconds)",
+          description:
+            "The timer starts when no notification or scheduled connection request still needs it. Use 0 to turn it off immediately.",
           default: 300,
         },
       },

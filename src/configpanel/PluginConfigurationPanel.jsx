@@ -412,7 +412,10 @@ function AlertDefaults({ config, update }) {
             value={policy.rearmAfterSeconds}
             onChange={(rearmAfterSeconds) => set({ rearmAfterSeconds })}
           />
-          <Field label="Internet connection behavior">
+          <Field
+            label="When internet is unavailable"
+            hint="Applies when this alert has a remote notification waiting. Turning a connection on also requires Internet connection control to be enabled."
+          >
             <select
               style={styles.input}
               value={policy.connectivity?.mode ?? "queue"}
@@ -425,16 +428,21 @@ function AlertDefaults({ config, update }) {
                 })
               }
             >
-              <option value="queue">Wait until already online</option>
-              <option value="wake">Start connectivity immediately</option>
+              <option value="queue">
+                Keep queued until internet is available
+              </option>
+              <option value="wake">
+                Turn on the configured connection immediately
+              </option>
               <option value="wake_after">
-                Start connectivity after a delay
+                Wait, then turn on the configured connection
               </option>
             </select>
           </Field>
           {policy.connectivity?.mode === "wake_after" && (
             <NumberField
-              label="Wait before starting connectivity (seconds)"
+              label="Delay before turning on the connection (seconds)"
+              hint="The alert must remain active for this long before Alert Center requests the connection."
               min={0}
               value={policy.connectivity?.delaySeconds}
               onChange={(delaySeconds) =>
@@ -865,8 +873,8 @@ function Connectivity({ config, update }) {
   const set = (patch) => update("connectivity", { ...value, ...patch });
   return (
     <Card
-      title="Connectivity manager"
-      help="Optionally let Alert Center start and stop a connection such as Starlink when deliveries are waiting."
+      title="Internet connection control"
+      help="Optional. Alert Center can turn a Signal K-controlled connection such as Starlink on when notifications need internet access. It turns the connection off only when it originally turned it on."
     >
       <label style={{ ...styles.checkLabel, marginBottom: 18 }}>
         <input
@@ -875,12 +883,12 @@ function Connectivity({ config, update }) {
           checked={value.enabled === true}
           onChange={(event) => set({ enabled: event.target.checked })}
         />
-        Manage connectivity for queued alerts
+        Allow Alert Center to control the internet connection
       </label>
       <div style={styles.grid}>
         <Field
-          label="Signal K switch path"
-          hint="Path that turns the connection on and off."
+          label="Signal K connection switch path"
+          hint="The Signal K path used to turn the connection on and off, for example electrical.switches.starlink.state."
         >
           <input
             style={styles.input}
@@ -891,20 +899,20 @@ function Connectivity({ config, update }) {
           />
         </Field>
         <NumberField
-          label="Switch ON value"
+          label="Value that turns the connection on"
           value={value.switch?.onValue}
           onChange={(onValue) => set({ switch: { ...value.switch, onValue } })}
         />
         <NumberField
-          label="Switch OFF value"
+          label="Value that turns the connection off"
           value={value.switch?.offValue}
           onChange={(offValue) =>
             set({ switch: { ...value.switch, offValue } })
           }
         />
         <Field
-          label="Internet check URL"
-          hint="Must accept HEAD and return a 2xx response."
+          label="Internet availability check URL"
+          hint="Alert Center sends a HEAD request to this address. Any 2xx response means internet access is available."
         >
           <input
             style={styles.input}
@@ -916,7 +924,7 @@ function Connectivity({ config, update }) {
           />
         </Field>
         <NumberField
-          label="Internet check timeout (seconds)"
+          label="Give up on each internet check after (seconds)"
           min={1}
           value={value.probe?.timeoutSeconds}
           onChange={(timeoutSeconds) =>
@@ -924,13 +932,13 @@ function Connectivity({ config, update }) {
           }
         />
         <NumberField
-          label="Connection startup timeout (seconds)"
+          label="Give up waiting after turning the connection on (seconds)"
           min={1}
           value={value.bootTimeoutSeconds}
           onChange={(bootTimeoutSeconds) => set({ bootTimeoutSeconds })}
         />
         <NumberField
-          label="Internet check interval (seconds)"
+          label="Check for internet every (seconds)"
           min={1}
           value={value.internetCheckIntervalSeconds}
           onChange={(internetCheckIntervalSeconds) =>
@@ -938,7 +946,8 @@ function Connectivity({ config, update }) {
           }
         />
         <NumberField
-          label="Idle time before shutdown (seconds)"
+          label="Turn off an Alert Center-started connection after (seconds)"
+          hint="The timer starts when no notification or scheduled connection request still needs it. Use 0 to turn it off immediately."
           min={0}
           value={value.idleCooldownSeconds}
           onChange={(idleCooldownSeconds) => set({ idleCooldownSeconds })}
