@@ -207,10 +207,13 @@ describe("validateConfig", () => {
             targets: ["bridge"],
             voice: "en_US-lessac-medium",
             urgentAt: "alarm",
+            sounds: { warn: "warning", alarm: "engine_alarm" },
           },
         ],
         defaults: {
           notifiers: ["Bridge speakers"],
+          soundEnabled: true,
+          speechEnabled: false,
           speechMinimumSeverity: "warn",
           speechTemplate: "{name}. {message}",
           speechAnnounceClear: true,
@@ -231,6 +234,17 @@ describe("validateConfig", () => {
     expect(() => validateConfig({ defaults: { speechTemplate: "" } })).toThrow(
       "spoken-alert template",
     );
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          {
+            name: "Bridge speakers",
+            type: "wyoming",
+            sounds: { alarm: "Invalid sound" },
+          },
+        ],
+      }),
+    ).toThrow("invalid Wyoming sound id");
   });
 
   it("validates Telegram destinations", () => {

@@ -484,13 +484,47 @@
           </p>
           <div id="notifier-options"></div>
         </fieldset>
+        <div class="form-field" data-policy-field="soundEnabled">
+          <label class="check-label"
+            ><input id="sound-enabled" type="checkbox" /> Play a notification
+            sound</label
+          >
+          <small class="field-help"
+            >Uses the selected Wyoming service's sound for the current alert
+            severity.</small
+          >
+        </div>
+        <label class="form-field" data-policy-field="soundId"
+          ><span
+            >Custom sound ID
+            <small class="field-help"
+              >Override the per-severity sound for this alert with a built-in or
+              uploaded signalk-wyoming sound ID.</small
+            ></span
+          ><input
+            id="sound-id"
+            type="text"
+            maxlength="64"
+            pattern="[a-z0-9][a-z0-9_-]{0,63}"
+            placeholder="Uses severity sound"
+        /></label>
+        <div class="form-field" data-policy-field="speechEnabled">
+          <label class="check-label"
+            ><input id="speech-enabled" type="checkbox" /> Speak alert text
+            after the sound</label
+          >
+          <small class="field-help"
+            >Sound and speech are independent. When both are enabled, the sound
+            is always queued first.</small
+          >
+        </div>
         <label class="form-field" data-policy-field="speechMinimumSeverity"
           ><span
             >Lowest severity spoken
             <small class="field-help"
-              >Applies only when a Signal K Wyoming speech service is selected
-              above. Its global severity floor can still require a higher
-              level.</small
+              >Applies only when speech is enabled for a selected Signal K
+              Wyoming audio service. Its global severity floor can still require
+              a higher level.</small
             ></span
           ><select id="speech-minimum-severity">
             <option>normal</option>
@@ -548,7 +582,7 @@
           >
           <small class="field-help"
             >Turn this off to keep tracking the alert without creating new ntfy,
-            PagerDuty, Discord, or Wyoming speech deliveries.</small
+            PagerDuty, Discord, or Wyoming audio deliveries.</small
           >
         </div>
         <p id="policy-result" class="form-result" role="status"></p>

@@ -49,6 +49,20 @@ const date = (value: unknown): Date | undefined =>
 const json = (value: unknown): unknown | undefined =>
   value === null || value === undefined ? undefined : JSON.parse(String(value));
 
+function ensureColumn(
+  database: DatabaseSync,
+  table: string,
+  column: string,
+  definition: string,
+): boolean {
+  const columns = database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as Row[];
+  if (columns.some((item) => item.name === column)) return false;
+  database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  return true;
+}
+
 const deliveryContextSelect = `SELECT d.*,
   o.id AS occurrence_id, o.occurrence_number, o.definition_id,
   o.path AS alert_path, o.message AS alert_message,
@@ -163,11 +177,28 @@ export class AlertDatabase {
   constructor(filename = ":memory:") {
     this.db = new DatabaseSync(filename);
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-    this.migrationApplied = migrateLegacyRepeatSchema(this.db);
+    const repeatMigrationApplied = migrateLegacyRepeatSchema(this.db);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.exec(schema);
+      const soundMigrationResults = [
+        ["alert_policies", "sound_enabled", "INTEGER"],
+        ["alert_policies", "sound_id", "TEXT"],
+        ["alert_policies", "speech_enabled", "INTEGER"],
+        ["alert_occurrences", "sound_enabled", "INTEGER NOT NULL DEFAULT 1"],
+        ["alert_occurrences", "sound_id", "TEXT"],
+        ["alert_occurrences", "speech_enabled", "INTEGER NOT NULL DEFAULT 1"],
+        [
+          "alert_occurrences",
+          "speech_minimum_severity",
+          "TEXT NOT NULL DEFAULT 'warn'",
+        ],
+      ].map(([table, column, definition]) =>
+        ensureColumn(this.db, table, column, definition),
+      );
+      const soundMigrationApplied = soundMigrationResults.some(Boolean);
       this.db.exec("COMMIT");
+      this.migrationApplied = repeatMigrationApplied || soundMigrationApplied;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -553,13 +584,16 @@ export class AlertDatabase {
           `INSERT INTO alert_policies
             (definition_id, enabled, minimum_severity, connectivity_json,
              one_time, activation_delay_seconds,
+             sound_enabled, sound_id, speech_enabled,
              speech_minimum_severity, speech_template, speech_announce_clear,
              override_fields_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(definition_id) DO UPDATE SET
             enabled=excluded.enabled, minimum_severity=excluded.minimum_severity,
             connectivity_json=excluded.connectivity_json, one_time=excluded.one_time,
             activation_delay_seconds=excluded.activation_delay_seconds,
+            sound_enabled=excluded.sound_enabled, sound_id=excluded.sound_id,
+            speech_enabled=excluded.speech_enabled,
             speech_minimum_severity=excluded.speech_minimum_severity,
             speech_template=excluded.speech_template,
             speech_announce_clear=excluded.speech_announce_clear,
@@ -575,6 +609,13 @@ export class AlertDatabase {
             : JSON.stringify(policy.connectivity),
           policy.oneTime === undefined ? null : Number(policy.oneTime),
           policy.activationDelaySeconds ?? null,
+          policy.soundEnabled === undefined
+            ? null
+            : Number(policy.soundEnabled),
+          policy.soundId ?? null,
+          policy.speechEnabled === undefined
+            ? null
+            : Number(policy.speechEnabled),
           policy.speechMinimumSeverity ?? null,
           policy.speechTemplate ?? null,
           policy.speechAnnounceClear === undefined
@@ -628,6 +669,11 @@ export class AlertDatabase {
         row.activation_delay_seconds === null
           ? undefined
           : Number(row.activation_delay_seconds),
+      soundEnabled:
+        row.sound_enabled === null ? undefined : Boolean(row.sound_enabled),
+      soundId: row.sound_id ? String(row.sound_id) : undefined,
+      speechEnabled:
+        row.speech_enabled === null ? undefined : Boolean(row.speech_enabled),
       speechMinimumSeverity: row.speech_minimum_severity
         ? (String(
             row.speech_minimum_severity,
@@ -942,10 +988,12 @@ export class AlertDatabase {
                source_timestamp, received_at, last_seen_at, cleared_at, current_state,
                current_severity, max_severity, message, source_payload_json,
                notification_id, one_time, minimum_severity,
-               activation_delay_seconds, speech_template,
+               activation_delay_seconds,
+               sound_enabled, sound_id, speech_enabled, speech_minimum_severity,
+               speech_template,
                connectivity_json, activation_due_at, activation_state,
                created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -968,6 +1016,10 @@ export class AlertDatabase {
             Number(options.oneTime ?? false),
             minimumSeverity,
             delaySeconds,
+            Number(options.soundEnabled ?? true),
+            options.soundId ?? null,
+            Number(options.speechEnabled ?? true),
+            options.speechMinimumSeverity ?? "warn",
             options.speechTemplate ?? null,
             JSON.stringify(connectivity),
             activationDueAt,
@@ -1416,6 +1468,11 @@ export class AlertDatabase {
       speechTemplate: row.speech_template
         ? String(row.speech_template)
         : undefined,
+      soundEnabled: Boolean(row.sound_enabled),
+      soundId: row.sound_id ? String(row.sound_id) : undefined,
+      speechEnabled: Boolean(row.speech_enabled),
+      speechMinimumSeverity:
+        row.speech_minimum_severity as AlertRecord["speechMinimumSeverity"],
     };
   }
 

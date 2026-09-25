@@ -19,6 +19,8 @@ describe("AlertPolicyResolver", () => {
       defaults: {
         minSeverity: "warn",
         notifiers: ["primary"],
+        soundEnabled: true,
+        speechEnabled: false,
         speechMinimumSeverity: "alert",
         speechTemplate: "{name}: {message}",
         speechAnnounceClear: true,
@@ -36,6 +38,8 @@ describe("AlertPolicyResolver", () => {
       minimumSeverity: "warn",
       notifierIds: ["primary"],
       notifierRepeatIntervals: { primary: 300 },
+      soundEnabled: true,
+      speechEnabled: false,
       speechMinimumSeverity: "alert",
       speechTemplate: "{name}: {message}",
       speechAnnounceClear: true,
@@ -45,7 +49,10 @@ describe("AlertPolicyResolver", () => {
       enabled: false,
       notifierIds: ["primary"],
       notifierRepeatOverrides: { primary: 60 },
-      overrideFields: ["enabled", "notifierIds"],
+      soundEnabled: true,
+      soundId: "anchor-bell",
+      speechEnabled: true,
+      overrideFields: ["enabled", "notifierIds", "soundId", "speechEnabled"],
     });
     expect(
       resolver.forPath("notifications.navigation.anchor", "alarm"),
@@ -53,6 +60,8 @@ describe("AlertPolicyResolver", () => {
       enabled: false,
       notifierRepeatIntervals: { primary: 60 },
       notifierRepeatOverrides: { primary: 60 },
+      soundId: "anchor-bell",
+      speechEnabled: true,
       provenance: "partial",
     });
     expect(database.listDefinitions()).toHaveLength(1);

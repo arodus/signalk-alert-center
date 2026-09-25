@@ -38,6 +38,8 @@ export type NotifierConfig =
       voice?: string;
       /** Alerts at or above this level bypass voice mute and interrupt playback. */
       urgentAt?: Severity;
+      /** Notification sound id selected for each Signal K severity. */
+      sounds?: Partial<Record<Severity, string>>;
     });
 export interface PluginConfig {
   storage?: { path?: string };
@@ -72,6 +74,8 @@ export interface PluginConfig {
     activationDelaySeconds?: number;
     connectivity?: ConnectivityMode;
     notifiers?: string[];
+    soundEnabled?: boolean;
+    speechEnabled?: boolean;
     speechMinimumSeverity?: Severity;
     speechTemplate?: string;
     speechAnnounceClear?: boolean;
@@ -176,6 +180,29 @@ export function validateConfig(config: PluginConfig): void {
         `Notification service ${notifier.name} has an invalid ntfy server URL`,
         ["http:", "https:"],
       );
+    }
+    if (notifier.type === "wyoming" && notifier.sounds !== undefined) {
+      if (
+        !notifier.sounds ||
+        typeof notifier.sounds !== "object" ||
+        Array.isArray(notifier.sounds)
+      )
+        throw new Error(
+          `Notification service ${notifier.name} has invalid Wyoming sounds`,
+        );
+      for (const [severity, soundId] of Object.entries(notifier.sounds)) {
+        if (!severities.includes(severity as Severity))
+          throw new Error(
+            `Notification service ${notifier.name} has an invalid Wyoming sound severity`,
+          );
+        if (
+          typeof soundId !== "string" ||
+          !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(soundId)
+        )
+          throw new Error(
+            `Notification service ${notifier.name} has an invalid Wyoming sound id`,
+          );
+      }
     }
     if (notifier.type === "pagerduty")
       requireString(
@@ -343,6 +370,8 @@ function validatePolicy(
         | "activationDelaySeconds"
         | "notifiers"
         | "minSeverity"
+        | "soundEnabled"
+        | "speechEnabled"
         | "speechMinimumSeverity"
         | "speechTemplate"
         | "speechAnnounceClear"
@@ -367,6 +396,16 @@ function validatePolicy(
     !severities.includes(policy.speechMinimumSeverity)
   )
     throw new Error(`${label} has an invalid spoken-alert minimum severity`);
+  if (
+    policy.soundEnabled !== undefined &&
+    typeof policy.soundEnabled !== "boolean"
+  )
+    throw new Error(`${label} soundEnabled must be boolean`);
+  if (
+    policy.speechEnabled !== undefined &&
+    typeof policy.speechEnabled !== "boolean"
+  )
+    throw new Error(`${label} speechEnabled must be boolean`);
   if (
     policy.speechTemplate !== undefined &&
     (typeof policy.speechTemplate !== "string" ||

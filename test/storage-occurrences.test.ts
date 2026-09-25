@@ -46,6 +46,10 @@ describe("occurrence storage", () => {
       expect.arrayContaining([
         "source",
         "activation_due_at",
+        "sound_enabled",
+        "sound_id",
+        "speech_enabled",
+        "speech_minimum_severity",
         "speech_template",
       ]),
     );
@@ -65,6 +69,9 @@ describe("occurrence storage", () => {
     ).toEqual(
       expect.arrayContaining([
         "speech_minimum_severity",
+        "sound_enabled",
+        "sound_id",
+        "speech_enabled",
         "speech_template",
         "speech_announce_clear",
       ]),
@@ -88,6 +95,59 @@ describe("occurrence storage", () => {
         .map((column) => (column as { name: string }).name),
     ).toContain("cycle");
     expect(db.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("adds Wyoming policy columns without losing an existing database", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-wyoming-schema-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const previousSchema = schema
+      .replace(
+        "  sound_enabled INTEGER,\n  sound_id TEXT,\n  speech_enabled INTEGER,\n",
+        "",
+      )
+      .replace(
+        "  sound_enabled INTEGER NOT NULL DEFAULT 1,\n  sound_id TEXT,\n  speech_enabled INTEGER NOT NULL DEFAULT 1,\n  speech_minimum_severity TEXT NOT NULL DEFAULT 'warn',\n",
+        "",
+      );
+    const existing = new DatabaseSync(filename);
+    existing.exec(previousSchema);
+    existing
+      .prepare(
+        `INSERT INTO alert_definitions
+          (id, source_type, path_pattern, name, created_at, updated_at)
+         VALUES ('anchor', 'recognized', ?, 'Anchor', ?, ?)`,
+      )
+      .run(
+        active().path,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+    existing.close();
+
+    const migrated = new AlertDatabase(filename);
+    databases.push(migrated);
+    expect(migrated.migrationApplied).toBe(true);
+    expect(migrated.listDefinitions()).toMatchObject([{ id: "anchor" }]);
+    expect(
+      migrated.db
+        .prepare("PRAGMA table_info(alert_occurrences)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toEqual(
+      expect.arrayContaining([
+        "sound_enabled",
+        "sound_id",
+        "speech_enabled",
+        "speech_minimum_severity",
+      ]),
+    );
+
+    migrated.close();
+    databases.length = 0;
+    const reopened = new AlertDatabase(filename);
+    databases.push(reopened);
+    expect(reopened.migrationApplied).toBe(false);
   });
 
   it("migrates the previous repeat schema without losing stored data", () => {
@@ -750,9 +810,22 @@ describe("occurrence storage", () => {
       activationDelaySeconds: 0,
       notifierIds: ["ntfy"],
       notifierRepeatOverrides: { ntfy: 60 },
-      overrideFields: ["notifierIds"],
+      soundEnabled: true,
+      soundId: "anchor-bell",
+      speechEnabled: false,
+      overrideFields: [
+        "notifierIds",
+        "soundEnabled",
+        "soundId",
+        "speechEnabled",
+      ],
     });
     expect(policy.notifierRepeatOverrides).toEqual({ ntfy: 60 });
+    expect(policy).toMatchObject({
+      soundEnabled: true,
+      soundId: "anchor-bell",
+      speechEnabled: false,
+    });
 
     const first = db.ingest(
       active(),
@@ -761,8 +834,18 @@ describe("occurrence storage", () => {
       {
         definitionId: "anchor-alert",
         notifierRepeatIntervals: { ntfy: 60 },
+        soundEnabled: true,
+        soundId: "anchor-bell",
+        speechEnabled: false,
+        speechMinimumSeverity: "alarm",
       },
     )!;
+    expect(first).toMatchObject({
+      soundEnabled: true,
+      soundId: "anchor-bell",
+      speechEnabled: false,
+      speechMinimumSeverity: "alarm",
+    });
     const second = db.ingest(
       active(),
       ["ntfy"],

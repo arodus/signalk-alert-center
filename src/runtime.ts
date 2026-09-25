@@ -47,7 +47,7 @@ import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
 import { TelegramTransport } from "./transports/telegram";
 import { NotificationTransport } from "./transports/transport";
-import { WyomingSayApi, WyomingTransport } from "./transports/wyoming";
+import { WyomingAnnouncementApi, WyomingTransport } from "./transports/wyoming";
 import {
   NotificationTestOperation,
   NotificationTestResult,
@@ -108,7 +108,7 @@ export class AlertCenterRuntime {
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
   private notifierTests = new Set<string>();
-  private wyomingApi?: WyomingSayApi;
+  private wyomingApi?: WyomingAnnouncementApi;
   private wyomingUnsubscribe?: () => void;
   private changeRevision = 0;
   private changeListeners = new Set<(change: AlertCenterChange) => void>();
@@ -559,12 +559,7 @@ export class AlertCenterRuntime {
     );
     const notifierMinimumSeverity = (id: string): Severity => {
       const notifier = configuredNotifiers.get(id);
-      const configured = notifier?.minSeverity ?? "normal";
-      if (notifier?.type !== "wyoming") return configured;
-      return severityRank(configured) >=
-        severityRank(policy.speechMinimumSeverity)
-        ? configured
-        : policy.speechMinimumSeverity;
+      return notifier?.minSeverity ?? "normal";
     };
     const occurrence = new AlertLifecycle(this.db(), []).ingest(
       normalized,
@@ -592,12 +587,17 @@ export class AlertCenterRuntime {
           (id) =>
             configuredNotifiers.get(id)?.type === "pagerduty" ||
             (configuredNotifiers.get(id)?.type === "wyoming" &&
+              policy.speechEnabled &&
               policy.speechAnnounceClear),
         ),
         acknowledgingNotifierIds: notifierIds.filter(
           (id) => configuredNotifiers.get(id)?.type === "pagerduty",
         ),
         speechTemplate: policy.speechTemplate,
+        soundEnabled: policy.soundEnabled,
+        soundId: policy.soundId,
+        speechEnabled: policy.speechEnabled,
+        speechMinimumSeverity: policy.speechMinimumSeverity,
       },
     );
     if (!occurrence) return undefined;
@@ -855,6 +855,11 @@ export class AlertCenterRuntime {
           patch.notifierRepeatOverrides !== undefined
         )
           changedFields.push("notifierIds");
+        if (patch.soundEnabled !== undefined)
+          changedFields.push("soundEnabled");
+        if (patch.soundId !== undefined) changedFields.push("soundId");
+        if (patch.speechEnabled !== undefined)
+          changedFields.push("speechEnabled");
         if (patch.speechMinimumSeverity !== undefined)
           changedFields.push("speechMinimumSeverity");
         if (patch.speechTemplate !== undefined)
@@ -886,6 +891,9 @@ export class AlertCenterRuntime {
           notifierRepeatOverrides:
             patch.notifierRepeatOverrides ??
             current.policy.notifierRepeatOverrides,
+          soundEnabled: patch.soundEnabled ?? current.policy.soundEnabled,
+          soundId: patch.soundId ?? current.policy.soundId,
+          speechEnabled: patch.speechEnabled ?? current.policy.speechEnabled,
           speechMinimumSeverity:
             patch.speechMinimumSeverity ?? current.policy.speechMinimumSeverity,
           speechTemplate: patch.speechTemplate ?? current.policy.speechTemplate,
@@ -1029,9 +1037,7 @@ export class AlertCenterRuntime {
     this.config = options;
     this.database = new AlertDatabase(this.databasePath(options));
     if (this.database.migrationApplied)
-      this.debug(
-        "Migrated the previous repeat schema without removing stored alert data",
-      );
+      this.debug("Migrated the database without removing stored alert data");
     this.database.configureResolvingNotifiers(
       (options.notifiers ?? [])
         .filter(
@@ -1057,22 +1063,23 @@ export class AlertCenterRuntime {
       typeof propertyApp.onPropertyValues === "function"
     ) {
       const unsubscribe = propertyApp.onPropertyValues(
-        "signalk-wyoming.api",
+        "signalk-wyoming.announcements.api",
         (history) => {
           const candidate = [...history]
             .reverse()
             .map((entry) => entry?.value)
-            .find((value): value is WyomingSayApi =>
+            .find((value): value is WyomingAnnouncementApi =>
               Boolean(
                 value &&
                 typeof value === "object" &&
-                (value as WyomingSayApi).version === 1 &&
-                typeof (value as WyomingSayApi).say === "function",
+                (value as WyomingAnnouncementApi).version === 1 &&
+                typeof (value as WyomingAnnouncementApi).announce ===
+                  "function",
               ),
             );
           if (!candidate) return;
           this.wyomingApi = candidate;
-          this.debug("Connected to signalk-wyoming spoken-announcement API");
+          this.debug("Connected to signalk-wyoming announcement API");
           this.requestDeliveryRun();
         },
       );
@@ -1118,6 +1125,7 @@ export class AlertCenterRuntime {
             targets: notifier.targets,
             voice: notifier.voice,
             urgentAt: notifier.urgentAt,
+            sounds: notifier.sounds,
             definitionName: (definitionId) => {
               if (!definitionId) return undefined;
               try {
@@ -1344,6 +1352,7 @@ export class AlertCenterRuntime {
       targets: notifier.targets,
       voice: notifier.voice,
       urgentAt: notifier.urgentAt,
+      sounds: notifier.sounds,
     });
     try {
       const result = await transport.announce(
