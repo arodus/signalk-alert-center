@@ -41,8 +41,8 @@ that the corresponding behavior has been implemented.
   severity, and per-occurrence start/clear times and duration.
 - A new occurrence on the same path must not overwrite earlier occurrences or
   their delivery results. Duplicate updates within one occurrence should coalesce.
-  Do not invent separate one-shot occurrences from identical repeats without a
-  documented identity/rearm policy.
+  Do not invent separate occurrences from identical repeats; repeat delivery is a
+  per-notification-service schedule within the same occurrence.
 - Provide global and per-notification history in the UI and API with pagination
   and filters for time, path/source, state and severity.
   History must work locally and remain available after restart and successful delivery.

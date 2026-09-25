@@ -450,6 +450,7 @@ export function getAlertCenterOpenApi() {
           required: [
             "enabled",
             "notifierIds",
+            "notifierRepeatIntervals",
             "activationDelaySeconds",
             "minimumSeverity",
             "connectivity",
@@ -457,16 +458,18 @@ export function getAlertCenterOpenApi() {
           properties: {
             enabled: { type: "boolean" },
             oneTime: { type: "boolean" },
-            rearmAfterSeconds: {
-              type: "integer",
-              nullable: true,
-              minimum: 0,
-              maximum: 31536000,
-            },
             notifierIds: {
               type: "array",
               items: { type: "string" },
               uniqueItems: true,
+            },
+            notifierRepeatIntervals: {
+              type: "object",
+              additionalProperties: {
+                type: "integer",
+                minimum: 0,
+                maximum: 31536000,
+              },
             },
             activationDelaySeconds: {
               type: "integer",
@@ -487,7 +490,12 @@ export function getAlertCenterOpenApi() {
             { $ref: "#/components/schemas/PolicyValues" },
             {
               type: "object",
-              required: ["provenance", "overriddenFields", "defaults"],
+              required: [
+                "provenance",
+                "overriddenFields",
+                "defaults",
+                "notifierRepeatOverrides",
+              ],
               properties: {
                 provenance: {
                   type: "string",
@@ -499,6 +507,14 @@ export function getAlertCenterOpenApi() {
                   uniqueItems: true,
                 },
                 defaults: { $ref: "#/components/schemas/PolicyValues" },
+                notifierRepeatOverrides: {
+                  type: "object",
+                  additionalProperties: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 31536000,
+                  },
+                },
               },
             },
           ],
@@ -510,7 +526,6 @@ export function getAlertCenterOpenApi() {
             "oneTime",
             "minimumSeverity",
             "activationDelaySeconds",
-            "rearmAfterSeconds",
             "connectivity",
             "notifierIds",
             "speechMinimumSeverity",
@@ -530,16 +545,18 @@ export function getAlertCenterOpenApi() {
             },
             enabled: { type: "boolean" },
             oneTime: { type: "boolean" },
-            rearmAfterSeconds: {
-              type: "integer",
-              nullable: true,
-              minimum: 0,
-              maximum: 31536000,
-            },
             notifierIds: {
               type: "array",
               items: { type: "string", minLength: 1 },
               uniqueItems: true,
+            },
+            notifierRepeatOverrides: {
+              type: "object",
+              additionalProperties: {
+                type: "integer",
+                minimum: 0,
+                maximum: 31536000,
+              },
             },
             activationDelaySeconds: {
               type: "integer",
@@ -642,6 +659,7 @@ export function getAlertCenterOpenApi() {
             "operation",
             "state",
             "attemptCount",
+            "cycle",
             "createdAt",
             "updatedAt",
             "service",
@@ -666,6 +684,7 @@ export function getAlertCenterOpenApi() {
               ],
             },
             attemptCount: { type: "integer", minimum: 0 },
+            cycle: { type: "integer", minimum: 1 },
             nextAttemptAt: { type: "string", format: "date-time" },
             lastAttemptAt: { type: "string", format: "date-time" },
             deliveredAt: { type: "string", format: "date-time" },
@@ -759,6 +778,11 @@ export function getAlertCenterOpenApi() {
             type: { type: "string" },
             enabled: { type: "boolean" },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
+            repeatIntervalSeconds: {
+              type: "integer",
+              minimum: 0,
+              maximum: 31536000,
+            },
           },
         },
         NotificationTestResult: {

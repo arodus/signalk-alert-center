@@ -13,6 +13,7 @@ describe("AlertPolicyResolver", () => {
           type: "ntfy",
           server: "http://ntfy",
           topic: "boat",
+          repeatIntervalSeconds: 300,
         },
       ],
       defaults: {
@@ -34,6 +35,7 @@ describe("AlertPolicyResolver", () => {
     ).toMatchObject({
       minimumSeverity: "warn",
       notifierIds: ["primary"],
+      notifierRepeatIntervals: { primary: 300 },
       speechMinimumSeverity: "alert",
       speechTemplate: "{name}: {message}",
       speechAnnounceClear: true,
@@ -41,13 +43,16 @@ describe("AlertPolicyResolver", () => {
     });
     database.setPolicy(pathDefinitionId("notifications.navigation.anchor"), {
       enabled: false,
-      notifierIds: [],
+      notifierIds: ["primary"],
+      notifierRepeatOverrides: { primary: 60 },
       overrideFields: ["enabled", "notifierIds"],
     });
     expect(
       resolver.forPath("notifications.navigation.anchor", "alarm"),
     ).toMatchObject({
       enabled: false,
+      notifierRepeatIntervals: { primary: 60 },
+      notifierRepeatOverrides: { primary: 60 },
       provenance: "partial",
     });
     expect(database.listDefinitions()).toHaveLength(1);

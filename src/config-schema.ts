@@ -22,6 +22,14 @@ const serviceMinimumSeverity = {
   enum: [...severities],
   default: "normal",
 };
+const serviceRepeatInterval = {
+  type: "integer",
+  minimum: 0,
+  maximum: 31536000,
+  title: "Repeat while the alert remains active (seconds)",
+  description:
+    "After this service delivers successfully, send through it again after this many seconds while the alert remains active. Leave empty or use 0 to send once.",
+};
 const serviceType = {
   type: "string",
   title: "Service type",
@@ -236,13 +244,6 @@ export const pluginConfigSchema = {
             "How long a new alert must remain active before its first remote notification is created.",
           default: 0,
         },
-        rearmAfterSeconds: {
-          type: "number",
-          minimum: 0,
-          title: "Default repeat interval while active (seconds)",
-          description:
-            "Starts a new occurrence after this interval when an alert never clears. Leave empty to disable repeating.",
-        },
         connectivity: {
           type: "object",
           title: "When internet is unavailable by default",
@@ -322,6 +323,7 @@ export const pluginConfigSchema = {
           type: serviceType,
           enabled: serviceEnabled,
           minSeverity: serviceMinimumSeverity,
+          repeatIntervalSeconds: serviceRepeatInterval,
         },
         required: ["name", "type"],
         dependencies: {

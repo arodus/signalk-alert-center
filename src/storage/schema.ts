@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS alert_policies (
   connectivity_json TEXT,
   one_time INTEGER,
   activation_delay_seconds INTEGER,
-  rearm_after_seconds INTEGER,
   speech_minimum_severity TEXT,
   speech_template TEXT,
   speech_announce_clear INTEGER,
@@ -35,6 +34,7 @@ CREATE TABLE IF NOT EXISTS alert_policies (
 CREATE TABLE IF NOT EXISTS alert_policy_notifiers (
   definition_id TEXT NOT NULL REFERENCES alert_definitions(id) ON DELETE CASCADE,
   transport_instance_id TEXT NOT NULL,
+  repeat_override_seconds INTEGER,
   PRIMARY KEY (definition_id, transport_instance_id)
 );
 
@@ -61,7 +61,6 @@ CREATE TABLE IF NOT EXISTS alert_occurrences (
   one_time INTEGER NOT NULL DEFAULT 0,
   minimum_severity TEXT NOT NULL DEFAULT 'normal',
   activation_delay_seconds INTEGER NOT NULL DEFAULT 0,
-  rearm_after_seconds INTEGER,
   connectivity_json TEXT NOT NULL DEFAULT '{"mode":"queue"}',
   speech_template TEXT,
   activation_due_at TEXT,
@@ -102,8 +101,13 @@ CREATE TABLE IF NOT EXISTS occurrence_notifiers (
   transport_instance_id TEXT NOT NULL,
   supports_resolution INTEGER NOT NULL DEFAULT 0,
   supports_acknowledgement INTEGER NOT NULL DEFAULT 0,
+  repeat_after_seconds INTEGER NOT NULL DEFAULT 0,
+  next_repeat_at TEXT,
   PRIMARY KEY (alert_id, transport_instance_id)
 );
+
+CREATE INDEX IF NOT EXISTS occurrence_notifier_repeat_idx
+  ON occurrence_notifiers(next_repeat_at) WHERE next_repeat_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS occurrence_notifier_thresholds (
   alert_id TEXT NOT NULL REFERENCES alert_occurrences(id) ON DELETE CASCADE,
@@ -117,6 +121,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   alert_id TEXT NOT NULL REFERENCES alert_occurrences(id),
   transport_instance_id TEXT NOT NULL,
   operation TEXT NOT NULL,
+  cycle INTEGER NOT NULL DEFAULT 1,
   state TEXT NOT NULL,
   attempt_count INTEGER NOT NULL DEFAULT 0,
   next_attempt_at TEXT,
@@ -127,7 +132,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   remote_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE(alert_id, transport_instance_id, operation)
+  UNIQUE(alert_id, transport_instance_id, operation, cycle)
 );
 
 CREATE INDEX IF NOT EXISTS deliveries_due_idx

@@ -49,8 +49,8 @@ export interface AlertPolicyPatch {
   overrideFields?: AlertPolicyField[];
   enabled?: boolean;
   oneTime?: boolean;
-  rearmAfterSeconds?: number | null;
   notifierIds?: string[];
+  notifierRepeatOverrides?: Record<string, number>;
   activationDelaySeconds?: number;
   minimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
   speechMinimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
@@ -336,8 +336,8 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
   const allowed = new Set([
     "enabled",
     "oneTime",
-    "rearmAfterSeconds",
     "notifierIds",
+    "notifierRepeatOverrides",
     "activationDelaySeconds",
     "minimumSeverity",
     "connectivity",
@@ -380,21 +380,6 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       throw new ApiError(400, "INVALID_BODY", "oneTime must be boolean");
     patch.oneTime = value.oneTime;
   }
-  if (value.rearmAfterSeconds !== undefined) {
-    const rearm = value.rearmAfterSeconds;
-    if (
-      rearm !== null &&
-      (!Number.isInteger(rearm) ||
-        Number(rearm) < 0 ||
-        Number(rearm) > 31536000)
-    )
-      throw new ApiError(
-        400,
-        "INVALID_BODY",
-        "rearmAfterSeconds must be null or an integer from 0 to 31536000",
-      );
-    patch.rearmAfterSeconds = rearm === null ? null : Number(rearm);
-  }
   if (value.notifierIds !== undefined) {
     if (
       !Array.isArray(value.notifierIds) ||
@@ -406,6 +391,33 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
         "notifierIds must contain non-empty strings",
       );
     patch.notifierIds = [...new Set(value.notifierIds as string[])];
+  }
+  if (value.notifierRepeatOverrides !== undefined) {
+    const overrides = value.notifierRepeatOverrides;
+    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides))
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "notifierRepeatOverrides must be an object keyed by notification service name",
+      );
+    const entries = Object.entries(overrides);
+    if (
+      entries.some(
+        ([id, interval]) =>
+          !id.trim() ||
+          !Number.isInteger(interval) ||
+          Number(interval) < 0 ||
+          Number(interval) > 31536000,
+      )
+    )
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "Each notification service repeat override must be an integer from 0 to 31536000 seconds",
+      );
+    patch.notifierRepeatOverrides = Object.fromEntries(
+      entries.map(([id, interval]) => [id, Number(interval)]),
+    );
   }
   const delay = value.activationDelaySeconds;
   if (delay !== undefined) {
@@ -686,7 +698,10 @@ export function registerAlertCenterRoutes(
     "readwrite",
     wrap(async (req, res) => {
       const patch = parsePolicy(req.body);
-      if (patch.notifierIds && dependencies.listNotifiers) {
+      if (
+        (patch.notifierIds || patch.notifierRepeatOverrides) &&
+        dependencies.listNotifiers
+      ) {
         const known = new Set(
           (await dependencies.listNotifiers()).map((item) =>
             typeof item === "string"
@@ -694,7 +709,11 @@ export function registerAlertCenterRoutes(
               : String((item as { id?: unknown }).id),
           ),
         );
-        const missing = patch.notifierIds.filter((id) => !known.has(id));
+        const referenced = new Set([
+          ...(patch.notifierIds ?? []),
+          ...Object.keys(patch.notifierRepeatOverrides ?? {}),
+        ]);
+        const missing = [...referenced].filter((id) => !known.has(id));
         if (missing.length)
           throw new ApiError(
             400,

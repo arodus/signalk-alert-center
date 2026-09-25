@@ -887,6 +887,40 @@ dialog .button {
 [data-policy-field]:has(> .policy-override-button[aria-pressed="false"]) {
   color: #657472;
 }
+.notifier-policy-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 190px);
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #e5eceb;
+}
+.notifier-policy-option:last-child {
+  border-bottom: 0;
+}
+.notifier-repeat-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+.notifier-repeat-field span {
+  display: grid;
+}
+.notifier-repeat-field small {
+  color: #657472;
+  font-weight: 400;
+}
+.notifier-repeat-field input {
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 580px) {
+  .notifier-policy-option {
+    grid-template-columns: 1fr;
+  }
+}
 dialog .drawer-header {
   align-items: flex-start;
   gap: 12px;

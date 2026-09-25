@@ -64,6 +64,7 @@ const deliveryRecord = (row: Row): DeliveryRecord => ({
   operation: row.operation as DeliveryRecord["operation"],
   state: row.state as DeliveryRecord["state"],
   attemptCount: Number(row.attempt_count),
+  cycle: Number(row.cycle ?? 1),
   nextAttemptAt: date(row.next_attempt_at),
   lastAttemptAt: date(row.last_attempt_at),
   deliveredAt: date(row.delivered_at),
@@ -548,15 +549,14 @@ export class AlertDatabase {
         .prepare(
           `INSERT INTO alert_policies
             (definition_id, enabled, minimum_severity, connectivity_json,
-             one_time, activation_delay_seconds, rearm_after_seconds,
+             one_time, activation_delay_seconds,
              speech_minimum_severity, speech_template, speech_announce_clear,
              override_fields_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(definition_id) DO UPDATE SET
             enabled=excluded.enabled, minimum_severity=excluded.minimum_severity,
             connectivity_json=excluded.connectivity_json, one_time=excluded.one_time,
             activation_delay_seconds=excluded.activation_delay_seconds,
-            rearm_after_seconds=excluded.rearm_after_seconds,
             speech_minimum_severity=excluded.speech_minimum_severity,
             speech_template=excluded.speech_template,
             speech_announce_clear=excluded.speech_announce_clear,
@@ -572,7 +572,6 @@ export class AlertDatabase {
             : JSON.stringify(policy.connectivity),
           policy.oneTime === undefined ? null : Number(policy.oneTime),
           policy.activationDelaySeconds ?? null,
-          policy.rearmAfterSeconds ?? null,
           policy.speechMinimumSeverity ?? null,
           policy.speechTemplate ?? null,
           policy.speechAnnounceClear === undefined
@@ -587,9 +586,13 @@ export class AlertDatabase {
       for (const notifierId of [...new Set(policy.notifierIds)]) {
         this.db
           .prepare(
-            "INSERT INTO alert_policy_notifiers(definition_id, transport_instance_id) VALUES (?, ?)",
+            "INSERT INTO alert_policy_notifiers(definition_id, transport_instance_id, repeat_override_seconds) VALUES (?, ?, ?)",
           )
-          .run(definitionId, notifierId);
+          .run(
+            definitionId,
+            notifierId,
+            policy.notifierRepeatOverrides?.[notifierId] ?? null,
+          );
       }
       this.db.exec("COMMIT");
       return this.getPolicy(definitionId)!;
@@ -606,7 +609,7 @@ export class AlertDatabase {
     if (!row) return undefined;
     const notifiers = this.db
       .prepare(
-        "SELECT transport_instance_id FROM alert_policy_notifiers WHERE definition_id=? ORDER BY transport_instance_id",
+        "SELECT transport_instance_id, repeat_override_seconds FROM alert_policy_notifiers WHERE definition_id=? ORDER BY transport_instance_id",
       )
       .all(definitionId) as Row[];
     return {
@@ -622,10 +625,6 @@ export class AlertDatabase {
         row.activation_delay_seconds === null
           ? undefined
           : Number(row.activation_delay_seconds),
-      rearmAfterSeconds:
-        row.rearm_after_seconds === null
-          ? undefined
-          : Number(row.rearm_after_seconds),
       speechMinimumSeverity: row.speech_minimum_severity
         ? (String(
             row.speech_minimum_severity,
@@ -639,6 +638,14 @@ export class AlertDatabase {
           ? undefined
           : Boolean(row.speech_announce_clear),
       notifierIds: notifiers.map((item) => String(item.transport_instance_id)),
+      notifierRepeatOverrides: Object.fromEntries(
+        notifiers
+          .filter((item) => item.repeat_override_seconds !== null)
+          .map((item) => [
+            String(item.transport_instance_id),
+            Number(item.repeat_override_seconds),
+          ]),
+      ),
       overrideFields:
         (json(row.override_fields_json) as AlertPolicyField[] | undefined) ??
         [],
@@ -759,43 +766,6 @@ export class AlertDatabase {
         )
         .get(alert.sourceKey) as Row | undefined;
 
-      const rearmAfterSeconds = active
-        ? active.rearm_after_seconds === null
-          ? undefined
-          : Number(active.rearm_after_seconds)
-        : options.rearmAfterSeconds;
-      if (
-        active &&
-        alert.state === "active" &&
-        rearmAfterSeconds !== undefined &&
-        rearmAfterSeconds > 0 &&
-        now.getTime() - new Date(String(active.started_at)).getTime() >=
-          rearmAfterSeconds * 1000
-      ) {
-        const suppressed = active.activation_state === "pending";
-        this.db
-          .prepare(
-            `UPDATE alert_occurrences SET current_state='cleared', cleared_at=?,
-             activation_state=CASE WHEN ? THEN 'suppressed' ELSE activation_state END,
-             activation_due_at=CASE WHEN ? THEN NULL ELSE activation_due_at END,
-             last_seen_at=?, updated_at=? WHERE id=?`,
-          )
-          .run(
-            timestamp,
-            Number(suppressed),
-            Number(suppressed),
-            timestamp,
-            timestamp,
-            String(active.id),
-          );
-        if (suppressed)
-          this.addEvent(String(active.id), "suppressed_before_activation", now);
-        this.addEvent(String(active.id), "rearmed", now, {
-          rearmAfterSeconds,
-        });
-        active = undefined;
-      }
-
       let id: string;
       if (active) {
         id = String(active.id);
@@ -859,7 +829,14 @@ export class AlertDatabase {
         )
           this.addEvent(id, "updated", now, alert.sourcePayload);
         if (suppression) this.addEvent(id, "suppressed_before_activation", now);
-        if (clearing) this.addEvent(id, "cleared", now, alert.sourcePayload);
+        if (clearing) {
+          this.addEvent(id, "cleared", now, alert.sourcePayload);
+          this.db
+            .prepare(
+              "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=?",
+            )
+            .run(id);
+        }
 
         if (alert.acknowledged && !active.acknowledged_at) {
           this.db
@@ -962,10 +939,10 @@ export class AlertDatabase {
                source_timestamp, received_at, last_seen_at, cleared_at, current_state,
                current_severity, max_severity, message, source_payload_json,
                notification_id, one_time, minimum_severity,
-               activation_delay_seconds, rearm_after_seconds, speech_template,
+               activation_delay_seconds, speech_template,
                connectivity_json, activation_due_at, activation_state,
                created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -988,7 +965,6 @@ export class AlertDatabase {
             Number(options.oneTime ?? false),
             minimumSeverity,
             delaySeconds,
-            options.rearmAfterSeconds ?? null,
             options.speechTemplate ?? null,
             JSON.stringify(connectivity),
             activationDueAt,
@@ -1015,8 +991,8 @@ export class AlertDatabase {
             .prepare(
               `INSERT INTO occurrence_notifiers
                 (alert_id, transport_instance_id, supports_resolution,
-                 supports_acknowledgement)
-               VALUES (?, ?, ?, ?)`,
+                 supports_acknowledgement, repeat_after_seconds)
+               VALUES (?, ?, ?, ?, ?)`,
             )
             .run(
               id,
@@ -1030,6 +1006,7 @@ export class AlertDatabase {
                   options.resolvingNotifierIds
                 )?.includes(transportId) ?? false,
               ),
+              options.notifierRepeatIntervals?.[transportId] ?? 0,
             );
           this.db
             .prepare(
@@ -1130,7 +1107,7 @@ export class AlertDatabase {
     const timestamp = now.toISOString();
     const rows = this.db
       .prepare(
-        `SELECT n.transport_instance_id
+        `SELECT n.transport_instance_id, MAX(trigger_delivery.cycle) AS trigger_cycle
          FROM occurrence_notifiers n
          JOIN deliveries trigger_delivery
            ON trigger_delivery.alert_id=n.alert_id
@@ -1141,14 +1118,15 @@ export class AlertDatabase {
            AND CASE WHEN ?='acknowledge'
              THEN n.supports_acknowledgement=1
              ELSE n.supports_resolution=1
-           END`,
+           END
+         GROUP BY n.transport_instance_id`,
       )
       .all(alertId, operation) as Row[];
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO deliveries
-        (id, alert_id, transport_instance_id, operation, state,
+        (id, alert_id, transport_instance_id, operation, cycle, state,
          attempt_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
     );
     for (const row of rows)
       insert.run(
@@ -1156,6 +1134,7 @@ export class AlertDatabase {
         alertId,
         String(row.transport_instance_id),
         operation,
+        operation === "acknowledge" ? Number(row.trigger_cycle) : 1,
         timestamp,
         timestamp,
       );
@@ -1428,10 +1407,6 @@ export class AlertDatabase {
       oneTime: Boolean(row.one_time),
       minimumSeverity: row.minimum_severity as AlertRecord["minimumSeverity"],
       activationDelaySeconds: Number(row.activation_delay_seconds),
-      rearmAfterSeconds:
-        row.rearm_after_seconds === null
-          ? undefined
-          : Number(row.rearm_after_seconds),
       connectivity: json(row.connectivity_json) as AlertRecord["connectivity"],
       activationDueAt: date(row.activation_due_at),
       activationState: row.activation_state as AlertRecord["activationState"],
@@ -1518,12 +1493,75 @@ export class AlertDatabase {
   nextDeliveryDueAt(): Date | undefined {
     const row = this.db
       .prepare(
-        `SELECT MIN(COALESCE(next_attempt_at, created_at)) AS due_at
-         FROM deliveries
-         WHERE state NOT IN ('delivered', 'failed_terminal', 'sending')`,
+        `SELECT MIN(due_at) AS due_at FROM (
+           SELECT COALESCE(next_attempt_at, created_at) AS due_at
+           FROM deliveries
+           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending')
+           UNION ALL
+           SELECT n.next_repeat_at AS due_at
+           FROM occurrence_notifiers n
+           JOIN alert_occurrences o ON o.id=n.alert_id
+           WHERE n.next_repeat_at IS NOT NULL AND o.current_state='active'
+         )`,
       )
       .get() as Row;
     return date(row.due_at);
+  }
+
+  processDueRepeats(now = new Date()): number {
+    const timestamp = now.toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT n.alert_id, n.transport_instance_id, n.supports_resolution
+           FROM occurrence_notifiers n
+           JOIN alert_occurrences o ON o.id=n.alert_id
+           WHERE n.next_repeat_at IS NOT NULL
+             AND n.next_repeat_at <= ?
+             AND o.current_state='active'
+           ORDER BY n.next_repeat_at, n.rowid`,
+        )
+        .all(timestamp) as Row[];
+      const clear = this.db.prepare(
+        `UPDATE occurrence_notifiers SET next_repeat_at=NULL
+         WHERE alert_id=? AND transport_instance_id=? AND next_repeat_at <= ?`,
+      );
+      const nextCycle = this.db.prepare(
+        `SELECT COALESCE(MAX(cycle), 0) + 1 AS cycle
+         FROM deliveries
+         WHERE alert_id=? AND transport_instance_id=?
+           AND operation IN ('notify', 'trigger')`,
+      );
+      const insert = this.db.prepare(
+        `INSERT INTO deliveries
+          (id, alert_id, transport_instance_id, operation, cycle, state,
+           attempt_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+      );
+      let created = 0;
+      for (const row of rows) {
+        const alertId = String(row.alert_id);
+        const transportId = String(row.transport_instance_id);
+        if (clear.run(alertId, transportId, timestamp).changes === 0) continue;
+        const cycleRow = nextCycle.get(alertId, transportId) as Row;
+        insert.run(
+          randomUUID(),
+          alertId,
+          transportId,
+          Number(row.supports_resolution) ? "trigger" : "notify",
+          Number(cycleRow.cycle),
+          timestamp,
+          timestamp,
+        );
+        created += 1;
+      }
+      this.db.exec("COMMIT");
+      return created;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   retryFailedDeliveries(): void {
@@ -1757,10 +1795,14 @@ export class AlertDatabase {
     try {
       const row = this.db
         .prepare(
-          `SELECT d.attempt_count, d.alert_id, d.operation,
-                  o.current_state, o.acknowledged_at
+          `SELECT d.attempt_count, d.alert_id, d.transport_instance_id,
+                  d.operation, o.current_state, o.acknowledged_at,
+                  n.repeat_after_seconds
            FROM deliveries d
            JOIN alert_occurrences o ON o.id=d.alert_id
+           LEFT JOIN occurrence_notifiers n
+             ON n.alert_id=d.alert_id
+            AND n.transport_instance_id=d.transport_instance_id
            WHERE d.id=?`,
         )
         .get(id) as Row | undefined;
@@ -1812,6 +1854,26 @@ export class AlertDatabase {
             String(row.alert_id),
             "resolve",
             now,
+          );
+      }
+      if (
+        outcome === "delivered" &&
+        (row.operation === "notify" || row.operation === "trigger") &&
+        row.current_state === "active" &&
+        Number(row.repeat_after_seconds ?? 0) > 0
+      ) {
+        const nextRepeatAt = new Date(
+          now.getTime() + Number(row.repeat_after_seconds) * 1000,
+        ).toISOString();
+        this.db
+          .prepare(
+            `UPDATE occurrence_notifiers SET next_repeat_at=?
+             WHERE alert_id=? AND transport_instance_id=?`,
+          )
+          .run(
+            nextRepeatAt,
+            String(row.alert_id),
+            String(row.transport_instance_id),
           );
       }
       this.db.exec("COMMIT");

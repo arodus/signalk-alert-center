@@ -405,13 +405,6 @@ function AlertDefaults({ config, update }) {
               set({ activationDelaySeconds })
             }
           />
-          <NumberField
-            label="Repeat while active (seconds)"
-            hint="Leave empty to create only one occurrence until the alert clears."
-            min={0}
-            value={policy.rearmAfterSeconds}
-            onChange={(rearmAfterSeconds) => set({ rearmAfterSeconds })}
-          />
           <Field
             label="When internet is unavailable"
             hint="Applies when this alert has a remote notification waiting. Turning a connection on also requires Internet connection control to be enabled."
@@ -591,6 +584,7 @@ function NotificationServices({ config, update }) {
                     name: service.name,
                     enabled: service.enabled,
                     minSeverity: service.minSeverity,
+                    repeatIntervalSeconds: service.repeatIntervalSeconds,
                     type,
                   };
                   if (type === "ntfy")
@@ -669,6 +663,16 @@ function NotificationServices({ config, update }) {
                 ))}
               </select>
             </Field>
+            <NumberField
+              label="Repeat while the alert remains active (seconds)"
+              hint="After a successful delivery, send through this service again after this many seconds. Leave empty or use 0 to send once."
+              min={0}
+              max={31536000}
+              value={service.repeatIntervalSeconds}
+              onChange={(repeatIntervalSeconds) =>
+                change(index, { repeatIntervalSeconds })
+              }
+            />
             <label style={{ ...styles.checkLabel, alignSelf: "center" }}>
               <input
                 style={styles.checkbox}

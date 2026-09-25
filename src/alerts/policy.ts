@@ -15,9 +15,9 @@ export interface PolicyValues {
   oneTime: boolean;
   minimumSeverity: Severity;
   activationDelaySeconds: number;
-  rearmAfterSeconds?: number;
   connectivity: ConnectivityMode;
   notifierIds: string[];
+  notifierRepeatIntervals: Record<string, number>;
   speechMinimumSeverity: Severity;
   speechTemplate: string;
   speechAnnounceClear: boolean;
@@ -27,6 +27,7 @@ export interface EffectivePolicy extends PolicyValues {
   provenance: "override" | "partial" | "default";
   overriddenFields: AlertPolicyField[];
   defaults: PolicyValues;
+  notifierRepeatOverrides: Record<string, number>;
 }
 
 export const pathDefinitionId = (notificationPath: string): string =>
@@ -44,9 +45,14 @@ export class AlertPolicyResolver {
       oneTime: this.config.defaults?.oneTime ?? false,
       minimumSeverity: this.config.defaults?.minSeverity ?? "normal",
       activationDelaySeconds: this.config.defaults?.activationDelaySeconds ?? 0,
-      rearmAfterSeconds: this.config.defaults?.rearmAfterSeconds,
       connectivity: this.config.defaults?.connectivity ?? { mode: "queue" },
       notifierIds: [...(this.config.defaults?.notifiers ?? [])],
+      notifierRepeatIntervals: Object.fromEntries(
+        (this.config.notifiers ?? []).map((notifier) => [
+          notifier.name,
+          notifier.repeatIntervalSeconds ?? 0,
+        ]),
+      ),
       speechMinimumSeverity:
         this.config.defaults?.speechMinimumSeverity ?? "warn",
       speechTemplate:
@@ -64,6 +70,7 @@ export class AlertPolicyResolver {
       ...base,
       connectivity: { ...base.connectivity },
       notifierIds: [...base.notifierIds],
+      notifierRepeatIntervals: { ...base.notifierRepeatIntervals },
     };
     if (stored) {
       if (fields.has("enabled") && stored.enabled !== undefined)
@@ -77,13 +84,16 @@ export class AlertPolicyResolver {
         stored.activationDelaySeconds !== undefined
       )
         effective.activationDelaySeconds = stored.activationDelaySeconds;
-      if (fields.has("rearmAfterSeconds"))
-        effective.rearmAfterSeconds = stored.rearmAfterSeconds;
       if (fields.has("connectivity") && stored.connectivity)
         effective.connectivity = stored.connectivity;
       // The mask distinguishes an explicit empty list from inheritance.
       if (fields.has("notifierIds"))
         effective.notifierIds = [...stored.notifierIds];
+      if (fields.has("notifierIds"))
+        for (const [notifierId, interval] of Object.entries(
+          stored.notifierRepeatOverrides,
+        ))
+          effective.notifierRepeatIntervals[notifierId] = interval;
       if (fields.has("speechMinimumSeverity") && stored.speechMinimumSeverity)
         effective.speechMinimumSeverity = stored.speechMinimumSeverity;
       if (fields.has("speechTemplate") && stored.speechTemplate)
@@ -104,10 +114,12 @@ export class AlertPolicyResolver {
             ? "override"
             : "partial",
       overriddenFields,
+      notifierRepeatOverrides: { ...(stored?.notifierRepeatOverrides ?? {}) },
       defaults: {
         ...base,
         connectivity: { ...base.connectivity },
         notifierIds: [...base.notifierIds],
+        notifierRepeatIntervals: { ...base.notifierRepeatIntervals },
       },
     };
   }

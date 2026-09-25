@@ -28,7 +28,7 @@ retries and attempt histories remain independent.
 One-time behavior is snapshotted when an occurrence starts. Every occurrence
 remains available in history, and a later raise creates a distinct occurrence.
 Per-definition settings cover enabled state, minimum severity, notifiers,
-activation delay, repeat intervals, and connectivity mode.
+activation delay, per-service repeat overrides, and connectivity mode.
 
 Direct local playback is intentionally outside this plugin. The former playback
 implementation is preserved on the `archive/local-playback` branch. Spoken alerts
@@ -99,7 +99,7 @@ their source first. A zone or notification path still present in Signal K will b
 discovered again and will inherit the current global defaults.
 
 The definition settings panel controls enabled state, notification services, minimum
-severity, connectivity mode, repeat interval, and
+severity, connectivity mode, each selected service's repeat interval, and
 `activationDelaySeconds`. Overrides are stored by this plugin; Signal K
 `meta.zones` remain authoritative input metadata and are not rewritten. Settings
 apply to future occurrences by default so changing a policy does not silently
@@ -113,6 +113,15 @@ An activation delay is different from `wake_after`:
   delivery.
 - `wake_after`: once a delivery is eligible, wait before requesting managed
   connectivity. It affects power behavior, not whether the alert qualifies.
+
+Repeat behavior belongs to each notification service. Its global interval is used
+by every alert unless that alert supplies an override for the service. Empty means
+inherit, `0` means send only once, and a positive value schedules that service's
+next delivery after its previous delivery succeeds. Different services can repeat
+at different rates. Repeats remain part of the same alert occurrence, use separate
+durable delivery rows, survive restart, and stop as soon as Signal K clears the
+alert. A failed attempt follows the normal retry policy and does not start a new
+repeat clock until it succeeds.
 
 ## Implementation status and roadmap
 
@@ -152,9 +161,8 @@ Add indexes for current-list lookup and stable, cursor-based history order
 
 - Start an occurrence on inactive-to-active transition; coalesce identical updates
   while active; close it on null/normal; start a new occurrence on the next raise.
-- For sources that never send clear, support explicit producer identity when
-  present and a documented configurable rearm policy. Do not guess a new event from
-  repeated identical deltas.
+- For sources that never send clear, keep repeated identical deltas in the same
+  occurrence. Per-service repeat delivery must not invent a new alert occurrence.
 - Persist `activation_due_at`. Promote still-active occurrences to notifier intents
   at the deadline; otherwise record suppression. Recover overdue deadlines on
   restart before running the delivery scheduler.
@@ -322,7 +330,8 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
       "server": "https://ntfy.sh",
       "topic": "boat-alerts",
       "token": "secret",
-      "minSeverity": "warn"
+      "minSeverity": "warn",
+      "repeatIntervalSeconds": 300
     },
     {
       "name": "Emergency PagerDuty",
@@ -477,7 +486,7 @@ confirmation is retried, but the missing cancellation/idempotency contract means
 late acceptance can theoretically cause duplicate speech. Wyoming-only services
 never request managed Internet connectivity.
 
-Per-alert service selection, minimum severity, activation delay, repeat interval,
+Per-alert service selection, minimum severity, activation delay, per-service repeat overrides,
 speech policy, and connectivity policy are stored from the Alert center's
 **Settings** dialog. A
 notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
@@ -619,7 +628,7 @@ reconnect the same-origin stream; while it is unavailable, the UI uses a slow
 60-second fallback poll.
 
 Policy edits apply to future occurrences. Each occurrence snapshots its effective
-one-time, severity, activation, rearm, connectivity, and notifier policy into
+one-time, severity, activation, connectivity, notifier selection, and per-service repeat policy into
 durable delivery work, so a later settings edit cannot rewrite history or silently
 retarget pending work.
 

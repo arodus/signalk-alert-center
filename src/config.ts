@@ -5,6 +5,8 @@ interface NotifierBaseConfig {
   name: string;
   enabled?: boolean;
   minSeverity?: Severity;
+  /** Seconds after a successful delivery before this service sends again. */
+  repeatIntervalSeconds?: number;
 }
 export type NotifierConfig =
   | (NotifierBaseConfig & {
@@ -68,7 +70,6 @@ export interface PluginConfig {
     oneTime?: boolean;
     minSeverity?: Severity;
     activationDelaySeconds?: number;
-    rearmAfterSeconds?: number;
     connectivity?: ConnectivityMode;
     notifiers?: string[];
     speechMinimumSeverity?: Severity;
@@ -118,6 +119,15 @@ export function validateConfig(config: PluginConfig): void {
     )
       throw new Error(
         `Notification service ${notifier.name} has an invalid minimum severity`,
+      );
+    if (
+      notifier.repeatIntervalSeconds !== undefined &&
+      (!Number.isInteger(notifier.repeatIntervalSeconds) ||
+        notifier.repeatIntervalSeconds < 0 ||
+        notifier.repeatIntervalSeconds > 31536000)
+    )
+      throw new Error(
+        `Notification service ${notifier.name} repeat interval must be an integer from 0 to 31536000`,
       );
     if (notifier.type === "ntfy") {
       requireString(
@@ -298,7 +308,6 @@ function validatePolicy(
     | Pick<
         NonNullable<PluginConfig["defaults"]>,
         | "activationDelaySeconds"
-        | "rearmAfterSeconds"
         | "notifiers"
         | "minSeverity"
         | "speechMinimumSeverity"
@@ -315,8 +324,6 @@ function validatePolicy(
     policy.activationDelaySeconds < 0
   )
     throw new Error(`${label} activation delay must be non-negative`);
-  if (policy.rearmAfterSeconds !== undefined && policy.rearmAfterSeconds < 0)
-    throw new Error(`${label} rearm delay must be non-negative`);
   if (
     policy.minSeverity !== undefined &&
     !severities.includes(policy.minSeverity)
