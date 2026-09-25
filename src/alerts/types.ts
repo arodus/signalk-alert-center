@@ -46,6 +46,11 @@ export interface AlertRecord {
   activationState?: ActivationState;
   /** Template snapshotted for Wyoming speech deliveries. */
   speechTemplate?: string;
+  /** Wyoming playback policy snapshotted when this occurrence starts. */
+  soundEnabled?: boolean;
+  soundId?: string;
+  speechEnabled?: boolean;
+  speechMinimumSeverity?: Severity;
 }
 
 export type ActivationState = "pending" | "eligible" | "suppressed";
@@ -111,6 +116,9 @@ export interface AlertPolicyRecord {
   notifierIds: string[];
   /** Per-service values explicitly overriding the global repeat interval. */
   notifierRepeatOverrides: Record<string, number>;
+  soundEnabled?: boolean;
+  soundId?: string;
+  speechEnabled?: boolean;
   speechMinimumSeverity?: Severity;
   speechTemplate?: string;
   speechAnnounceClear?: boolean;
@@ -125,6 +133,9 @@ export const alertPolicyFields = [
   "activationDelaySeconds",
   "connectivity",
   "notifierIds",
+  "soundEnabled",
+  "soundId",
+  "speechEnabled",
   "speechMinimumSeverity",
   "speechTemplate",
   "speechAnnounceClear",
@@ -213,6 +224,10 @@ export interface IngestOptions {
   acknowledgingNotifierIds?: string[];
   /** Spoken-alert template resolved when this occurrence starts. */
   speechTemplate?: string;
+  soundEnabled?: boolean;
+  soundId?: string;
+  speechEnabled?: boolean;
+  speechMinimumSeverity?: Severity;
 }
 
 export interface OccurrenceQuery {

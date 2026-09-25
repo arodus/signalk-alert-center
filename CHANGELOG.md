@@ -5,6 +5,11 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Added signalk-wyoming notification sounds with a configurable sound for every
+  alert severity, per-alert sound overrides, and independent per-alert sound and
+  speech switches. When both are enabled, the sound is queued before speech.
+- Repeat-while-active policies now use a durable timer and continue repeating
+  even when the Signal K source sends no additional updates.
 - Added Telegram Bot API notifications with chat, forum-topic, silent-delivery,
   manual-test, and durable retry support.
 - Added signalk-wyoming as an optional notification service for durable spoken

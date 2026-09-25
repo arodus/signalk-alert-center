@@ -52,18 +52,18 @@ occurrence identity and audit data, not optional display details.
 The implementation uses the current typed Signal K plugin surface and keeps the
 following boundaries explicit:
 
-| Area            | Implemented behavior                                                                                                                                                                                                                                              |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                                        |
-| Ingestion       | An all-source subscription feeds one bounded worker. Equivalent pending updates coalesce, transitions stay ordered, and queue pressure is observable. `$source`, source time, receipt time, and raw values are persisted. Null/normal values clear an occurrence. |
-| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                                |
-| Stored removal  | Removing an inactive stored alert deletes its definition, per-alert settings, occurrences, history, deliveries, and related queued work. Signal K can rediscover it using current defaults.                                                                       |
-| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                |
-| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                            |
-| PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                   |
-| Telegram        | Bot API text messages support chats, channels, optional forum topics, silent delivery, durable retry, and manual service tests.                                                                                                                                   |
-| Spoken alerts   | Selected Wyoming services use signalk-wyoming's in-process announcement API. Speech text and lifecycle delivery state are durable here; synthesis, playback queues, mute, voice, and satellite routing remain owned by signalk-wyoming.                           |
-| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                           |
+| Area            | Implemented behavior                                                                                                                                                                                                                                                 |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                                           |
+| Ingestion       | An all-source subscription feeds one bounded worker. Equivalent pending updates coalesce, transitions stay ordered, and queue pressure is observable. `$source`, source time, receipt time, and raw values are persisted. Null/normal values clear an occurrence.    |
+| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                                   |
+| Stored removal  | Removing an inactive stored alert deletes its definition, per-alert settings, occurrences, history, deliveries, and related queued work. Signal K can rediscover it using current defaults.                                                                          |
+| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                   |
+| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                               |
+| PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                      |
+| Telegram        | Bot API text messages support chats, channels, optional forum topics, silent delivery, durable retry, and manual service tests.                                                                                                                                      |
+| Local audio     | Selected Wyoming services use signalk-wyoming's in-process announcement API. Severity sounds, optional speech, lifecycle delivery state, and repeat deadlines are durable here; playback queues, mute, voice, and satellite routing remain owned by signalk-wyoming. |
+| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                              |
 
 [Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player)
 is a useful product reference: it discovers known/configured notifications, opens
@@ -362,6 +362,13 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
       "targets": ["bridge"],
       "voice": "en_US-lessac-medium",
       "urgentAt": "alarm",
+      "sounds": {
+        "normal": "chime",
+        "warn": "warning",
+        "alert": "warning",
+        "alarm": "alarm",
+        "emergency": "alarm"
+      },
       "minSeverity": "warn"
     }
   ],
@@ -371,6 +378,8 @@ reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
     "activationDelaySeconds": 0,
     "connectivity": { "mode": "queue" },
     "notifiers": ["Crew ntfy", "Bridge speakers"],
+    "soundEnabled": true,
+    "speechEnabled": true,
     "speechMinimumSeverity": "warn",
     "speechTemplate": "{name}. {severity}. {message}",
     "speechAnnounceClear": false
@@ -418,7 +427,7 @@ into focused sections. The default-service picker lists the configured services 
 their human-readable names instead of requiring internal identifiers. Each
 notification service has one **Service type** selector; changing it immediately
 shows only the connection fields required by ntfy, PagerDuty, Discord, Telegram, or
-Signal K Wyoming speech.
+Signal K Wyoming audio.
 
 Optional **History retention** removes only cleared occurrences older than the
 configured age, in bounded batches. It is disabled by default and always protects
@@ -446,50 +455,48 @@ returned message ID with the completed delivery. Failed and rate-limited request
 use the same durable retry policy as other remote services. Bot tokens are treated
 as secrets and are never written to plugin logs or API responses.
 
-### Optional spoken alerts with signalk-wyoming
+### Optional notification sounds and speech with signalk-wyoming
 
 Wyoming is an optional notifier type, just like ntfy, PagerDuty, and Discord. Alert
 Center starts and handles alerts normally when signalk-wyoming is not installed or
 configured. It subscribes to the Wyoming API only when at least one enabled Wyoming
 notification service exists.
 
-If you choose to use spoken alerts, that integration requires signalk-wyoming and a
-working text-to-speech service. Install and enable `signalk-container`,
-`signalk-piper`, and `signalk-wyoming`, then configure a local or remote Wyoming
-satellite with a speaker. At the time of writing signalk-wyoming itself requires
-Node 24 or newer; follow its requirements if they are newer than Alert Center's
-minimum. Verify playback from the **Voice (Wyoming)** webapp before testing the
-optional service from Alert Center.
+Notification sounds require signalk-wyoming and a satellite with a speaker, but do
+not require Piper. Spoken alert text additionally requires a working text-to-speech
+service such as signalk-piper. Verify both from the **Voice (Wyoming)** webapp
+before testing the optional service from Alert Center.
 
 The package declares `signalk-wyoming` and `signalk-piper` as optional Signal K
 recommendations so compatible App Store views can surface them alongside Alert
 Center. Neither plugin is installed as an npm dependency or required unless spoken
 alerts are configured.
 
-Add one or more **Signal K Wyoming speech** notification services globally. An
-empty target list speaks on every configured satellite. An optional voice overrides
+Add one or more **Signal K Wyoming audio** notification services globally. Each
+service maps every alert severity to a built-in or uploaded Wyoming sound ID. An
+empty target list uses every configured satellite, and an optional voice overrides
 signalk-wyoming's default. Alerts at or above **Urgent playback starts at** use
-Wyoming's urgent priority, which interrupts normal playback and bypasses Wyoming's
-mute switch. Choose the service in an alert's Settings dialog, then configure the
-minimum spoken severity, text template, and optional clear announcement there.
-Supported template fields are `{name}`, `{severity}`, `{message}`, `{path}`, and
-`{state}`; rendered text is limited to 500 characters.
+Wyoming's urgent priority, which interrupts normal playback and bypasses mute.
 
-Alert Center uses the in-process `signalk-wyoming.api` version 1 interface. It does
-not invoke Piper directly, run shell commands, or use browser speech. A delivery is
-complete when signalk-wyoming confirms that it queued the announcement, not when
-the speaker finishes playing it. Normal announcements suppressed by Wyoming mute
-are recorded as intentionally completed so they are not replayed much later.
-Acknowledging, silencing, deleting, or clearing an alert cannot cancel speech that
-Wyoming already accepted because its current API has no cancellation or playback-
-completion events. A clear announcement, when enabled, is separate durable work
-and is queued only after the original speech was accepted. A timeout before queue
-confirmation is retried, but the missing cancellation/idempotency contract means a
-late acceptance can theoretically cause duplicate speech. Wyoming-only services
-never request managed Internet connectivity.
+Each alert can independently enable its notification sound and TTS, and can replace
+the severity sound with a custom sound ID. When both are enabled, Alert Center
+queues the sound first and then the rendered speech on the same per-satellite FIFO.
+Supported speech-template fields are `{name}`, `{severity}`, `{message}`, `{path}`,
+and `{state}`; rendered text is limited to 500 characters.
+
+Alert Center uses the in-process `signalk-wyoming.announcements.api` version 1
+interface. It does not invoke Piper directly, run shell commands, or use browser
+speech. A delivery is complete when signalk-wyoming confirms that it queued each
+announcement, not when the speaker finishes playing it. Normal announcements
+suppressed by Wyoming mute are recorded as intentionally completed so they are not
+replayed much later. Stable request IDs make retries idempotent: if the sound was
+accepted but queuing speech failed, the delivery retry does not replay that sound.
+A clear announcement, when enabled, is separate durable work and is queued only
+after the original alert delivery was accepted. Wyoming-only services never request
+managed Internet connectivity.
 
 Per-alert service selection, minimum severity, activation delay, per-service repeat overrides,
-speech policy, and connectivity policy are stored from the Alert center's
+sound override, speech policy, and connectivity policy are stored from the Alert center's
 **Settings** dialog. A
 notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
 that notifier send at a lower severity.

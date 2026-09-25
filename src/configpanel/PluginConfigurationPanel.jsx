@@ -1,12 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const severityOptions = ["normal", "warn", "alert", "alarm", "emergency"];
+const defaultSounds = {
+  normal: "chime",
+  warn: "warning",
+  alert: "warning",
+  alarm: "alarm",
+  emergency: "alarm",
+};
 const notifierTypes = [
   { value: "ntfy", label: "ntfy" },
   { value: "pagerduty", label: "PagerDuty" },
   { value: "discord", label: "Discord" },
   { value: "telegram", label: "Telegram" },
-  { value: "wyoming", label: "Signal K Wyoming speech" },
+  { value: "wyoming", label: "Signal K Wyoming audio" },
 ];
 const tabs = [
   ["defaults", "Alert defaults"],
@@ -33,6 +40,8 @@ const defaults = {
     activationDelaySeconds: 0,
     connectivity: { mode: "queue" },
     notifiers: [],
+    soundEnabled: true,
+    speechEnabled: true,
     speechMinimumSeverity: "warn",
     speechTemplate: "{name}. {severity}. {message}",
     speechAnnounceClear: false,
@@ -447,10 +456,32 @@ function AlertDefaults({ config, update }) {
       </Card>
       {config.notifiers.some((service) => service.type === "wyoming") && (
         <Card
-          title="Spoken alert defaults"
-          help="These values apply to selected Signal K Wyoming speech services. Individual alerts can override them."
+          title="Wyoming sound and speech defaults"
+          help="Selected Wyoming services play the severity sound first, then optionally speak. Individual alerts can override both."
         >
           <div style={styles.grid}>
+            <label style={styles.checkLabel}>
+              <input
+                style={styles.checkbox}
+                type="checkbox"
+                checked={policy.soundEnabled !== false}
+                onChange={(event) =>
+                  set({ soundEnabled: event.target.checked })
+                }
+              />
+              Play notification sounds
+            </label>
+            <label style={styles.checkLabel}>
+              <input
+                style={styles.checkbox}
+                type="checkbox"
+                checked={policy.speechEnabled !== false}
+                onChange={(event) =>
+                  set({ speechEnabled: event.target.checked })
+                }
+              />
+              Speak alert text after the sound
+            </label>
             <Field label="Lowest severity spoken">
               <select
                 style={styles.input}
@@ -636,6 +667,7 @@ function NotificationServices({ config, update }) {
                         targets: service.targets ?? [],
                         voice: service.voice ?? "",
                         urgentAt: service.urgentAt ?? "alarm",
+                        sounds: service.sounds ?? { ...defaultSounds },
                       },
                       true,
                     );
@@ -847,6 +879,35 @@ function NotificationServices({ config, update }) {
                     ))}
                   </select>
                 </Field>
+                {severityOptions.map((severity) => (
+                  <Field
+                    key={severity}
+                    label={`${severity} sound ID`}
+                    hint="Built-in or custom sound ID from signalk-wyoming."
+                  >
+                    <input
+                      style={styles.input}
+                      value={
+                        service.sounds?.[severity] ?? defaultSounds[severity]
+                      }
+                      pattern="[a-z0-9][a-z0-9_-]{0,63}"
+                      onChange={(event) => {
+                        const sounds = { ...(service.sounds ?? {}) };
+                        const value = event.target.value.trim();
+                        if (value) sounds[severity] = value;
+                        else delete sounds[severity];
+                        change(index, { sounds });
+                      }}
+                      placeholder={
+                        severity === "normal"
+                          ? "chime"
+                          : severity === "warn" || severity === "alert"
+                            ? "warning"
+                            : "alarm"
+                      }
+                    />
+                  </Field>
+                ))}
               </>
             )}
           </div>

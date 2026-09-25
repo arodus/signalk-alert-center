@@ -18,6 +18,9 @@ export interface PolicyValues {
   connectivity: ConnectivityMode;
   notifierIds: string[];
   notifierRepeatIntervals: Record<string, number>;
+  soundEnabled: boolean;
+  soundId?: string;
+  speechEnabled: boolean;
   speechMinimumSeverity: Severity;
   speechTemplate: string;
   speechAnnounceClear: boolean;
@@ -53,6 +56,9 @@ export class AlertPolicyResolver {
           notifier.repeatIntervalSeconds ?? 0,
         ]),
       ),
+      soundEnabled: this.config.defaults?.soundEnabled ?? true,
+      soundId: undefined,
+      speechEnabled: this.config.defaults?.speechEnabled ?? true,
       speechMinimumSeverity:
         this.config.defaults?.speechMinimumSeverity ?? "warn",
       speechTemplate:
@@ -94,6 +100,11 @@ export class AlertPolicyResolver {
           stored.notifierRepeatOverrides,
         ))
           effective.notifierRepeatIntervals[notifierId] = interval;
+      if (fields.has("soundEnabled") && stored.soundEnabled !== undefined)
+        effective.soundEnabled = stored.soundEnabled;
+      if (fields.has("soundId")) effective.soundId = stored.soundId;
+      if (fields.has("speechEnabled") && stored.speechEnabled !== undefined)
+        effective.speechEnabled = stored.speechEnabled;
       if (fields.has("speechMinimumSeverity") && stored.speechMinimumSeverity)
         effective.speechMinimumSeverity = stored.speechMinimumSeverity;
       if (fields.has("speechTemplate") && stored.speechTemplate)

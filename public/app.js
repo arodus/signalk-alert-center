@@ -90,6 +90,9 @@ const policyFieldNames = {
   activationDelaySeconds: "wait before sending",
   connectivity: "internet connection behavior",
   notifierIds: "notification services",
+  soundEnabled: "notification sound",
+  soundId: "custom sound",
+  speechEnabled: "spoken alert",
   speechMinimumSeverity: "lowest severity spoken",
   speechTemplate: "spoken alert text",
   speechAnnounceClear: "clear announcement",
@@ -925,6 +928,9 @@ function setPolicyControlValues(policy) {
   $("#connectivity-mode").value = policy.connectivity?.mode ?? "queue";
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
   $("#speech-minimum-severity").value = policy.speechMinimumSeverity ?? "warn";
+  $("#sound-enabled").checked = policy.soundEnabled !== false;
+  $("#sound-id").value = policy.soundId ?? "";
+  $("#speech-enabled").checked = policy.speechEnabled !== false;
   $("#speech-template").value =
     policy.speechTemplate ?? "{name}. {severity}. {message}";
   $("#speech-announce-clear").checked = policy.speechAnnounceClear === true;
@@ -952,6 +958,11 @@ function applyDefaultForField(field) {
         input.value = "";
       });
     },
+    soundEnabled: () =>
+      ($("#sound-enabled").checked = defaults.soundEnabled !== false),
+    soundId: () => ($("#sound-id").value = defaults.soundId ?? ""),
+    speechEnabled: () =>
+      ($("#speech-enabled").checked = defaults.speechEnabled !== false),
     speechMinimumSeverity: () =>
       ($("#speech-minimum-severity").value = defaults.speechMinimumSeverity),
     speechTemplate: () =>
@@ -1132,6 +1143,11 @@ async function savePolicy(event) {
         )
         .map((input) => [input.dataset.notifierId, Number(input.value)]),
     ),
+    soundEnabled: $("#sound-enabled").checked,
+    ...($("#sound-id").value.trim()
+      ? { soundId: $("#sound-id").value.trim() }
+      : {}),
+    speechEnabled: $("#speech-enabled").checked,
     speechMinimumSeverity: $("#speech-minimum-severity").value,
     speechTemplate: $("#speech-template").value,
     speechAnnounceClear: $("#speech-announce-clear").checked,

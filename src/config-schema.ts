@@ -41,7 +41,7 @@ const serviceType = {
     "PagerDuty",
     "Discord",
     "Telegram",
-    "Signal K Wyoming speech",
+    "Signal K Wyoming audio",
   ],
   default: "ntfy",
 };
@@ -225,7 +225,7 @@ export const pluginConfigSchema = {
           type: "boolean",
           title: "Deliver notifications by default",
           description:
-            "Newly discovered alerts inherit this value until their Settings are changed in the Alert center. This covers remote services and Wyoming speech.",
+            "Newly discovered alerts inherit this value until their Settings are changed in the Alert center. This covers remote services and Wyoming audio.",
           default: true,
         },
         minSeverity: {
@@ -284,11 +284,25 @@ export const pluginConfigSchema = {
             title: "Service name",
           },
         },
+        soundEnabled: {
+          type: "boolean",
+          title: "Play notification sounds by default",
+          description:
+            "Selected Wyoming services play their sound for the alert severity before optional speech.",
+          default: true,
+        },
+        speechEnabled: {
+          type: "boolean",
+          title: "Speak alerts by default",
+          description:
+            "Selected Wyoming services speak alert text after the notification sound.",
+          default: true,
+        },
         speechMinimumSeverity: {
           type: "string",
           title: "Lowest severity spoken by default",
           description:
-            "Applies only to selected Signal K Wyoming speech services. A service's own severity floor can still require a higher level.",
+            "Applies only when speech is enabled for selected Signal K Wyoming audio services. A service's own severity floor can still require a higher level.",
           enum: [...severities],
           default: "warn",
         },
@@ -305,7 +319,7 @@ export const pluginConfigSchema = {
           type: "boolean",
           title: "Announce clears by default",
           description:
-            "When enabled, selected Wyoming speech services also say when an alert clears.",
+            "When enabled, selected Wyoming audio services also say when an alert clears.",
           default: false,
         },
       },
@@ -314,7 +328,7 @@ export const pluginConfigSchema = {
       type: "array",
       title: "Notification services",
       description:
-        "Optionally add each ntfy, PagerDuty, Discord, Telegram, or Signal K Wyoming speech service once. Alert Center works without any notification service. Alerts select configured services by name.",
+        "Optionally add each ntfy, PagerDuty, Discord, Telegram, or Signal K Wyoming audio service once. Alert Center works without any notification service. Alerts select configured services by name.",
       default: [],
       items: {
         type: "object",
@@ -442,6 +456,23 @@ export const pluginConfigSchema = {
                       "Alerts at or above this severity interrupt normal playback and bypass signalk-wyoming mute.",
                     enum: [...severities],
                     default: "alarm",
+                  },
+                  sounds: {
+                    type: "object",
+                    title: "Sounds by alert severity",
+                    description:
+                      "Wyoming sound IDs played for each Signal K alert severity. Custom uploaded sound IDs are supported.",
+                    properties: Object.fromEntries(
+                      severities.map((severity) => [
+                        severity,
+                        {
+                          type: "string",
+                          title: `${severity} sound ID`,
+                          pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
+                        },
+                      ]),
+                    ),
+                    additionalProperties: false,
                   },
                 },
               },

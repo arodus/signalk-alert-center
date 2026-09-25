@@ -454,6 +454,8 @@ export function getAlertCenterOpenApi() {
             "activationDelaySeconds",
             "minimumSeverity",
             "connectivity",
+            "soundEnabled",
+            "speechEnabled",
           ],
           properties: {
             enabled: { type: "boolean" },
@@ -477,6 +479,12 @@ export function getAlertCenterOpenApi() {
               maximum: 604800,
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
+            soundEnabled: { type: "boolean" },
+            soundId: {
+              type: "string",
+              pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
+            },
+            speechEnabled: { type: "boolean" },
             speechMinimumSeverity: {
               $ref: "#/components/schemas/Severity",
             },
@@ -528,6 +536,9 @@ export function getAlertCenterOpenApi() {
             "activationDelaySeconds",
             "connectivity",
             "notifierIds",
+            "soundEnabled",
+            "soundId",
+            "speechEnabled",
             "speechMinimumSeverity",
             "speechTemplate",
             "speechAnnounceClear",
@@ -564,6 +575,12 @@ export function getAlertCenterOpenApi() {
               maximum: 604800,
             },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
+            soundEnabled: { type: "boolean" },
+            soundId: {
+              type: "string",
+              pattern: "^[a-z0-9][a-z0-9_-]{0,63}$",
+            },
+            speechEnabled: { type: "boolean" },
             speechMinimumSeverity: {
               $ref: "#/components/schemas/Severity",
             },

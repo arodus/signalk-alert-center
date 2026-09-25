@@ -10,32 +10,59 @@ import {
   TransportResult,
 } from "./transport";
 
-export interface WyomingSayResult {
-  ok: boolean;
-  queued?: string[];
-  suppressed?: string;
-  errors?: Array<{ satellite: string; error: string }>;
+export type WyomingAnnouncementContent =
+  | { kind: "sound"; soundId: string }
+  | { kind: "speech"; text: string; voice?: string };
+
+export interface WyomingAnnouncementSnapshot {
+  id: string;
+  state:
+    | "queued"
+    | "playing"
+    | "played"
+    | "suppressed"
+    | "cancelled"
+    | "interrupted"
+    | "failed"
+    | "unknown"
+    | "partial";
+  targets?: Record<string, { state: string; error?: string }>;
 }
 
-export interface WyomingSayApi {
+export interface WyomingAnnouncementApi {
   version: number;
-  say(options: {
-    text: string;
+  announce(options: {
+    requestId?: string;
+    content: WyomingAnnouncementContent;
     targets?: string[];
-    voice?: string;
     priority?: "normal" | "urgent";
-  }): Promise<WyomingSayResult>;
+  }): Promise<WyomingAnnouncementSnapshot>;
 }
 
 export interface WyomingTransportOptions {
-  api: () => WyomingSayApi | undefined;
+  api: () => WyomingAnnouncementApi | undefined;
   targets?: string[];
   voice?: string;
   urgentAt?: Severity;
+  sounds?: Partial<Record<Severity, string>>;
   definitionName?: (definitionId: string | undefined) => string | undefined;
 }
 
 const DEFAULT_TEMPLATE = "{name}. {severity}. {message}";
+const DEFAULT_SOUNDS: Record<Severity, string> = {
+  normal: "chime",
+  warn: "warning",
+  alert: "warning",
+  alarm: "alarm",
+  emergency: "alarm",
+};
+const acceptedStates = new Set([
+  "queued",
+  "playing",
+  "played",
+  "suppressed",
+  "partial",
+]);
 
 export function renderSpeechText(
   alert: AlertRecord,
@@ -63,10 +90,11 @@ export class WyomingTransport implements NotificationTransport {
 
   constructor(private readonly options: WyomingTransportOptions) {}
 
-  async announce(
-    text: string,
+  private async queue(
+    content: WyomingAnnouncementContent,
     priority: "normal" | "urgent",
     signal: AbortSignal,
+    requestId?: string,
   ): Promise<TransportResult> {
     if (signal.aborted)
       return {
@@ -80,7 +108,7 @@ export class WyomingTransport implements NotificationTransport {
         kind: "retryable",
         code: "WYOMING_UNAVAILABLE",
         message:
-          "signalk-wyoming is not running or has not published a compatible say API",
+          "signalk-wyoming is not running or has not published a compatible announcement API",
       };
     try {
       let rejectOnAbort: (() => void) | undefined;
@@ -88,30 +116,28 @@ export class WyomingTransport implements NotificationTransport {
         rejectOnAbort = () => reject(new Error("WYOMING_ABORTED"));
         signal.addEventListener("abort", rejectOnAbort, { once: true });
       });
-      const request = api.say({
-        text: text.slice(0, 500),
+      const request = api.announce({
+        ...(requestId ? { requestId } : {}),
+        content,
         priority,
         ...(this.options.targets?.length
           ? { targets: [...new Set(this.options.targets)] }
           : {}),
-        ...(this.options.voice?.trim()
-          ? { voice: this.options.voice.trim() }
-          : {}),
       });
-      const result = await Promise.race([request, aborted]).finally(() => {
+      const snapshot = await Promise.race([request, aborted]).finally(() => {
         if (rejectOnAbort) signal.removeEventListener("abort", rejectOnAbort);
       });
-      if (result.suppressed)
-        return { kind: "success", remoteId: `suppressed:${result.suppressed}` };
-      if (result.queued?.length)
-        return { kind: "success", remoteId: result.queued.join(",") };
+      if (acceptedStates.has(snapshot.state))
+        return { kind: "success", remoteId: snapshot.id };
+      const errors = Object.entries(snapshot.targets ?? {})
+        .filter(([, target]) => target.error)
+        .map(([satellite, target]) => `${satellite}: ${target.error}`)
+        .join("; ");
       return {
         kind: "retryable",
-        code: "WYOMING_NOT_QUEUED",
+        code: `WYOMING_${snapshot.state.toUpperCase()}`,
         message:
-          result.errors
-            ?.map((item) => `${item.satellite}: ${item.error}`)
-            .join("; ") || "signalk-wyoming did not queue the announcement",
+          errors || `signalk-wyoming reported announcement ${snapshot.state}`,
       };
     } catch (error) {
       if (signal.aborted)
@@ -129,13 +155,31 @@ export class WyomingTransport implements NotificationTransport {
     }
   }
 
+  announce(
+    text: string,
+    priority: "normal" | "urgent",
+    signal: AbortSignal,
+    requestId?: string,
+  ): Promise<TransportResult> {
+    return this.queue(
+      {
+        kind: "speech",
+        text: text.slice(0, 500),
+        ...(this.options.voice?.trim()
+          ? { voice: this.options.voice.trim() }
+          : {}),
+      },
+      priority,
+      signal,
+      requestId,
+    );
+  }
+
   async send(
     alert: AlertRecord,
     delivery: DeliveryRecord,
     context: TransportContext,
   ): Promise<TransportResult> {
-    // Defensive only: Wyoming instances do not opt into acknowledgement rows.
-    // The API cannot cancel speech that has already been queued.
     if (delivery.operation === "acknowledge") return { kind: "success" };
     const name =
       this.options.definitionName?.(alert.definitionId) ?? alert.path;
@@ -144,10 +188,43 @@ export class WyomingTransport implements NotificationTransport {
       severityRank(this.options.urgentAt ?? "alarm")
         ? "urgent"
         : "normal";
-    return this.announce(
-      renderSpeechText(alert, name, delivery.operation),
-      priority,
-      context.signal,
-    );
+    const soundId =
+      alert.soundId?.trim() ||
+      this.options.sounds?.[alert.maxSeverity]?.trim() ||
+      DEFAULT_SOUNDS[alert.maxSeverity];
+    const shouldPlaySound = alert.soundEnabled !== false && soundId;
+    const shouldSpeak =
+      alert.speechEnabled !== false &&
+      (delivery.operation === "resolve" ||
+        severityRank(alert.maxSeverity) >=
+          severityRank(alert.speechMinimumSeverity ?? "warn"));
+    const remoteIds: string[] = [];
+
+    // Queue in this order. signalk-wyoming preserves FIFO order per satellite,
+    // so the notification sound always precedes its spoken text.
+    if (shouldPlaySound) {
+      const sound = await this.queue(
+        { kind: "sound", soundId },
+        priority,
+        context.signal,
+        `${delivery.id}:sound`,
+      );
+      if (sound.kind !== "success") return sound;
+      if (sound.remoteId) remoteIds.push(`sound:${sound.remoteId}`);
+    }
+    if (shouldSpeak) {
+      const speech = await this.announce(
+        renderSpeechText(alert, name, delivery.operation),
+        priority,
+        context.signal,
+        `${delivery.id}:speech`,
+      );
+      if (speech.kind !== "success") return speech;
+      if (speech.remoteId) remoteIds.push(`speech:${speech.remoteId}`);
+    }
+    return {
+      kind: "success",
+      remoteId: remoteIds.join(",") || "suppressed:policy",
+    };
   }
 }

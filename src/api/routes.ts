@@ -53,6 +53,9 @@ export interface AlertPolicyPatch {
   notifierRepeatOverrides?: Record<string, number>;
   activationDelaySeconds?: number;
   minimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  soundEnabled?: boolean;
+  soundId?: string;
+  speechEnabled?: boolean;
   speechMinimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
   speechTemplate?: string;
   speechAnnounceClear?: boolean;
@@ -342,6 +345,9 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
     "minimumSeverity",
     "connectivity",
     "overrideFields",
+    "soundEnabled",
+    "soundId",
+    "speechEnabled",
     "speechMinimumSeverity",
     "speechTemplate",
     "speechAnnounceClear",
@@ -452,6 +458,34 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       );
     patch.speechMinimumSeverity =
       value.speechMinimumSeverity as AlertPolicyPatch["speechMinimumSeverity"];
+  }
+  if (value.soundEnabled !== undefined) {
+    if (typeof value.soundEnabled !== "boolean")
+      throw new ApiError(400, "INVALID_BODY", "soundEnabled must be boolean");
+    patch.soundEnabled = value.soundEnabled;
+  }
+  if (value.soundId !== undefined) {
+    if (
+      typeof value.soundId !== "string" ||
+      !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.soundId)
+    )
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "soundId must be a valid Wyoming sound id",
+      );
+    patch.soundId = value.soundId;
+  }
+  if (patch.overrideFields?.includes("soundId") && value.soundId === undefined)
+    throw new ApiError(
+      400,
+      "INVALID_BODY",
+      "soundId is required when custom sound is enabled",
+    );
+  if (value.speechEnabled !== undefined) {
+    if (typeof value.speechEnabled !== "boolean")
+      throw new ApiError(400, "INVALID_BODY", "speechEnabled must be boolean");
+    patch.speechEnabled = value.speechEnabled;
   }
   if (value.speechTemplate !== undefined) {
     if (
