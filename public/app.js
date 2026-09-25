@@ -5,6 +5,7 @@ const state = {
   activeDefinitionIds: new Set(),
   notifiers: [],
   deliveries: [],
+  deliveryTotal: 0,
   alertHistory: [],
   occurrenceCursor: undefined,
   deliveryCursor: undefined,
@@ -597,6 +598,8 @@ async function loadDeliveries(append = false) {
     ? mergeById(state.deliveries, pageItems(page))
     : pageItems(page);
   state.deliveryCursor = page.nextCursor;
+  state.deliveryTotal = page.total ?? state.deliveries.length;
+  elements.deliveryTabCount.textContent = state.deliveryTotal;
   renderDeliveries(state.deliveries);
 }
 async function loadAlertHistory(append = false) {
@@ -646,6 +649,7 @@ async function load(preserveLoadedHistory = false) {
       : mergeById(activeOccurrences, pageItems(occurrences));
     state.notifiers = pageItems(notifiers);
     state.deliveries = pageItems(deliveryPage);
+    state.deliveryTotal = deliveryPage.total ?? state.deliveries.length;
     state.deliveryCursor = deliveryPage.nextCursor;
     const previousHistoryCursor = state.alertHistoryCursor;
     state.alertHistory = preserveLoadedHistory
@@ -665,7 +669,7 @@ async function load(preserveLoadedHistory = false) {
         (item) => !["delivered", "failed_terminal"].includes(item.state),
       ).length;
     elements.pendingCount.textContent = pendingDeliveryCount;
-    elements.deliveryTabCount.textContent = pendingDeliveryCount;
+    elements.deliveryTabCount.textContent = state.deliveryTotal;
     elements.connectivityNote.textContent = status.connectivity?.state
       ? `${status.health?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
       : "delivery intents waiting";

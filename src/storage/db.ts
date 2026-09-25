@@ -1663,6 +1663,10 @@ export class AlertDatabase {
 
   queryDeliveries(limit = 30, cursor?: string): DeliveryPage {
     const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    const total = Number(
+      (this.db.prepare("SELECT COUNT(*) AS count FROM deliveries").get() as Row)
+        .count ?? 0,
+    );
     let cursorPriority: number | undefined;
     let cursorRowId: number | undefined;
     if (cursor) {
@@ -1674,7 +1678,7 @@ export class AlertDatabase {
            FROM deliveries WHERE id=?`,
         )
         .get(cursor) as Row | undefined;
-      if (!row) return { items: [] };
+      if (!row) return { items: [], total };
       cursorPriority = Number(row.priority);
       cursorRowId = Number(row.rowid);
     }
@@ -1701,6 +1705,7 @@ export class AlertDatabase {
     return {
       items: selected,
       nextCursor: rows.length > boundedLimit ? selected.at(-1)?.id : undefined,
+      total,
     };
   }
 

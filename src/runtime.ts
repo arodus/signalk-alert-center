@@ -955,6 +955,7 @@ export class AlertCenterRuntime {
         return {
           items: page.items.map((delivery) => this.deliveryView(delivery)),
           nextCursor: page.nextCursor,
+          total: page.total,
         };
       },
       getDelivery: (id) => {

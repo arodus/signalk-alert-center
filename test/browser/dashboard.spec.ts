@@ -168,11 +168,12 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
         });
       if (url.pathname.endsWith("/delivery-1"))
         return route.fulfill({ json: delivery });
-      return route.fulfill({ json: { items: [delivery] } });
+      return route.fulfill({ json: { items: [delivery], total: 7 } });
     },
   );
 
   await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#delivery-tab-count")).toHaveText("7");
   await expect(page.locator("#alerts-panel")).toBeVisible();
   await expect(page.locator("#deliveries-panel")).toBeHidden();
   await page.getByRole("tab", { name: /Deliveries/ }).click();

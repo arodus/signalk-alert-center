@@ -192,6 +192,7 @@ export interface DeliveryAttemptRecord {
 export interface DeliveryPage {
   items: DeliveryRecord[];
   nextCursor?: string;
+  total: number;
 }
 
 export interface DeliveryAttemptPage {
