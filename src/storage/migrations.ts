@@ -208,3 +208,41 @@ export function migrateLegacyRepeatSchema(database: DatabaseSync): boolean {
     throw error;
   }
 }
+
+/** Adds durable Wyoming playback outcomes to the immediately preceding schema. */
+export function migrateWyomingPlaybackSchema(database: DatabaseSync): boolean {
+  if (
+    !tableExists(database, "deliveries") ||
+    tableExists(database, "wyoming_playbacks")
+  )
+    return false;
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec(`
+      CREATE TABLE wyoming_playbacks (
+        announcement_id TEXT PRIMARY KEY,
+        delivery_id TEXT NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        request_id TEXT,
+        state TEXT NOT NULL,
+        targets_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        terminal_at TEXT,
+        UNIQUE(delivery_id, kind)
+      );
+      CREATE INDEX wyoming_playbacks_delivery_idx
+        ON wyoming_playbacks(delivery_id, kind);
+      CREATE INDEX wyoming_playbacks_state_idx
+        ON wyoming_playbacks(state, updated_at);
+    `);
+    const foreignKeyErrors = database.prepare("PRAGMA foreign_key_check").all();
+    if (foreignKeyErrors.length)
+      throw new Error("Wyoming playback migration failed a foreign-key check");
+    database.exec("COMMIT");
+    return true;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}

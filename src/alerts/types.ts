@@ -200,6 +200,38 @@ export interface DeliveryAttemptRecord {
   remoteId?: string;
 }
 
+export type WyomingPlaybackState =
+  | "queued"
+  | "playing"
+  | "played"
+  | "suppressed"
+  | "cancelled"
+  | "interrupted"
+  | "failed"
+  | "unknown"
+  | "partial";
+
+export interface WyomingPlaybackTargetRecord {
+  state: Exclude<WyomingPlaybackState, "partial">;
+  queuedAt?: Date;
+  startedAt?: Date;
+  finishedAt?: Date;
+  error?: string;
+}
+
+/** Playback confirmation is distinct from notifier delivery acceptance. */
+export interface WyomingPlaybackRecord {
+  announcementId: string;
+  deliveryId: string;
+  kind: "sound" | "speech";
+  requestId?: string;
+  state: WyomingPlaybackState;
+  targets: Record<string, WyomingPlaybackTargetRecord>;
+  createdAt: Date;
+  updatedAt: Date;
+  terminalAt?: Date;
+}
+
 export interface DeliveryPage {
   items: DeliveryRecord[];
   nextCursor?: string;

@@ -18,9 +18,14 @@ import {
   OccurrencePage,
   OccurrenceQuery,
   severityRank,
+  WyomingPlaybackRecord,
+  WyomingPlaybackState,
 } from "../alerts/types";
 import { currentSchemaVersion, schema } from "./schema";
-import { migrateLegacyRepeatSchema } from "./migrations";
+import {
+  migrateLegacyRepeatSchema,
+  migrateWyomingPlaybackSchema,
+} from "./migrations";
 
 type Row = Record<string, unknown>;
 
@@ -43,6 +48,24 @@ export interface DatabaseOperationalStatus {
   nextWakeAt?: Date;
   services: ServiceOperationalStatus[];
   error?: string;
+}
+
+export interface WyomingPlaybackSnapshotInput {
+  id: string;
+  requestId?: string;
+  state: WyomingPlaybackState;
+  createdAt?: number;
+  updatedAt?: number;
+  targets?: Record<
+    string,
+    {
+      state: Exclude<WyomingPlaybackState, "partial">;
+      queuedAt?: number;
+      startedAt?: number;
+      finishedAt?: number;
+      error?: string;
+    }
+  >;
 }
 const date = (value: unknown): Date | undefined =>
   value ? new Date(String(value)) : undefined;
@@ -124,6 +147,51 @@ const deliveryAttemptRecord = (row: Row): DeliveryAttemptRecord => ({
   remoteId: row.remote_id ? String(row.remote_id) : undefined,
 });
 
+const terminalWyomingPlaybackStates = new Set<WyomingPlaybackState>([
+  "played",
+  "suppressed",
+  "cancelled",
+  "interrupted",
+  "failed",
+  "unknown",
+  "partial",
+]);
+
+const wyomingPlaybackRecord = (row: Row): WyomingPlaybackRecord => {
+  const targets = (json(row.targets_json) ?? {}) as Record<
+    string,
+    {
+      state: WyomingPlaybackRecord["targets"][string]["state"];
+      queuedAt?: string;
+      startedAt?: string;
+      finishedAt?: string;
+      error?: string;
+    }
+  >;
+  return {
+    announcementId: String(row.announcement_id),
+    deliveryId: String(row.delivery_id),
+    kind: row.kind as WyomingPlaybackRecord["kind"],
+    requestId: row.request_id ? String(row.request_id) : undefined,
+    state: row.state as WyomingPlaybackState,
+    targets: Object.fromEntries(
+      Object.entries(targets).map(([id, target]) => [
+        id,
+        {
+          state: target.state,
+          queuedAt: date(target.queuedAt),
+          startedAt: date(target.startedAt),
+          finishedAt: date(target.finishedAt),
+          error: target.error,
+        },
+      ]),
+    ),
+    createdAt: new Date(String(row.created_at)),
+    updatedAt: new Date(String(row.updated_at)),
+    terminalAt: date(row.terminal_at),
+  };
+};
+
 const alertHistoryRecord = (row: Row): AlertHistoryRecord => {
   const payload = json(row.payload_json);
   const payloadRecord =
@@ -178,6 +246,7 @@ export class AlertDatabase {
     this.db = new DatabaseSync(filename);
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     const repeatMigrationApplied = migrateLegacyRepeatSchema(this.db);
+    const playbackMigrationApplied = migrateWyomingPlaybackSchema(this.db);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.exec(schema);
@@ -198,7 +267,10 @@ export class AlertDatabase {
       );
       const soundMigrationApplied = soundMigrationResults.some(Boolean);
       this.db.exec("COMMIT");
-      this.migrationApplied = repeatMigrationApplied || soundMigrationApplied;
+      this.migrationApplied =
+        repeatMigrationApplied ||
+        playbackMigrationApplied ||
+        soundMigrationApplied;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -214,6 +286,7 @@ export class AlertDatabase {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
+        "wyoming_playbacks",
         "delivery_attempts",
         "deliveries",
         "wake_requests",
@@ -1956,6 +2029,153 @@ export class AlertDatabase {
             .all()
     ) as Row[];
     return rows.map(deliveryAttemptRecord);
+  }
+
+  recordWyomingPlayback(
+    deliveryId: string,
+    kind: WyomingPlaybackRecord["kind"],
+    snapshot: WyomingPlaybackSnapshotInput,
+    now = new Date(),
+  ): WyomingPlaybackRecord {
+    const createdAt =
+      snapshot.createdAt !== undefined ? new Date(snapshot.createdAt) : now;
+    const updatedAt =
+      snapshot.updatedAt !== undefined ? new Date(snapshot.updatedAt) : now;
+    const terminalAt = terminalWyomingPlaybackStates.has(snapshot.state)
+      ? updatedAt
+      : undefined;
+    const targets = Object.fromEntries(
+      Object.entries(snapshot.targets ?? {}).map(([id, target]) => [
+        id,
+        {
+          state: target.state,
+          ...(target.queuedAt !== undefined
+            ? { queuedAt: new Date(target.queuedAt).toISOString() }
+            : {}),
+          ...(target.startedAt !== undefined
+            ? { startedAt: new Date(target.startedAt).toISOString() }
+            : {}),
+          ...(target.finishedAt !== undefined
+            ? { finishedAt: new Date(target.finishedAt).toISOString() }
+            : {}),
+          ...(target.error ? { error: target.error.slice(0, 500) } : {}),
+        },
+      ]),
+    );
+    this.db
+      .prepare(
+        `INSERT INTO wyoming_playbacks
+          (announcement_id, delivery_id, kind, request_id, state, targets_json,
+           created_at, updated_at, terminal_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(delivery_id, kind) DO UPDATE SET
+          announcement_id=excluded.announcement_id,
+          request_id=excluded.request_id,
+          state=excluded.state,
+          targets_json=excluded.targets_json,
+          created_at=excluded.created_at,
+          updated_at=excluded.updated_at,
+          terminal_at=excluded.terminal_at`,
+      )
+      .run(
+        snapshot.id,
+        deliveryId,
+        kind,
+        snapshot.requestId ?? null,
+        snapshot.state,
+        JSON.stringify(targets),
+        createdAt.toISOString(),
+        updatedAt.toISOString(),
+        terminalAt?.toISOString() ?? null,
+      );
+    return this.getWyomingPlayback(snapshot.id)!;
+  }
+
+  getWyomingPlayback(
+    announcementId: string,
+  ): WyomingPlaybackRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM wyoming_playbacks WHERE announcement_id=?")
+      .get(announcementId) as Row | undefined;
+    return row ? wyomingPlaybackRecord(row) : undefined;
+  }
+
+  listWyomingPlaybacks(deliveryId: string): WyomingPlaybackRecord[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM wyoming_playbacks WHERE delivery_id=? ORDER BY CASE kind WHEN 'sound' THEN 0 ELSE 1 END",
+        )
+        .all(deliveryId) as Row[]
+    ).map(wyomingPlaybackRecord);
+  }
+
+  listIncompleteWyomingPlaybacks(): WyomingPlaybackRecord[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM wyoming_playbacks WHERE state IN ('queued', 'playing') ORDER BY updated_at",
+        )
+        .all() as Row[]
+    ).map(wyomingPlaybackRecord);
+  }
+
+  listWyomingDeliveryCandidates(
+    transportInstanceIds: string[],
+  ): DeliveryRecord[] {
+    if (!transportInstanceIds.length) return [];
+    const placeholders = transportInstanceIds.map(() => "?").join(",");
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM deliveries
+           WHERE transport_instance_id IN (${placeholders})
+             AND remote_id IS NOT NULL
+           ORDER BY updated_at DESC`,
+        )
+        .all(...transportInstanceIds) as Row[]
+    ).map(deliveryRecord);
+  }
+
+  markWyomingPlaybackUnknown(
+    announcementId: string,
+    message: string,
+    now = new Date(),
+  ): WyomingPlaybackRecord | undefined {
+    const current = this.getWyomingPlayback(announcementId);
+    if (!current || terminalWyomingPlaybackStates.has(current.state))
+      return current;
+    return this.recordWyomingPlayback(
+      current.deliveryId,
+      current.kind,
+      {
+        id: current.announcementId,
+        requestId: current.requestId,
+        state: "unknown",
+        createdAt: current.createdAt.getTime(),
+        updatedAt: now.getTime(),
+        targets: Object.fromEntries(
+          Object.entries(current.targets).map(([id, target]) => [
+            id,
+            terminalWyomingPlaybackStates.has(target.state)
+              ? {
+                  ...target,
+                  queuedAt: target.queuedAt?.getTime(),
+                  startedAt: target.startedAt?.getTime(),
+                  finishedAt: target.finishedAt?.getTime(),
+                }
+              : {
+                  state: "unknown" as const,
+                  queuedAt: target.queuedAt?.getTime(),
+                  startedAt: target.startedAt?.getTime(),
+                  finishedAt: now.getTime(),
+                  error: message,
+                },
+          ]),
+        ),
+      },
+      now,
+    );
   }
 
   queryDeliveryAttempts(

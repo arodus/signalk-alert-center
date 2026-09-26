@@ -523,4 +523,144 @@ describe("AlertCenterRuntime", () => {
       await runtime.stop();
     }
   });
+
+  it("persists Wyoming playback events separately from accepted delivery", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-wyoming-runtime-"));
+    directories.push(directory);
+    let notificationSubscriber: ((delta: unknown) => void) | undefined;
+    let announcementListener:
+      | ((event: {
+          sequence: number;
+          at: number;
+          announcementId: string;
+          state: "played";
+        }) => void)
+      | undefined;
+    const snapshots = new Map<string, Record<string, unknown>>();
+    const announcementApi = {
+      version: 1 as const,
+      announce: vi.fn(async (request: { requestId?: string }) => {
+        const snapshot = {
+          id: "sound-1",
+          requestId: request.requestId,
+          state: "queued" as const,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          targets: { salon: { state: "queued" as const } },
+        };
+        snapshots.set(snapshot.id, snapshot);
+        return snapshot;
+      }),
+      getAnnouncement: (id: string) => snapshots.get(id),
+      onAnnouncementEvent: (listener: typeof announcementListener) => {
+        announcementListener = listener;
+        return vi.fn();
+      },
+    };
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(() => ({})),
+      selfContext: "vessels.self",
+      setPluginStatus: vi.fn(),
+      onPropertyValues: (
+        _name: string,
+        callback: (history: Array<{ value: unknown }>) => void,
+      ) => {
+        callback([{ value: announcementApi }]);
+        return vi.fn();
+      },
+      subscriptionmanager: {
+        subscribe: (
+          _command: unknown,
+          unsubscribes: Array<() => void>,
+          _onError: (error: unknown) => void,
+          callback: (delta: unknown) => void,
+        ) => {
+          notificationSubscriber = callback;
+          unsubscribes.push(vi.fn());
+        },
+      },
+    } as unknown as ServerAPI;
+    const runtime = new AlertCenterRuntime(app);
+    runtime.start({
+      notifiers: [{ name: "Cabin audio", type: "wyoming" }],
+      defaults: {
+        minSeverity: "normal",
+        notifiers: ["Cabin audio"],
+        speechEnabled: false,
+      },
+    });
+    try {
+      notificationSubscriber?.({
+        updates: [
+          {
+            $source: "fixture",
+            values: [
+              {
+                path: "notifications.navigation.anchor",
+                value: { state: "alarm", message: "Anchor dragging" },
+              },
+            ],
+          },
+        ],
+      });
+      const repository = (
+        runtime as unknown as { repository(): AlertCenterRepository }
+      ).repository();
+      await vi.waitFor(async () => {
+        const page = (await repository.listDeliveries({ limit: 10 })) as Page<{
+          state: string;
+          playback: Array<{ state: string }>;
+        }>;
+        expect(page.items[0]).toMatchObject({
+          state: "delivered",
+          playback: [{ state: "queued" }],
+        });
+      });
+
+      const playedAt = Date.now();
+      snapshots.set("sound-1", {
+        ...snapshots.get("sound-1"),
+        state: "played",
+        updatedAt: playedAt,
+        targets: {
+          salon: {
+            state: "played",
+            queuedAt: playedAt - 100,
+            startedAt: playedAt - 50,
+            finishedAt: playedAt,
+          },
+        },
+      });
+      announcementListener?.({
+        sequence: 1,
+        at: playedAt,
+        announcementId: "sound-1",
+        state: "played",
+      });
+
+      const page = (await repository.listDeliveries({ limit: 10 })) as Page<{
+        state: string;
+        playback: Array<{
+          state: string;
+          terminalAt?: Date;
+          targets: Record<string, { state: string }>;
+        }>;
+      }>;
+      expect(page.items[0]).toMatchObject({
+        state: "delivered",
+        playback: [
+          {
+            state: "played",
+            terminalAt: new Date(playedAt),
+            targets: { salon: { state: "played" } },
+          },
+        ],
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
 });

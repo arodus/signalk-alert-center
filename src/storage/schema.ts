@@ -160,6 +160,24 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
 CREATE INDEX IF NOT EXISTS delivery_attempts_finished_idx
   ON delivery_attempts(finished_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS wyoming_playbacks (
+  announcement_id TEXT PRIMARY KEY,
+  delivery_id TEXT NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  request_id TEXT,
+  state TEXT NOT NULL,
+  targets_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  terminal_at TEXT,
+  UNIQUE(delivery_id, kind)
+);
+
+CREATE INDEX IF NOT EXISTS wyoming_playbacks_delivery_idx
+  ON wyoming_playbacks(delivery_id, kind);
+CREATE INDEX IF NOT EXISTS wyoming_playbacks_state_idx
+  ON wyoming_playbacks(state, updated_at);
+
 CREATE TABLE IF NOT EXISTS wake_requests (
   alert_id TEXT PRIMARY KEY REFERENCES alert_occurrences(id) ON DELETE CASCADE,
   wake_due_at TEXT NOT NULL,

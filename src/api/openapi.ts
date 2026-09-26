@@ -708,6 +708,10 @@ export function getAlertCenterOpenApi() {
             lastErrorCode: { type: "string" },
             lastErrorMessage: { type: "string" },
             remoteId: { type: "string" },
+            playback: {
+              type: "array",
+              items: { $ref: "#/components/schemas/WyomingPlayback" },
+            },
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
             alert: { type: "object", additionalProperties: true },
@@ -733,6 +737,57 @@ export function getAlertCenterOpenApi() {
             errorCode: { type: "string" },
             errorMessage: { type: "string" },
             remoteId: { type: "string" },
+          },
+        },
+        WyomingPlayback: {
+          type: "object",
+          description:
+            "Durable Wyoming process-level playback confirmation. Played does not prove physical speaker audibility.",
+          required: [
+            "announcementId",
+            "deliveryId",
+            "kind",
+            "state",
+            "targets",
+            "createdAt",
+            "updatedAt",
+          ],
+          properties: {
+            announcementId: { type: "string" },
+            deliveryId: { type: "string" },
+            kind: { type: "string", enum: ["sound", "speech"] },
+            requestId: { type: "string" },
+            state: {
+              type: "string",
+              enum: [
+                "queued",
+                "playing",
+                "played",
+                "suppressed",
+                "cancelled",
+                "interrupted",
+                "failed",
+                "unknown",
+                "partial",
+              ],
+            },
+            targets: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                required: ["state"],
+                properties: {
+                  state: { type: "string" },
+                  queuedAt: { type: "string", format: "date-time" },
+                  startedAt: { type: "string", format: "date-time" },
+                  finishedAt: { type: "string", format: "date-time" },
+                  error: { type: "string" },
+                },
+              },
+            },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+            terminalAt: { type: "string", format: "date-time" },
           },
         },
         Event: {

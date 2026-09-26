@@ -94,7 +94,48 @@ describe("occurrence storage", () => {
         .all()
         .map((column) => (column as { name: string }).name),
     ).toContain("cycle");
+    expect(
+      db.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='wyoming_playbacks'",
+        )
+        .all(),
+    ).toHaveLength(1);
     expect(db.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("adds durable Wyoming playback storage to the preceding schema", () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-playback-schema-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const previousSchema = schema.replace(
+      /CREATE TABLE IF NOT EXISTS wyoming_playbacks[\s\S]*?ON wyoming_playbacks\(state, updated_at\);\n/,
+      "",
+    );
+    const existing = new DatabaseSync(filename);
+    existing.exec(previousSchema);
+    existing.close();
+
+    const migrated = new AlertDatabase(filename);
+    databases.push(migrated);
+
+    expect(migrated.migrationApplied).toBe(true);
+    expect(
+      migrated.db
+        .prepare("PRAGMA table_info(wyoming_playbacks)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toEqual(
+      expect.arrayContaining([
+        "announcement_id",
+        "delivery_id",
+        "kind",
+        "state",
+        "targets_json",
+        "terminal_at",
+      ]),
+    );
+    expect(migrated.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   it("adds Wyoming policy columns without losing an existing database", () => {

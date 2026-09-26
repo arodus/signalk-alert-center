@@ -445,14 +445,20 @@ function renderDeliveries(deliveries) {
               ? `Last attempt ${formatDate(delivery.lastAttemptAt)}`
               : `Queued ${formatDate(delivery.createdAt)}`;
             const outcomeTime = delivery.deliveredAt
-              ? `Delivered ${formatDate(delivery.deliveredAt)}`
+              ? `${service.type === "wyoming" ? "Accepted" : "Delivered"} ${formatDate(delivery.deliveredAt)}`
               : delivery.nextAttemptAt
                 ? `Next retry ${formatDate(delivery.nextAttemptAt)}`
                 : "No retry scheduled";
+            const playback = (delivery.playback ?? [])
+              .map(
+                (item) =>
+                  `${item.kind} ${String(item.state).replaceAll("_", " ")}`,
+              )
+              .join(" · ");
             return `<tr class="clickable-row delivery-row" data-delivery-id="${escapeHtml(delivery.id)}" tabindex="0" aria-label="Open delivery for ${escapeHtml(alertTitle)}">
               <td data-label="Alert"><strong class="cell-title">${escapeHtml(alertTitle)}</strong><span class="cell-detail">${escapeHtml(alert.path ?? "Occurrence unavailable")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</span></td>
               <td data-label="Service"><strong class="cell-title">${escapeHtml(service.name ?? delivery.transportInstanceId)}</strong><span class="cell-detail">${escapeHtml(service.type ?? "unknown service")} · ${escapeHtml(delivery.operation ?? "notify")}${delivery.cycle > 1 ? ` · repeat ${delivery.cycle - 1}` : ""}</span></td>
-              <td data-label="Status"><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span>${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
+              <td data-label="Status"><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span>${playback ? `<span class="cell-detail">Playback: ${escapeHtml(playback)}</span>` : ""}${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
               <td data-label="Timing"><span class="cell-title">${escapeHtml(primaryTime)}</span><span class="cell-detail">${escapeHtml(outcomeTime)}</span>${delivery.lastErrorMessage ? `<span class="cell-detail compact-detail error-detail" title="${escapeHtml(delivery.lastErrorMessage)}">${escapeHtml(delivery.lastErrorMessage)}</span>` : ""}</td>
               <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail">Can retry</span>' : ""}</td>
             </tr>`;
@@ -470,6 +476,25 @@ function renderDeliveries(deliveries) {
       }
     });
   });
+}
+
+function renderPlaybackDetails(playbacks = []) {
+  if (!playbacks.length) return "";
+  return `<section class="playback-details"><h3>Wyoming playback</h3><p class="cell-detail">“Played” confirms completion reported by the satellite process; it cannot prove that the physical speaker was audible.</p>${playbacks
+    .map((playback) => {
+      const targets = Object.entries(playback.targets ?? {});
+      return `<article class="playback-item"><div class="playback-heading"><strong>${escapeHtml(playback.kind === "sound" ? "Notification sound" : "Spoken alert")}</strong><span class="status-pill playback-${escapeHtml(playback.state)}">${escapeHtml(String(playback.state).replaceAll("_", " "))}</span></div><p class="cell-detail">Announcement ${escapeHtml(playback.announcementId)} · updated ${formatDate(playback.updatedAt)}</p>${
+        targets.length
+          ? `<dl class="playback-targets">${targets
+              .map(
+                ([satellite, target]) =>
+                  `<div><dt>${escapeHtml(satellite)}</dt><dd><span class="status-pill playback-${escapeHtml(target.state)}">${escapeHtml(String(target.state).replaceAll("_", " "))}</span>${target.finishedAt || target.startedAt || target.queuedAt ? `<time>${formatDate(target.finishedAt ?? target.startedAt ?? target.queuedAt)}</time>` : ""}${target.error ? `<span class="error-detail">${escapeHtml(target.error)}</span>` : ""}</dd></div>`,
+              )
+              .join("")}</dl>`
+          : '<p class="cell-detail">No per-satellite result was retained.</p>'
+      }</article>`;
+    })
+    .join("")}</section>`;
 }
 function eventLabel(eventType) {
   return String(eventType ?? "updated").replaceAll("_", " ");
@@ -756,7 +781,7 @@ function renderDeliveryDetail(delivery) {
     delivery.state,
   );
   elements.deliveryDialogTitle.textContent = alertTitle;
-  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span></dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>Delivered</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(delivery.remoteId ?? "—")}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}`;
+  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span></dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>${service.type === "wyoming" ? "Accepted" : "Delivered"}</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(delivery.remoteId ?? "—")}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}${renderPlaybackDetails(delivery.playback)}`;
   elements.deliveryRetry.hidden = !retryable;
   elements.deliveryRetry.dataset.id = delivery.id;
 }

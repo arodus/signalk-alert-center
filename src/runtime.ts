@@ -47,7 +47,12 @@ import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
 import { TelegramTransport } from "./transports/telegram";
 import { NotificationTransport } from "./transports/transport";
-import { WyomingAnnouncementApi, WyomingTransport } from "./transports/wyoming";
+import {
+  WyomingAnnouncementApi,
+  WyomingAnnouncementContent,
+  WyomingAnnouncementSnapshot,
+  WyomingTransport,
+} from "./transports/wyoming";
 import {
   NotificationTestOperation,
   NotificationTestResult,
@@ -110,6 +115,7 @@ export class AlertCenterRuntime {
   private notifierTests = new Set<string>();
   private wyomingApi?: WyomingAnnouncementApi;
   private wyomingUnsubscribe?: () => void;
+  private wyomingAnnouncementUnsubscribe?: () => void;
   private changeRevision = 0;
   private changeListeners = new Set<(change: AlertCenterChange) => void>();
   private retentionState?: {
@@ -338,6 +344,8 @@ export class AlertCenterRuntime {
   private async runScheduler(): Promise<void> {
     const repeatsCreated = this.database?.processDueRepeats() ?? 0;
     const summary = await this.scheduler?.runOnce();
+    if (summary?.processed && this.wyomingApi)
+      this.reconcileWyomingAnnouncements(this.wyomingApi);
     if (summary?.processed) {
       const message = `Delivery batch: processed=${summary.processed}, succeeded=${summary.succeeded}, retryableFailures=${summary.retryableFailures}, terminalFailures=${summary.terminalFailures}`;
       if (summary.retryableFailures || summary.terminalFailures)
@@ -677,6 +685,7 @@ export class AlertCenterRuntime {
         .listDeliveriesForAlert(occurrence.id)
         .map((delivery) => ({
           ...delivery,
+          playback: this.db().listWyomingPlaybacks(delivery.id),
           ...(includeAttempts
             ? { attempts: this.db().listDeliveryAttempts(delivery.id) }
             : {}),
@@ -701,6 +710,7 @@ export class AlertCenterRuntime {
     );
     return {
       ...delivery,
+      playback: this.db().listWyomingPlaybacks(delivery.id),
       alert:
         delivery.alert ??
         (occurrence
@@ -721,6 +731,64 @@ export class AlertCenterRuntime {
         type: notifier?.type ?? "unknown",
       },
     };
+  }
+
+  private recordWyomingAnnouncement(
+    deliveryId: string,
+    kind: WyomingAnnouncementContent["kind"],
+    snapshot: WyomingAnnouncementSnapshot,
+  ): void {
+    if (!this.database) return;
+    this.database.recordWyomingPlayback(deliveryId, kind, snapshot);
+    this.emitChange("wyoming_playback");
+  }
+
+  private reconcileWyomingAnnouncements(api: WyomingAnnouncementApi): void {
+    if (!this.database || !api.getAnnouncement) return;
+    const notifierIds = (this.config.notifiers ?? [])
+      .filter(
+        (notifier) => notifier.enabled !== false && notifier.type === "wyoming",
+      )
+      .map((notifier) => notifier.name);
+    for (const delivery of this.database.listWyomingDeliveryCandidates(
+      notifierIds,
+    )) {
+      for (const value of delivery.remoteId?.split(",") ?? []) {
+        const separator = value.indexOf(":");
+        const kind = value.slice(0, separator);
+        const announcementId = value.slice(separator + 1);
+        if (
+          separator < 1 ||
+          (kind !== "sound" && kind !== "speech") ||
+          !announcementId
+        )
+          continue;
+        const snapshot = api.getAnnouncement(announcementId);
+        if (snapshot)
+          this.database.recordWyomingPlayback(delivery.id, kind, snapshot);
+        else if (!this.database.getWyomingPlayback(announcementId))
+          this.database.recordWyomingPlayback(delivery.id, kind, {
+            id: announcementId,
+            state: "unknown",
+            targets: {},
+          });
+      }
+    }
+    for (const playback of this.database.listIncompleteWyomingPlaybacks()) {
+      const snapshot = api.getAnnouncement(playback.announcementId);
+      if (snapshot)
+        this.database.recordWyomingPlayback(
+          playback.deliveryId,
+          playback.kind,
+          snapshot,
+        );
+      else
+        this.database.markWyomingPlaybackUnknown(
+          playback.announcementId,
+          "signalk-wyoming no longer has this announcement after restart",
+        );
+    }
+    this.emitChange("wyoming_playback");
   }
 
   private page<T extends { id: string }>(
@@ -1078,8 +1146,26 @@ export class AlertCenterRuntime {
               ),
             );
           if (!candidate) return;
+          this.wyomingAnnouncementUnsubscribe?.();
           this.wyomingApi = candidate;
+          this.wyomingAnnouncementUnsubscribe = candidate.onAnnouncementEvent?.(
+            (event) => {
+              const playback = this.database?.getWyomingPlayback(
+                event.announcementId,
+              );
+              const snapshot = candidate.getAnnouncement?.(
+                event.announcementId,
+              );
+              if (playback && snapshot)
+                this.recordWyomingAnnouncement(
+                  playback.deliveryId,
+                  playback.kind,
+                  snapshot,
+                );
+            },
+          );
           this.debug("Connected to signalk-wyoming announcement API");
+          this.reconcileWyomingAnnouncements(candidate);
           this.requestDeliveryRun();
         },
       );
@@ -1126,6 +1212,8 @@ export class AlertCenterRuntime {
             voice: notifier.voice,
             urgentAt: notifier.urgentAt,
             sounds: notifier.sounds,
+            onAnnouncement: (deliveryId, kind, snapshot) =>
+              this.recordWyomingAnnouncement(deliveryId, kind, snapshot),
             definitionName: (definitionId) => {
               if (!definitionId) return undefined;
               try {
@@ -1388,6 +1476,8 @@ export class AlertCenterRuntime {
     this.unsubscribe = undefined;
     this.wyomingUnsubscribe?.();
     this.wyomingUnsubscribe = undefined;
+    this.wyomingAnnouncementUnsubscribe?.();
+    this.wyomingAnnouncementUnsubscribe = undefined;
     this.wyomingApi = undefined;
     if (this.startupImmediate) clearImmediate(this.startupImmediate);
     if (this.ingestionImmediate) clearImmediate(this.ingestionImmediate);

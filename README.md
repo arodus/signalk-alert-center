@@ -486,8 +486,14 @@ and `{state}`; rendered text is limited to 500 characters.
 
 Alert Center uses the in-process `signalk-wyoming.announcements.api` version 1
 interface. It does not invoke Piper directly, run shell commands, or use browser
-speech. A delivery is complete when signalk-wyoming confirms that it queued each
-announcement, not when the speaker finishes playing it. Normal announcements
+speech. A delivery is complete when signalk-wyoming confirms that it accepted each
+announcement. Alert Center separately follows and durably records each sound and
+speech announcement through queued, playing, and its terminal aggregate and
+per-satellite states. These outcomes survive Alert Center restarts; if Wyoming
+restarts before confirming an in-flight announcement, its outcome is recorded as
+unknown rather than silently treated as played. A `played` result confirms
+completion reported by the satellite process, not that the physical speaker was
+audible. Normal announcements
 suppressed by Wyoming mute are recorded as intentionally completed so they are not
 replayed much later. Stable request IDs make retries idempotent: if the sound was
 accepted but queuing speech failed, the delivery retry does not replay that sound.

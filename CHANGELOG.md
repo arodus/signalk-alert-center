@@ -5,6 +5,9 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Persist and display aggregate and per-satellite signalk-wyoming playback
+  outcomes separately from notification delivery acceptance, including restart
+  reconciliation and explicit unknown results when confirmation is lost.
 - Added signalk-wyoming notification sounds with a configurable sound for every
   alert severity, per-alert sound overrides, and independent per-alert sound and
   speech switches. When both are enabled, the sound is queued before speech.

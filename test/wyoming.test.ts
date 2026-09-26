@@ -234,10 +234,18 @@ describe("WyomingTransport", () => {
     const announce = vi.fn().mockResolvedValue({
       id: "speech-1",
       state: "queued",
+      requestId: "tracked-request",
+      createdAt: now.getTime(),
+      updatedAt: now.getTime(),
+      targets: {
+        salon: { state: "queued", queuedAt: now.getTime() },
+      },
     });
     const transport = new WyomingTransport({
       api: () => ({ version: 1, announce }),
       definitionName: () => "Anchor alarm",
+      onAnnouncement: (deliveryId, kind, snapshot) =>
+        database.recordWyomingPlayback(deliveryId, kind, snapshot),
     });
     const occurrence = database.ingest(
       {
@@ -270,6 +278,19 @@ describe("WyomingTransport", () => {
         operation: "trigger",
         state: "delivered",
         remoteId: "speech:speech-1",
+      },
+    ]);
+    expect(
+      database.listWyomingPlaybacks(
+        database.listDeliveriesForAlert(occurrence.id)[0]!.id,
+      ),
+    ).toMatchObject([
+      {
+        announcementId: "speech-1",
+        kind: "speech",
+        requestId: "tracked-request",
+        state: "queued",
+        targets: { salon: { state: "queued", queuedAt: now } },
       },
     ]);
     expect(announce).toHaveBeenCalledWith(

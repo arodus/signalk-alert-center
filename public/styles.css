@@ -1070,6 +1070,66 @@ dialog input[type="checkbox"] {
   color: #8c2927;
   background: #fae6e3;
 }
+.status-pill.playback-playing,
+.status-pill.playback-queued {
+  color: #8b5a0b;
+  background: #fff0d4;
+}
+.status-pill.playback-failed,
+.status-pill.playback-interrupted,
+.status-pill.playback-cancelled,
+.status-pill.playback-unknown,
+.status-pill.playback-partial {
+  color: #8c2927;
+  background: #fae6e3;
+}
+.playback-details {
+  margin-top: 22px;
+}
+.playback-details h3 {
+  margin-bottom: 6px;
+}
+.playback-item {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.playback-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.playback-targets {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.playback-targets div {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(150px, 2fr);
+  gap: 10px;
+  align-items: start;
+}
+.playback-targets dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  margin: 0;
+}
+.playback-targets time,
+.playback-targets .error-detail {
+  font-size: 0.8rem;
+}
+@media (max-width: 520px) {
+  .playback-targets div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
 .empty {
   padding: 34px 20px;
   border: 1px dashed var(--line);

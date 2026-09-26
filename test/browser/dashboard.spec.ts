@@ -204,6 +204,77 @@ test("shows an empty Deliveries tab", async ({ page }) => {
   );
 });
 
+test("shows tracked Wyoming aggregate and satellite playback", async ({
+  page,
+}) => {
+  const delivery = {
+    id: "wyoming-delivery-1",
+    alertId: "occurrence-audio",
+    transportInstanceId: "Cabin audio",
+    operation: "trigger",
+    cycle: 1,
+    state: "delivered",
+    attemptCount: 1,
+    deliveredAt: "2026-09-10T12:01:00.000Z",
+    createdAt: "2026-09-10T12:00:00.000Z",
+    updatedAt: "2026-09-10T12:01:00.000Z",
+    remoteId: "sound:sound-1",
+    alert: {
+      occurrenceId: "occurrence-audio",
+      name: "Anchor alarm",
+      path: "notifications.navigation.anchor",
+      message: "Anchor dragging",
+    },
+    service: { id: "Cabin audio", name: "Cabin audio", type: "wyoming" },
+    playback: [
+      {
+        announcementId: "sound-1",
+        deliveryId: "wyoming-delivery-1",
+        kind: "sound",
+        state: "partial",
+        createdAt: "2026-09-10T12:00:59.000Z",
+        updatedAt: "2026-09-10T12:01:02.000Z",
+        terminalAt: "2026-09-10T12:01:02.000Z",
+        targets: {
+          salon: {
+            state: "played",
+            finishedAt: "2026-09-10T12:01:01.000Z",
+          },
+          bridge: {
+            state: "unknown",
+            finishedAt: "2026-09-10T12:01:02.000Z",
+            error: "connection closed before confirmation",
+          },
+        },
+      },
+    ],
+  };
+  await page.route(
+    /\/plugins\/signalk-alert-center\/deliveries(?:\/.*)?(?:\?.*)?$/,
+    (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/wyoming-delivery-1/attempts"))
+        return route.fulfill({ json: { items: [] } });
+      if (url.pathname.endsWith("/wyoming-delivery-1"))
+        return route.fulfill({ json: delivery });
+      return route.fulfill({ json: { items: [delivery] } });
+    },
+  );
+
+  await page.goto("/signalk-alert-center/#deliveries");
+  await expect(page.locator("#delivery-list")).toContainText(
+    "Playback: sound partial",
+  );
+  await page.locator("[data-delivery-id='wyoming-delivery-1']").click();
+  await expect(page.locator("#delivery-dialog-body")).toContainText(
+    "Played” confirms completion reported by the satellite process",
+  );
+  await expect(page.locator("#delivery-dialog-body")).toContainText("salon");
+  await expect(page.locator("#delivery-dialog-body")).toContainText(
+    "connection closed before confirmation",
+  );
+});
+
 test("surfaces authentication failures", async ({ page }) => {
   await page.route(`**${plugin}/**`, async (route) => {
     if (route.request().url().endsWith("/events")) return route.abort();

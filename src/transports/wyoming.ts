@@ -14,8 +14,19 @@ export type WyomingAnnouncementContent =
   | { kind: "sound"; soundId: string }
   | { kind: "speech"; text: string; voice?: string };
 
+export type WyomingTargetPlaybackState =
+  | "queued"
+  | "playing"
+  | "played"
+  | "suppressed"
+  | "cancelled"
+  | "interrupted"
+  | "failed"
+  | "unknown";
+
 export interface WyomingAnnouncementSnapshot {
   id: string;
+  requestId?: string;
   state:
     | "queued"
     | "playing"
@@ -26,7 +37,27 @@ export interface WyomingAnnouncementSnapshot {
     | "failed"
     | "unknown"
     | "partial";
-  targets?: Record<string, { state: string; error?: string }>;
+  createdAt?: number;
+  updatedAt?: number;
+  targets?: Record<
+    string,
+    {
+      state: WyomingTargetPlaybackState;
+      queuedAt?: number;
+      startedAt?: number;
+      finishedAt?: number;
+      error?: string;
+    }
+  >;
+}
+
+export interface WyomingAnnouncementEvent {
+  sequence: number;
+  at: number;
+  announcementId: string;
+  satellite?: string;
+  state: WyomingAnnouncementSnapshot["state"];
+  targetState?: WyomingTargetPlaybackState;
 }
 
 export interface WyomingAnnouncementApi {
@@ -37,6 +68,10 @@ export interface WyomingAnnouncementApi {
     targets?: string[];
     priority?: "normal" | "urgent";
   }): Promise<WyomingAnnouncementSnapshot>;
+  getAnnouncement?(id: string): WyomingAnnouncementSnapshot | undefined;
+  onAnnouncementEvent?(
+    listener: (event: WyomingAnnouncementEvent) => void,
+  ): () => void;
 }
 
 export interface WyomingTransportOptions {
@@ -46,6 +81,11 @@ export interface WyomingTransportOptions {
   urgentAt?: Severity;
   sounds?: Partial<Record<Severity, string>>;
   definitionName?: (definitionId: string | undefined) => string | undefined;
+  onAnnouncement?: (
+    deliveryId: string,
+    kind: WyomingAnnouncementContent["kind"],
+    snapshot: WyomingAnnouncementSnapshot,
+  ) => void;
 }
 
 const DEFAULT_TEMPLATE = "{name}. {severity}. {message}";
@@ -95,6 +135,10 @@ export class WyomingTransport implements NotificationTransport {
     priority: "normal" | "urgent",
     signal: AbortSignal,
     requestId?: string,
+    tracking?: {
+      deliveryId: string;
+      kind: WyomingAnnouncementContent["kind"];
+    },
   ): Promise<TransportResult> {
     if (signal.aborted)
       return {
@@ -127,6 +171,12 @@ export class WyomingTransport implements NotificationTransport {
       const snapshot = await Promise.race([request, aborted]).finally(() => {
         if (rejectOnAbort) signal.removeEventListener("abort", rejectOnAbort);
       });
+      if (tracking)
+        this.options.onAnnouncement?.(
+          tracking.deliveryId,
+          tracking.kind,
+          snapshot,
+        );
       if (acceptedStates.has(snapshot.state))
         return { kind: "success", remoteId: snapshot.id };
       const errors = Object.entries(snapshot.targets ?? {})
@@ -160,6 +210,10 @@ export class WyomingTransport implements NotificationTransport {
     priority: "normal" | "urgent",
     signal: AbortSignal,
     requestId?: string,
+    tracking?: {
+      deliveryId: string;
+      kind: WyomingAnnouncementContent["kind"];
+    },
   ): Promise<TransportResult> {
     return this.queue(
       {
@@ -172,6 +226,7 @@ export class WyomingTransport implements NotificationTransport {
       priority,
       signal,
       requestId,
+      tracking,
     );
   }
 
@@ -208,6 +263,7 @@ export class WyomingTransport implements NotificationTransport {
         priority,
         context.signal,
         `${delivery.id}:sound`,
+        { deliveryId: delivery.id, kind: "sound" },
       );
       if (sound.kind !== "success") return sound;
       if (sound.remoteId) remoteIds.push(`sound:${sound.remoteId}`);
@@ -218,6 +274,7 @@ export class WyomingTransport implements NotificationTransport {
         priority,
         context.signal,
         `${delivery.id}:speech`,
+        { deliveryId: delivery.id, kind: "speech" },
       );
       if (speech.kind !== "success") return speech;
       if (speech.remoteId) remoteIds.push(`speech:${speech.remoteId}`);
