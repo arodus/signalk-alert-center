@@ -8,11 +8,15 @@ Versioning while it remains pre-1.0.
 - Persist and display aggregate and per-satellite signalk-wyoming playback
   outcomes separately from notification delivery acceptance, including restart
   reconciliation and explicit unknown results when confirmation is lost.
+- Added complete Signal K App Store metadata, reproducible desktop and tablet
+  screenshots, privacy and first-run guidance, an operator-focused README, and a
+  separate developer guide.
 - Added signalk-wyoming notification sounds with a configurable sound for every
   alert severity, per-alert sound overrides, and independent per-alert sound and
   speech switches. When both are enabled, the sound is queued before speech.
-- Repeat-while-active policies now use a durable timer and continue repeating
-  even when the Signal K source sends no additional updates.
+- Repeat-while-active delivery is configured per notification service, persisted
+  across restarts, and continues while the Signal K alert remains active even if
+  its source sends no additional updates.
 - Added Telegram Bot API notifications with chat, forum-topic, silent-delivery,
   manual-test, and durable retry support.
 - Added signalk-wyoming as an optional notification service for durable spoken

@@ -1,7 +1,7 @@
 {
   "name": "signalk-alert-center",
   "version": "0.1.0",
-  "description": "Durable offline-first Signal K alert delivery plugin",
+  "description": "Persistent Signal K alert history with reliable offline delivery and optional Wyoming audio",
   "author": "Sebastian Karasek",
   "repository": {
     "type": "git",
@@ -17,6 +17,9 @@
     "dist",
     "public",
     "README.md",
+    "DEVELOPERS.md",
+    "CHANGELOG.md",
+    "docs",
     "LICENSE"
   ],
   "keywords": [
@@ -24,8 +27,18 @@
     "signalk-plugin-configurator",
     "signalk-webapp",
     "signalk-category-notifications",
+    "signalk-category-utility",
     "signalk",
-    "notifications"
+    "notifications",
+    "alert-center",
+    "alert-history",
+    "offline-first",
+    "ntfy",
+    "pagerduty",
+    "discord",
+    "telegram",
+    "wyoming",
+    "text-to-speech"
   ],
   "license": "MIT",
   "publishConfig": {
@@ -46,6 +59,7 @@
     "test:browser": "node test/browser/run.mjs",
     "test:browser:only": "playwright test",
     "test:restart": "node test/integration/restart.mjs",
+    "screenshots:store": "node scripts/capture-store-screenshots.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "npm run typecheck",
@@ -77,6 +91,14 @@
   "signalk": {
     "appIcon": "./icon-192.png",
     "displayName": "Signal K Alert Center",
+    "screenshots": [
+      "./docs/screenshots/alert-center-overview.png",
+      "./docs/screenshots/alert-details.png",
+      "./docs/screenshots/alert-settings.png",
+      "./docs/screenshots/delivery-history.png",
+      "./docs/screenshots/plugin-settings.png",
+      "./docs/screenshots/alert-center-tablet.png"
+    ],
     "recommends": [
       "signalk-piper",
       "signalk-wyoming"

@@ -1,4 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,6 +58,26 @@ requireValue(
   packageJson.signalk?.displayName === "Signal K Alert Center",
   "Signal K display name is required",
 );
+const screenshots = packageJson.signalk?.screenshots;
+requireValue(
+  Array.isArray(screenshots) &&
+    screenshots.length > 0 &&
+    screenshots.length <= 6,
+  "Signal K Store requires between one and six screenshots",
+);
+for (const screenshot of screenshots ?? []) {
+  const path = String(screenshot).replace(/^\.\//, "");
+  requireValue(
+    /^docs\/screenshots\/.+\.(?:png|jpg)$/i.test(path),
+    `Store screenshot must use a stable docs/screenshots path: ${screenshot}`,
+  );
+  requireValue(existsSync(path), `Store screenshot is missing: ${path}`);
+  if (existsSync(path))
+    requireValue(
+      statSync(path).size <= 500_000,
+      `Store screenshot exceeds 500 KB: ${path}`,
+    );
+}
 for (const optionalPlugin of ["signalk-piper", "signalk-wyoming"])
   requireValue(
     packageJson.signalk?.recommends?.includes(optionalPlugin),
@@ -101,6 +127,10 @@ if (packed.status !== 0) {
     for (const required of [
       "LICENSE",
       "README.md",
+      "DEVELOPERS.md",
+      "CHANGELOG.md",
+      "docs/STORE_LISTING.md",
+      "docs/screenshots/plugin-defaults.png",
       "package.json",
       "dist/plugin.js",
       "dist/plugin.d.ts",
@@ -110,10 +140,12 @@ if (packed.status !== 0) {
       "public/remoteEntry.js",
       "public/icon-192.png",
       "public/icon-512.png",
+      ...(screenshots ?? []).map((path) => path.replace(/^\.\//, "")),
     ])
       requireValue(paths.includes(required), `package is missing ${required}`);
 
-    const allowed = /^(LICENSE|README\.md|package\.json|dist\/|public\/)/;
+    const allowed =
+      /^(LICENSE|README\.md|DEVELOPERS\.md|CHANGELOG\.md|package\.json|dist\/|public\/|docs\/)/;
     for (const path of paths)
       requireValue(allowed.test(path), `unexpected packaged file: ${path}`);
 
