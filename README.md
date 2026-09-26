@@ -1,726 +1,206 @@
 # Signal K Alert Center
 
-<p align="center">
-  <img src="./public/icon-192.png" alt="Signal K Alert Center logo" width="144" height="144" />
-</p>
+Signal K Alert Center gives your boat one durable place for alarms and
+notifications. It keeps alert history across restarts, shows configured Signal K
+zones before they fire, and reliably forwards alerts even when the boat is
+temporarily offline.
 
-An offline-first Signal K plugin for durable alert delivery through optional
-notification services: ntfy, PagerDuty, Discord, Telegram, and spoken announcements
-through signalk-wyoming. Alert Center does not require any of these integrations. Alerts
-and independent per-service delivery rows are stored in SQLite before delivery
-begins.
+![Alert Center showing active alerts and defined zones](./docs/screenshots/alert-center-overview.png)
 
-## Alert center
+## Why use it?
 
-This project provides a persistent onboard notification center inspired by
-[Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player),
-with one alert list, retained event history, and offline remote delivery. It discovers
-Signal K `meta.zones` and incoming notification paths, including definitions that
-have never fired. Every raise/clear cycle
-is stored as a distinct occurrence, while duplicate updates within the cycle are
-coalesced. Clicking an occurrence opens its durable event and notifier history.
-PagerDuty trigger, acknowledge, and resolve operations are stored separately.
-A Signal K acknowledgement is forwarded after PagerDuty accepts the matching
-trigger. A Signal K `normal`, `nominal`, `cleared`, or null transition queues a resolve only after
-PagerDuty has accepted the matching occurrence trigger; all three operations'
-retries and attempt histories remain independent.
+Signal K normally exposes the current notification state. Alert Center adds the
+operational history and delivery tracking needed when alerts matter after the
+current value changes:
 
-One-time behavior is snapshotted when an occurrence starts. Every occurrence
-remains available in history, and a later raise creates a distinct occurrence.
-Per-definition settings cover enabled state, minimum severity, notifiers,
-activation delay, per-service repeat overrides, and connectivity mode.
+- **See what needs attention now.** Active alerts appear first in one compact
+  list alongside inactive discovered alerts and defined zones.
+- **Keep the full story.** Raises, meaningful updates, clears,
+  acknowledgements, silences, and delivery results remain available after a
+  restart.
+- **Configure each alert.** Choose its notification services, minimum severity,
+  activation delay, connectivity behavior, and per-service repeat interval.
+- **Deliver through unreliable connectivity.** Outbound work is stored before
+  sending. Each service retries independently, so one failure does not resend a
+  notification that another service already accepted.
+- **Use the services that fit your boat.** Alert Center supports ntfy,
+  PagerDuty, Discord, Telegram, and optional Signal K Wyoming sounds and spoken
+  announcements.
+- **Understand every delivery.** The delivery view shows the destination,
+  status, timing, retry attempts, and error details.
 
-Direct local playback is intentionally outside this plugin. The former playback
-implementation is preserved on the `archive/local-playback` branch. Spoken alerts
-are delegated to
-[signalk-wyoming](https://github.com/hoeken/signalk-wyoming), which performs
-text-to-speech through [signalk-piper](https://github.com/hoeken/signalk-piper)
-and routes audio to its configured satellites.
+## Alert Center
 
-See the [gap assessment and acceptance scenarios](IMPLEMENTATION_BRIEF.md#product-goal-and-gap-assessment-2026-09-06)
-for verified source findings, required behavior, and unresolved scope decisions.
+Open **Webapps → Signal K Alert Center** after enabling the plugin.
 
-## Signal K and Notification Player review
+The main table combines all known alert definitions:
 
-The target architecture follows Signal K's separation between definitions and
-events: `meta.zones` define alarm thresholds on ordinary vessel paths, while the
-server raises values below `notifications.*` and clears them with a null delta.
-The plugin must subscribe to those notification deltas and also reconcile the
-current notification subtree at startup. Delta `$source` and timestamp are part of
-occurrence identity and audit data, not optional display details.
+- Signal K paths that have been observed under `notifications.*`;
+- paths defined by Signal K `meta.zones`, even before they fire;
+- the current state and severity, with active alerts first.
 
-The implementation uses the current typed Signal K plugin surface and keeps the
-following boundaries explicit:
+Select an alert to see its latest occurrence, the five most recent occurrences,
+and its event history. **Acknowledge** and **Silence** use Signal K's notification
+API when the source supports those operations. They do not erase history or
+pretend the underlying condition has cleared.
 
-| Area            | Implemented behavior                                                                                                                                                                                                                                                 |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions     | Discovered Signal K zones and notification paths are durable and visible before they fire.                                                                                                                                                                           |
-| Ingestion       | An all-source subscription feeds one bounded worker. Equivalent pending updates coalesce, transitions stay ordered, and queue pressure is observable. `$source`, source time, receipt time, and raw values are persisted. Null/normal values clear an occurrence.    |
-| Identity        | Definitions, recurring occurrences, immutable events, notifier intents, and delivery attempts use separate tables.                                                                                                                                                   |
-| Stored removal  | Removing an inactive stored alert deletes its definition, per-alert settings, occurrences, history, deliveries, and related queued work. Signal K can rediscover it using current defaults.                                                                          |
-| Policy          | Durable per-definition overrides are edited in the dashboard and snapshotted onto new occurrences.                                                                                                                                                                   |
-| Delay and retry | Activation and retry deadlines are persisted, recovered after restart, and driven by timers derived from the database.                                                                                                                                               |
-| PagerDuty       | Each occurrence's trigger, acknowledgement, and resolve use the same stable dedup key. Signal K acknowledgements and clear/normal transitions are forwarded as distinct durable operations after PagerDuty accepts the trigger.                                      |
-| Telegram        | Bot API text messages support chats, channels, optional forum topics, silent delivery, durable retry, and manual service tests.                                                                                                                                      |
-| Local audio     | Selected Wyoming services use signalk-wyoming's in-process announcement API. Severity sounds, optional speech, lifecycle delivery state, and repeat deadlines are durable here; playback queues, mute, voice, and satellite routing remain owned by signalk-wyoming. |
-| API/UI security | Reads use read-only access, mutations use read-write access, browser requests include the Signal K session, and OpenAPI describes the complete surface.                                                                                                              |
+![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
-[Signal K Notification Player](https://github.com/davidsanner/signalk-notification-player)
-is a useful product reference: it discovers known/configured notifications, opens
-per-path recent history, and persists zone transitions. Its synchronous JSON log,
-large untyped single module, and mutable GET endpoints should not be copied. This
-plugin's SQLite occurrence/event model and authenticated REST mutations are the
-better base for durable remote delivery.
+### Per-alert settings
 
-## Dashboard behavior
+Select an alert, then choose **Alert settings**. Settings are inherited from the
+global defaults until you override them for that alert. Changes apply to future
+occurrences.
 
-The compact main view puts current alerts first and defaults to active alerts.
-It can switch to all known alert definitions. Multiple sources for the same path
-remain individually inspectable while active. Clicking a row opens its recent event
-and notifier-delivery history.
+You can configure:
 
-The same table also contains Signal K thresholds and notification paths learned from
-incoming data, including disabled and never-fired definitions when **All known
-alerts** is selected. The UI calls these learned entries “Discovered paths”;
-“discovered” is definition provenance, not a live alert state. Signal K zone metadata
-remains an input to definition discovery, but definitions are not grouped by zone.
-Each row opens current information and history and has a direct **Settings** action.
+- whether external notification delivery is enabled;
+- the lowest severity that should be sent;
+- how long the condition must remain active before sending;
+- which configured notification services receive it;
+- a repeat interval for each selected service;
+- what to do when internet connectivity is unavailable;
+- Wyoming notification sound and spoken-text behavior.
 
-The event timeline includes raised, message/severity changes, activation-delay
-expiry or suppression, clear, acknowledge, silence, policy actions,
-and every notifier attempt/outcome. History uses cursor-based pagination and filters
-for state and severity.
+![Per-alert delivery, sound, and speech settings](./docs/screenshots/alert-settings.png)
 
-The settings dialog provides **Remove stored alert** for inactive alerts. This is
-a destructive definition-level action: it deletes the alert's per-alert settings,
-all occurrences and events, delivery attempts, and related queued work.
-It never clears the upstream Signal K alert, so active alerts must be cleared at
-their source first. A zone or notification path still present in Signal K will be
-discovered again and will inherit the current global defaults.
+### Alert and delivery history
 
-The definition settings panel controls enabled state, notification services, minimum
-severity, connectivity mode, each selected service's repeat interval, and
-`activationDelaySeconds`. Overrides are stored by this plugin; Signal K
-`meta.zones` remain authoritative input metadata and are not rewritten. Settings
-apply to future occurrences by default so changing a policy does not silently
-change delivery already in progress.
+**Alert history** is a chronological record of Signal K alert changes. It is
+separate from **Deliveries**, which tracks attempts to send those alerts to
+notification services.
 
-An activation delay is different from `wake_after`:
+![Notification delivery history and retry status](./docs/screenshots/delivery-history.png)
 
-- `activationDelaySeconds`: notify only if the same occurrence remains active for
-  the configured duration. Persist the deadline; if it clears first, retain the
-  occurrence and record `suppressed_before_activation`, but create no remote
-  delivery.
-- `wake_after`: once a delivery is eligible, wait before requesting managed
-  connectivity. It affects power behavior, not whether the alert qualifies.
+## Supported notification services
 
-Repeat behavior belongs to each notification service. Its global interval is used
-by every alert unless that alert supplies an override for the service. Empty means
-inherit, `0` means send only once, and a positive value schedules that service's
-next delivery after its previous delivery succeeds. Different services can repeat
-at different rates. Repeats remain part of the same alert occurrence, use separate
-durable delivery rows, survive restart, and stop as soon as Signal K clears the
-alert. A failed attempt follows the normal retry policy and does not start a new
-repeat clock until it succeeds.
+Notification services are created globally in **Server → Plugin Config → Signal
+K Alert Center**. Individual alerts then select from those named services.
 
-## Implementation status and roadmap
+| Service                | What is sent                                    | Notes                                                                                                  |
+| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| ntfy                   | Alert title, severity, message, and state       | Supports self-hosted or hosted ntfy servers.                                                           |
+| PagerDuty              | Trigger, acknowledgement, and resolution events | Uses one stable deduplication key for an occurrence.                                                   |
+| Discord                | Alert messages through a webhook                | Each configured webhook is an independent service.                                                     |
+| Telegram               | Alert messages through a bot                    | Supports chats, forum topics, and silent Telegram delivery.                                            |
+| Signal K Wyoming audio | Severity sound and optional spoken alert        | Optional; requires `signalk-wyoming`. Speech additionally needs a TTS service such as `signalk-piper`. |
 
-The initial alert-center implementation followed these phases. This is a new
-version-one project: prototype databases and configuration from the former
-package are not supported and should be removed before installation.
+Wyoming is not required to use Alert Center. When both sound and speech are
+enabled, Alert Center queues the configured severity sound first and then the
+spoken text. Uploaded Wyoming sound IDs can be selected for individual alerts.
+Alert Center records announcement acceptance separately from the playback states
+reported by Wyoming, including aggregate and per-satellite outcomes. A reported
+`played` state confirms completion from the satellite process; it cannot prove
+that the physical speaker was audible.
 
-### 1. Signal K boundary — implemented
+![Global defaults and notification services in plugin settings](./docs/screenshots/plugin-settings.png)
 
-- Add `@signalk/server-api` types and declare the supported Signal K server range.
-- Correct null/normal clear handling, preserve unknown raw values, and capture
-  delta timestamp plus `$source`.
-- Subscribe before taking a startup snapshot, then reconcile both streams through
-  one idempotent ingest path. Keep the live side bounded and ensure its latest
-  updates are applied after the older snapshot without retaining one task per delta.
-- Wire zone discovery into the catalog and refresh it when metadata changes or on
-  an explicit low-frequency rescan. Treat zones as definitions only.
+## Installation and first run
 
-### 2. Occurrence-based schema — implemented
+### From the Signal K App Store
 
-Create the complete version-one schema directly, with:
+1. Open the Signal K **App Store**.
+2. Install **Signal K Alert Center**.
+3. Open **Server → Plugin Config → Signal K Alert Center**.
+4. Enable the plugin and add any notification services you want to use.
+5. Set the defaults that newly discovered alerts should inherit and save.
+6. Open **Webapps → Signal K Alert Center** to review alerts and adjust individual
+   alert settings.
 
-- `alert_definitions`: zone/discovered identity and display metadata;
-- `alert_policies` plus a normalized definition-to-notifier mapping;
-- `alert_occurrences`: immutable occurrence identity, source/path, lifecycle,
-  source/receipt times, current and maximum severity, and clear time;
-- `alert_events`: immutable snapshots for meaningful lifecycle/operator changes;
-- `delivery_intents` and `delivery_attempts`: per-occurrence, per-notifier desired
-  work and append-only results;
-- persisted activation and connectivity deadlines.
+The default database is stored in the plugin's Signal K data directory. You do
+not need to enter an absolute path. Existing supported database layouts are
+migrated in place on startup.
 
-Databases created by the immediately preceding Alert Center build are upgraded
-in place to the per-service repeat schema. The migration preserves definitions,
-per-alert settings, occurrences, events, deliveries, attempts, and wake requests.
-Add indexes for current-list lookup and stable, cursor-based history order
-(`occurred_at`, unique id).
+### Install without publishing to npm
 
-### 3. Recurrence and delay state machines — implemented
-
-- Start an occurrence on inactive-to-active transition; coalesce identical updates
-  while active; close it on null/normal; start a new occurrence on the next raise.
-- For sources that never send clear, keep repeated identical deltas in the same
-  occurrence. Per-service repeat delivery must not invent a new alert occurrence.
-- Persist `activation_due_at`. Promote still-active occurrences to notifier intents
-  at the deadline; otherwise record suppression. Recover overdue deadlines on
-  restart before running the delivery scheduler.
-- Keep local stored-alert deletion distinct from acknowledge, silence, and
-  upstream clear, and reject deletion while any occurrence is active.
-
-### 4. Policy and history APIs — implemented
-
-Provide at least:
-
-```text
-GET   /definitions
-GET   /definitions/:id
-PATCH /definitions/:id/policy
-DELETE /definitions/:id/policy
-DELETE /definitions/:id
-GET   /occurrences
-GET   /occurrences/:id
-GET   /occurrences/:id/events
-POST  /occurrences/:id/acknowledge
-POST  /occurrences/:id/silence
-```
-
-Keep the status/delivery/retry endpoints stable. Use cursors,
-bounded limits, filter validation, stable ordering, and structured error bodies.
-Expose effective policy, the current global defaults, overridden field names,
-and provenance (`default`, `partial`, or `override`). Register
-read routes as read-only and mutations as read-write/admin using the supported
-Signal K router API, and publish the complete contract through `getOpenApi()`.
-
-### 5. Definitions and occurrences dashboard — implemented
-
-- Render active and known definitions in one compact alert table.
-- Add an accessible detail drawer opened by click and keyboard, with paginated
-  recent history and notifier outcomes.
-- Add a policy editor populated from configured notification services, with validation
-  and an explicit save result. Each setting remains linked to its global default
-  until the operator marks that field as custom. An explicitly custom empty
-  notification-service list means “send to no remote services”; it is different
-  from inheriting the global list. **Use global defaults** removes only the alert's
-  overrides and retains its definition, occurrences, and history.
-- Add global history filters, pagination, empty/loading/
-  auth/error states, and responsive layouts suitable for an onboard tablet.
-- Use `credentials: "include"`; redirect or link to Signal K login on 401/403.
-
-### 6. Delivery integration — partially implemented
-
-- Create delivery intents only after activation eligibility and snapshot the
-  effective policy onto the occurrence so later edits do not rewrite history.
-- Keep every notifier independent, append every attempt, and preserve PagerDuty
-  dedup identity per occurrence. Add resolve delivery where the transport supports
-  it without overwriting the trigger result.
-- Keep connectivity requests downstream of eligible delivery. Re-evaluate
-  `wake_after` cancellation and shutdown protection against occurrence-based work.
-
-### 7. Compatibility, observability, and retention — remaining roadmap
-
-- Await and audit Signal K notification API actions after checking `canSilence`,
-  `canAcknowledge`, and `canClear`; show unsupported and failed actions honestly.
-- Expand status with oldest pending work, last success/error per notifier, overdue
-  activation counts, schema version, and database health.
-- Default history retention to unlimited. If bounded retention is added, purge in
-  small transactions, never remove pending work, and expose policy/status clearly.
-- Replace the inline partial OpenAPI object with a validated complete document and
-  add CI for formatting, type checking, unit tests, schema creation, integration tests,
-  and the Docker smoke test.
-
-## Local Docker testing
-
-Use three layers rather than relying on manual clicks alone:
-
-1. Run `npm test`, `npm run typecheck`, and `npm run format:check` on Node 22 for
-   fast state-machine, storage, and fake-clock coverage.
-2. Run `npm run test:integration` for deterministic transport contract tests
-   against the existing local mock HTTP service.
-3. Run a real pinned Signal K server with the plugin installed and a persistent
-   data volume for API/UI/restart scenarios.
-
-The repository already provides `Dockerfile`, `docker-compose.live.yml`, and
-`docker-compose.integration.yml`, but the live setup should be hardened before it
-is the acceptance environment:
-
-- pin the Signal K image version for reproducibility and test `latest` separately
-  in CI as a compatibility signal;
-- add a `.dockerignore` that excludes `data`, `node_modules`, `.git`, coverage, and
-  other local output. The current bind-mounted `data` tree can otherwise be copied
-  into the plugin image and recursively copied back into its own installation;
-- use a named volume or a dedicated ignored directory for `/home/node/.signalk`;
-- add container health checks and wait for readiness instead of fixed sleeps;
-- install a test-only fixture plugin in the Compose profile. It should publish
-  zone metadata and timestamped notification deltas with controlled sources,
-  expose a fake Signal K PUT switch, and provide raise/update/clear operations;
-- extend the mock notifier to return scripted success, retryable failure, terminal
-  failure, timeout, and captured request history;
-- run API assertions and Playwright browser tests from separate containers so the
-  same suite works on developer machines and CI.
-
-The Docker acceptance suite should raise two sources on one path, exercise a
-never-fired zone definition, re-raise a one-time occurrence, inspect
-per-alert history, edit notifier/delay policy, clear both before and after the
-activation deadline, fail one notifier while two succeed, restart Signal K during
-pending activation and retry, and verify SQLite state plus connectivity ownership
-after recovery. No test should contact real ntfy, PagerDuty, Discord, or boat
-hardware.
-
-## Runtime
-
-The plugin uses the built-in `node:sqlite` API and requires Node.js 22.5 or newer.
-Signal K 2.31.1 is the pinned supported server target; CI also tests the current
-Signal K release as an early compatibility signal.
-
-Stable releases are installed through the Signal K App Store from npm. Every
-published version has a matching annotated source tag and GitHub Release containing
-the exact npm tarball and SHA-256 checksum. A downloaded release tarball can be
-installed without resolving the package from npm:
+Download or clone this repository on the Signal K host, build it, and install the
+resulting package archive into the Signal K data directory:
 
 ```sh
-npm install --prefix ~/.signalk ./signalk-alert-center-X.Y.Z.tgz
+npm ci
+npm run build
+npm pack
+cd ~/.signalk
+npm install /path/to/signalk-alert-center-0.1.0.tgz
 ```
 
-The first publication will use the `signalk-alert-center` package name. Do not
-install directly from a moving Git branch. Maintainer release policy, validation,
-rollback, and database-backup requirements are in
-[`docs/RELEASING.md`](docs/RELEASING.md).
+Restart Signal K after installation. Docker installations should run the final
+`npm install` command inside the Signal K container or bake the archive into a
+derived image so the installation survives container replacement.
 
-For development, install dependencies with `npm install` and compile with
-`npm run build`.
+## Global settings
 
-Startup subscribes to notification deltas before reconciling the existing Signal K
-model. Live updates received during that scan enter a fixed-size queue. Equivalent
-pending values for the same path and source are combined, while state, severity, and
-message transitions keep their order. One worker persists bounded batches and yields
-between them, so continuous traffic cannot create one retained promise per delta or
-prevent startup reconciliation from completing. Queue depth, its high-water mark,
-and received, processed, coalesced, and rejected counts are available from `/status`.
-Reaching the hard limit is logged as an error because it can mean alert transitions
-were rejected; the plugin never silently grows the queue beyond the configured size.
+The Signal K plugin configuration contains settings shared by all alerts:
 
-Runtime status, history pages, definition summaries, recent dashboard deliveries,
-and the delivery scheduler use bounded SQL queries so their cost does not grow with
-unrelated historical records. Unchanged zone definitions do not rewrite the database
-during periodic discovery.
+- notification-service connection details and secrets;
+- defaults inherited by newly discovered alerts;
+- optional internet-connection control;
+- retention and delivery limits;
+- the database reset action.
 
-The delivery scheduler loads at most 50 due deliveries per run and sends up to four
-at the same time by default. Each service request has a 15-second deadline. These
-limits are global settings under **Notification delivery**. Every row is claimed and
-committed before its network request starts, and each result is recorded independently,
-so a slow or failed service does not hold up successful services. A timeout is recorded
-as a retryable `DELIVERY_TIMEOUT`. Plugin shutdown stops claiming work, aborts active
-requests, records them as retryable interruptions, and then closes the database.
+![Global defaults inherited by newly discovered alerts](./docs/screenshots/plugin-defaults.png)
 
-Operational errors and delivery batches are written to Signal K's server log
-without notification bodies, notifier credentials, tokens, or webhook URLs. Enable
-the plugin's debug namespace on Signal K's **Server Log** page to see startup,
-reconciliation, policy/action, successful-delivery, and shutdown diagnostics.
+Alert-specific routing and timing belong in the Alert Center webapp, not in the
+global plugin configuration.
 
-## Configuration
+The **Reset database** button permanently removes stored alert definitions,
+history, deliveries, and per-alert settings. Global plugin configuration is kept.
 
-```json
-{
-  "notifiers": [
-    {
-      "name": "Crew ntfy",
-      "type": "ntfy",
-      "server": "https://ntfy.sh",
-      "topic": "boat-alerts",
-      "token": "secret",
-      "minSeverity": "warn",
-      "repeatIntervalSeconds": 300
-    },
-    {
-      "name": "Emergency PagerDuty",
-      "type": "pagerduty",
-      "routingKey": "secret",
-      "minSeverity": "alarm"
-    },
-    {
-      "name": "Boat Discord",
-      "type": "discord",
-      "webhookUrl": "https://discord.com/api/webhooks/...",
-      "minSeverity": "alert"
-    },
-    {
-      "name": "Crew Telegram",
-      "type": "telegram",
-      "botToken": "123456:secret",
-      "chatId": "-1001234567890",
-      "messageThreadId": 42,
-      "disableNotification": false,
-      "minSeverity": "warn"
-    },
-    {
-      "name": "Bridge speakers",
-      "type": "wyoming",
-      "targets": ["bridge"],
-      "voice": "en_US-lessac-medium",
-      "urgentAt": "alarm",
-      "sounds": {
-        "normal": "chime",
-        "warn": "warning",
-        "alert": "warning",
-        "alarm": "alarm",
-        "emergency": "alarm"
-      },
-      "minSeverity": "warn"
-    }
-  ],
-  "defaults": {
-    "enabled": true,
-    "minSeverity": "warn",
-    "activationDelaySeconds": 0,
-    "connectivity": { "mode": "queue" },
-    "notifiers": ["Crew ntfy", "Bridge speakers"],
-    "soundEnabled": true,
-    "speechEnabled": true,
-    "speechMinimumSeverity": "warn",
-    "speechTemplate": "{name}. {severity}. {message}",
-    "speechAnnounceClear": false
-  },
-  "delivery": {
-    "batchSize": 50,
-    "concurrency": 4,
-    "requestTimeoutSeconds": 15
-  },
-  "ingestion": {
-    "queueLimit": 2000,
-    "batchSize": 100
-  },
-  "connectivity": {
-    "enabled": true,
-    "switch": {
-      "path": "electrical.switches.starlink.state",
-      "onValue": 1,
-      "offValue": 0
-    },
-    "idleCooldownSeconds": 300,
-    "bootTimeoutSeconds": 240,
-    "internetCheckIntervalSeconds": 5,
-    "probe": {
-      "url": "https://www.gstatic.com/generate_204",
-      "timeoutSeconds": 10
-    }
-  }
-}
-```
+## Connectivity control
 
-By default, the database is `alert-center.sqlite` inside Signal K's data
-directory, so the configuration works across native and container installations.
-When `storage.path` is relative, it is resolved from that data directory. An absolute
-path remains supported when you intentionally manage the database elsewhere.
+Alert Center can optionally turn on a Signal K PUT-capable connectivity switch,
+such as a Starlink power control, when eligible work is waiting. It only turns a
+connection off when it can prove that it turned that session on. Leave this
+feature disabled if another system manages connectivity.
 
-There is intentionally no migration from `signalk-persistent-notifier`. Remove its
-old package, configuration file, and `persistent-notifier.sqlite` database before
-installing Signal K Alert Center. The new package creates its complete schema and
-discovers current Signal K definitions from scratch.
+The default connectivity check uses Google's lightweight `generate_204`
+endpoint. You can replace it with another URL that returns any successful 2xx
+response.
 
-The custom Signal K settings panel contains only global configuration. It separates
-alert defaults, notification services, connectivity, and storage/advanced settings
-into focused sections. The default-service picker lists the configured services by
-their human-readable names instead of requiring internal identifiers. Each
-notification service has one **Service type** selector; changing it immediately
-shows only the connection fields required by ntfy, PagerDuty, Discord, Telegram, or
-Signal K Wyoming audio.
+## Privacy and network access
 
-Optional **History retention** removes only cleared occurrences older than the
-configured age, in bounded batches. It is disabled by default and always protects
-active alerts, pending/retryable/in-flight deliveries, and persisted wake requests.
-Retention status and the most recent cleanup counts are available from `/status`.
+Alert Center adds no analytics or telemetry.
 
-The **Storage & advanced** section ends with a danger zone containing an explicit
-**Reset database** button. After confirmation, the plugin deletes all alert
-definitions, occurrences, event and delivery history, and per-alert policy;
-re-initializes the schema; discovers current Signal K definitions again; and clears
-the internal one-shot reset request. Global plugin configuration, including
-notification service secrets, is retained.
+Alert definitions, history, policies, and delivery attempts are stored locally in
+the Signal K data directory. Data leaves Signal K only when you configure and
+select a notification service for an alert:
 
-### Telegram notifications
+- ntfy receives the destination topic plus alert text and severity;
+- PagerDuty receives incident event data and the configured integration key;
+- Discord receives alert text at the configured webhook URL;
+- Telegram receives alert text, chat identifiers, and the configured bot token;
+- `signalk-wyoming` receives a sound ID and/or rendered speech text through its
+  in-process Signal K API. Wyoming then sends audio to the selected satellites.
 
-Create a bot with Telegram's BotFather, add it to the destination chat or channel,
-and configure a **Telegram** notification service with the bot token and target
-chat ID. Public channels may use an `@channel_name`; private chats, groups, and
-supergroups use their numeric chat ID. A forum supergroup topic can be targeted
-with its optional message-thread ID. **Send silently** uses Telegram's silent
-notification option while preserving the message in the chat.
+Connection credentials are used only for their configured service. Avoid placing
+secrets in alert names or messages, because alert content may be sent to every
+service selected for that alert.
 
-Alert Center sends plain text through the HTTPS Bot API and stores Telegram's
-returned message ID with the completed delivery. Failed and rate-limited requests
-use the same durable retry policy as other remote services. Bot tokens are treated
-as secrets and are never written to plugin logs or API responses.
+## Operational notes
 
-### Optional notification sounds and speech with signalk-wyoming
+- Alert Center subscribes to `notifications.*` and reconciles the current Signal K
+  notification tree at startup.
+- A `normal`, `nominal`, cleared, or null notification transition clears the
+  current occurrence but does not delete its history.
+- Delivery is persisted before network activity begins. Pending work is recovered
+  after a Signal K or plugin restart.
+- Retention cleanup is disabled by default and never removes active occurrences or
+  pending delivery work.
+- Use the diagnostics section at the bottom of the webapp when troubleshooting.
+  It shows database health, queue depth, scheduler state, connectivity state, and
+  per-service results.
 
-Wyoming is an optional notifier type, just like ntfy, PagerDuty, and Discord. Alert
-Center starts and handles alerts normally when signalk-wyoming is not installed or
-configured. It subscribes to the Wyoming API only when at least one enabled Wyoming
-notification service exists.
+## Help and support
 
-Notification sounds require signalk-wyoming and a satellite with a speaker, but do
-not require Piper. Spoken alert text additionally requires a working text-to-speech
-service such as signalk-piper. Verify both from the **Voice (Wyoming)** webapp
-before testing the optional service from Alert Center.
+- [Report a problem or request a feature](https://github.com/arodus/signalk-alert-center/issues)
+- [View the source code](https://github.com/arodus/signalk-alert-center)
+- [Read the changelog](./CHANGELOG.md)
+- [Developer and local-testing guide](./DEVELOPERS.md)
 
-The package declares `signalk-wyoming` and `signalk-piper` as optional Signal K
-recommendations so compatible App Store views can surface them alongside Alert
-Center. Neither plugin is installed as an npm dependency or required unless spoken
-alerts are configured.
+When reporting a problem, include the Alert Center version, Signal K version,
+relevant plugin logs, and the diagnostics shown in the webapp. Remove notification
+service secrets and personal vessel information first.
 
-Add one or more **Signal K Wyoming audio** notification services globally. Each
-service maps every alert severity to a built-in or uploaded Wyoming sound ID. An
-empty target list uses every configured satellite, and an optional voice overrides
-signalk-wyoming's default. Alerts at or above **Urgent playback starts at** use
-Wyoming's urgent priority, which interrupts normal playback and bypasses mute.
+## License
 
-Each alert can independently enable its notification sound and TTS, and can replace
-the severity sound with a custom sound ID. When both are enabled, Alert Center
-queues the sound first and then the rendered speech on the same per-satellite FIFO.
-Supported speech-template fields are `{name}`, `{severity}`, `{message}`, `{path}`,
-and `{state}`; rendered text is limited to 500 characters.
-
-Alert Center uses the in-process `signalk-wyoming.announcements.api` version 1
-interface. It does not invoke Piper directly, run shell commands, or use browser
-speech. A delivery is complete when signalk-wyoming confirms that it accepted each
-announcement. Alert Center separately follows and durably records each sound and
-speech announcement through queued, playing, and its terminal aggregate and
-per-satellite states. These outcomes survive Alert Center restarts; if Wyoming
-restarts before confirming an in-flight announcement, its outcome is recorded as
-unknown rather than silently treated as played. A `played` result confirms
-completion reported by the satellite process, not that the physical speaker was
-audible. Normal announcements
-suppressed by Wyoming mute are recorded as intentionally completed so they are not
-replayed much later. Stable request IDs make retries idempotent: if the sound was
-accepted but queuing speech failed, the delivery retry does not replay that sound.
-A clear announcement, when enabled, is separate durable work and is queued only
-after the original alert delivery was accepted. Wyoming-only services never request
-managed Internet connectivity.
-
-Per-alert service selection, minimum severity, activation delay, per-service repeat overrides,
-sound override, speech policy, and connectivity policy are stored from the Alert center's
-**Settings** dialog. A
-notifier's global `minSeverity` is a hard floor; an alert-level override cannot make
-that notifier send at a lower severity.
-
-Each entry under **Notification services** has a unique, human-readable `name`. That
-name appears in the per-alert Settings dialog and is used by the default alert policy.
-Renaming a service does not rewrite saved alert policies, so reselect the renamed
-service on affected alerts. The Signal K form only asks for credentials relevant to
-the selected service type.
-
-Repeated updates coalesce by notification path and available source identifier. Clear events retain the original occurrence and maximum severity. Each notifier retries independently; a successful notifier is never resent because another notifier failed. `wake_after` requests are persisted per alert and restored after restart. Connectivity is only switched off when the plugin observed it off before waking it and owns the session. Unknown ownership leaves it on.
-
-The plugin API is mounted by Signal K under `/plugins/signalk-alert-center`:
-
-- `GET /status`
-- `GET /alerts`
-- `GET /deliveries`
-- `POST /retry`
-- `GET /definitions` and `GET /definitions/:id`
-- `PATCH /definitions/:id/policy`
-- `DELETE /definitions/:id/policy` to remove per-alert overrides
-- `DELETE /definitions/:id` to remove an inactive stored alert, its settings, and history
-- `GET /notifiers`
-- `POST /notifiers/:id/test` to test one saved notification service
-- `GET /occurrences` and `GET /occurrences/:id`
-- `GET /occurrences/:id/events`
-- `GET /alert-history` for the global alert-update feed
-- `POST /occurrences/:id/acknowledge`
-- `POST /occurrences/:id/silence`
-
-Signal K protects these routes with its normal authentication. Read endpoints use
-read-only access and mutations require read-write access. Collection endpoints use
-bounded cursor pagination and validated filters. The complete request and response
-contract is returned through the plugin's OpenAPI document.
-
-Global defaults are resolved when a new alert occurrence is created. Untouched
-and partially customized alerts therefore pick up later global changes for every
-field they still inherit. Each occurrence stores the resulting effective policy
-as a snapshot, so changing a global default or alert override does not alter
-deliveries already in progress.
-
-### Operational diagnostics
-
-`GET /status` returns a bounded operational snapshot without notifier secrets or
-notification payloads. It includes runtime generation and listener counts; ingestion
-queue depth, limit, high-water mark, and totals; startup reconciliation state and duration;
-the last delivery scheduler run; active request count and oldest request; the oldest pending
-delivery, overdue activation count, database/schema health, pending connectivity wake work, switch ownership,
-the last connectivity transition and probe result, and per-service pending count
-plus last success/failure time and failure code. The dashboard exposes the same
-information under **System diagnostics** at the bottom of the Alert center. The
-section is collapsed by default so current alerts and delivery work remain the
-primary workflow, while Signal K's compact plugin status shows the overall health
-and active/pending counts.
-
-Health is **healthy** when the schema is current, startup reconciliation has
-completed, connectivity is not faulted, activations are not overdue, and no
-service's newest outcome is a failure. It is **degraded** while reconciliation is
-running, when activations are overdue, after a delivery scheduler error, or when a service's
-latest outcome is a failure. It is **fault** when the database/schema check fails,
-startup reconciliation fails, or connectivity enters `FAULT`. A later successful
-service delivery clears that service's degraded condition.
-
-Diagnostic queries use aggregate/indexed lookups and one latest-failure lookup per
-service with recorded deliveries; they do not load or reconstruct complete alert
-history.
-
-### Resource-exhaustion troubleshooting
-
-Rapidly increasing Signal K memory, heap-limit restarts, a queue at its configured
-limit, or an old active delivery request indicate that input or a notification service
-is not keeping up. Disable this plugin on the affected server and restart Signal K to
-release retained process memory. Preserve the database and logs; deleting the database
-is not required. Before re-enabling it, verify the configured ntfy, PagerDuty,
-Discord, and Telegram endpoints are reachable and review `/status` for ingestion and scheduler
-diagnostics. Do not increase the queue or request timeout as a first response because
-that permits more work to remain resident.
-
-`GET /occurrences` accepts exact `definitionId`, `path`, and `source` filters,
-plus `state`, `severity`, `from`, and `to`. Filters can be combined;
-cursor ordering remains stable by occurrence start time and id.
-
-The dashboard is served at `/signalk-alert-center`. The default **Alerts**
-tab uses one compact table for all known definitions, with active alerts first. Select an alert to open
-its current information, five most recent occurrences, selected occurrence timeline, and **Settings**. Acknowledge and
-Silence are available directly in active rows, with completed actions shown disabled.
-Inactive rows use a neutral status badge. Acknowledge and silence apply only
-to active occurrences. Any inactive stored alert can be permanently removed from
-Settings together with its configuration and complete history. Active alerts must
-be cleared in Signal K first. Definitions still supplied by Signal K are discovered again.
-
-The default **All alerts and zones** view includes inactive alerts and zone
-definitions that have never fired. Active alerts appear first, highest severity
-first. **Active alerts only** is an optional filter. **Inactive** means there is
-no displayed active notification; it does not claim the sensor is currently normal.
-Search matches alert names, paths, sources, and loaded messages.
-Source names are shown in alert details, not in the table.
-Use **More filters** for an exact Signal K path or source and a started-at time
-range. These filters are evaluated by the server and work with **Load more**.
-The separate **Alert history** tab is a newest-first feed of alert lifecycle
-updates across all occurrences. It can be filtered by alert, update type,
-severity, state, source, and time range. It intentionally contains no notifier
-delivery attempts or outcomes; those remain in **Deliveries**.
-Zone definitions share the Alerts table; their threshold ranges appear in the
-detail drawer when you open an alert. Notification services and delivery timing
-are shown in plain language beside each alert. Open the alert and select **Settings**
-to change them.
-
-Expand **System diagnostics** and use **Test notification services** to verify an
-enabled service with its currently saved plugin settings. Tests run immediately
-when requested, including during any quiet period, and use the configured delivery
-request timeout with a 30-second maximum. A second test for the same service is
-rejected while the first is running. Results distinguish credential, configuration,
-timeout, network, and remote-service failures without returning or logging tokens,
-webhook addresses, routing keys, or remote response bodies.
-
-ntfy and Discord receive an unmistakably marked manual test notification. A
-Wyoming test queues “Test announcement from Signal K Alert Center” at normal
-priority using that service's saved satellite and voice settings.
-PagerDuty's **Test alert** sends a real warning trigger and therefore opens or
-updates a clearly marked test incident. **Test resolve** is a separate action that
-uses the same stable test deduplication key to resolve that test incident. Service
-tests bypass the alert pipeline: they do not create alert occurrences, delivery
-rows, retries, connectivity wake requests, acknowledgements, or Alert center
-history. The generated Signal K settings form cannot expose actions for unsaved
-array entries, so save service changes before testing them from the Alert center.
-
-The separate **Deliveries** tab keeps transport troubleshooting out of the alert
-workflow. Unfinished work appears first, followed by recent completed and terminal
-results. Each row identifies the alert occurrence and notification service, current
-state, attempt count, relevant timestamps, and latest error. Opening a row shows
-the remote delivery ID and cursor-paged chronological attempt history. Failed rows
-can be retried individually; **Retry all failed deliveries** retries every failed
-intent. Delivery pages and attempt pages are bounded to 100 records per request.
-The dashboard receives lightweight server-sent change events and reloads data only
-after alerts, policies, definitions, or deliveries change. Browsers automatically
-reconnect the same-origin stream; while it is unavailable, the UI uses a slow
-60-second fallback poll.
-
-Policy edits apply to future occurrences. Each occurrence snapshots its effective
-one-time, severity, activation, connectivity, notifier selection, and per-service repeat policy into
-durable delivery work, so a later settings edit cannot rewrite history or silently
-retarget pending work.
-
-When connectivity is enabled, the plugin sends an HTTP `HEAD` request to the
-configured probe URL and enters `ONLINE` after any 2xx response. The default is
-Google's lightweight public `https://www.gstatic.com/generate_204` endpoint, which
-returns HTTP 204 without authentication. The plugin retries until
-`bootTimeoutSeconds` and enters `FAULT` without deleting queued alerts if readiness
-never arrives.
-
-Docker-backed HTTP integration tests are available with
-`npm run test:integration`. They start a local scripted HTTP service and exercise
-ntfy, PagerDuty, Discord, and Telegram without contacting external services.
-
-For a real Signal K acceptance run:
-
-```sh
-npm run test:acceptance
-docker compose -f docker-compose.acceptance.yml down -v
-```
-
-This builds against the pinned Signal K 2.31.1 image, installs a test-only fixture
-plugin, publishes zone metadata and timestamped raise/clear deltas, changes a
-definition policy, checks recent history, removes an inactive stored alert, and
-verifies recurrence behavior. The separate mock
-service also verifies scripted retry responses and captured request bodies.
-
-Install Chromium once with `npx playwright install chromium`, then run
-`npm run test:browser` for desktop and tablet dashboard coverage. The command
-starts an isolated Docker project and removes its named test volume afterward.
-`npm run test:restart` separately verifies that pending activation, retryable
-delivery work, occurrence history, and event history survive Signal K restarts.
-Both suites use only the local fixture and mock notifier.
-
-For interactive UI testing:
-
-```sh
-docker compose -f docker-compose.live.yml up --build
-```
-
-Open `http://localhost:3000`, complete Signal K setup if prompted, enable/configure
-the plugin, then open `http://localhost:3000/signalk-alert-center`. The live
-Compose file uses a named volume. Remove it only when you intentionally want a
-fresh development database:
-
-```sh
-docker compose -f docker-compose.live.yml down -v
-```
-
-To start the same local server with a test-only fixture plugin and populate it
-with realistic demo alerts, run:
-
-```sh
-npm run demo
-```
-
-The fixture publishes active refrigerator, bilge, battery, engine, anchor, and
-security alerts, plus cleared and recurring occurrences and two independent
-sources on the same bilge path. It never contacts external services or vessel
-hardware. Open the alert dashboard after a few seconds to browse the generated
-definitions and history.
-
-You can add another batch while the demo fixture is installed with:
-
-```sh
-curl -X POST http://localhost:3000/plugins/signalk-test-fixture/seed
-```
-
-If Signal K security is enabled, invoke that endpoint from an authenticated client
-or simply rerun `npm run demo`, which seeds automatically on fixture startup.
-
-## Development
-
-`npm test` runs the lifecycle, persistence, API, policy, runtime, scheduler, and
-connectivity tests. `npm run format:check`, `npm run lint`, and `npm run build` are
-the required quality checks. Node 22.5 or newer is required; Docker acceptance is
-pinned to Signal K server 2.31.1. GitHub Actions runs those checks on pull requests,
-including browser and restart coverage; a non-blocking job also exercises the latest
-Signal K image. CI caches only npm downloads. Docker volumes, databases, browser
-traces, and test configuration are ephemeral and are not persisted as artifacts.
+[MIT](./LICENSE)

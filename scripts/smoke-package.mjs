@@ -64,6 +64,14 @@ try {
     "public/remoteEntry.js",
     "public/icon-192.png",
     "public/icon-512.png",
+    "README.md",
+    "DEVELOPERS.md",
+    "CHANGELOG.md",
+    "docs/STORE_LISTING.md",
+    "docs/screenshots/plugin-defaults.png",
+    ...(installedPackage.signalk?.screenshots ?? []).map((path) =>
+      path.replace(/^\.\//, ""),
+    ),
   ])
     if (!existsSync(join(installedRoot, required)))
       throw new Error(`Installed package is missing ${required}`);
