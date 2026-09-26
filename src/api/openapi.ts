@@ -29,12 +29,13 @@ const errors = {
   "500": response("Internal error", { $ref: "#/components/schemas/Error" }),
   "503": response("Plugin not started", { $ref: "#/components/schemas/Error" }),
 };
-const page = (item: string) => ({
+const page = (item: string, includeTotal = false) => ({
   type: "object",
-  required: ["items"],
+  required: ["items", ...(includeTotal ? ["total"] : [])],
   properties: {
     items: { type: "array", items: { $ref: item } },
     nextCursor: { type: "string" },
+    ...(includeTotal ? { total: { type: "integer", minimum: 0 } } : {}),
   },
 });
 
@@ -62,7 +63,7 @@ export function getAlertCenterOpenApi() {
           responses: {
             "200": response(
               "Delivery page",
-              page("#/components/schemas/Delivery"),
+              page("#/components/schemas/Delivery", true),
             ),
             ...errors,
           },

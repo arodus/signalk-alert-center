@@ -1310,8 +1310,11 @@ describe("occurrence storage", () => {
       },
     ]);
     const firstPage = db.queryDeliveries(1);
+    expect(firstPage.total).toBe(2);
     expect(firstPage.nextCursor).toBe(firstPage.items[0].id);
-    expect(db.queryDeliveries(1, firstPage.nextCursor).items[0]).toMatchObject({
+    const secondPage = db.queryDeliveries(1, firstPage.nextCursor);
+    expect(secondPage.total).toBe(2);
+    expect(secondPage.items[0]).toMatchObject({
       alertId: completed.id,
       state: "delivered",
     });

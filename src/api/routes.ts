@@ -8,6 +8,7 @@ import {
 export interface Page<T> {
   items: T[];
   nextCursor?: string;
+  total?: number;
 }
 export interface DefinitionQuery {
   limit: number;

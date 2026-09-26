@@ -114,7 +114,11 @@ function fixture() {
     },
     listDeliveries(query) {
       queries.push(query);
-      return { items: [{ id: "delivery-1" }], nextCursor: "delivery-1" };
+      return {
+        items: [{ id: "delivery-1" }],
+        nextCursor: "delivery-1",
+        total: 12,
+      };
     },
     getDelivery: (id) => (id === "delivery-1" ? { id } : undefined),
     listDeliveryAttempts: (id, query) =>
@@ -230,6 +234,7 @@ describe("alert-center routes", () => {
     expect(list.body).toMatchObject({
       items: [{ id: "delivery-1" }],
       nextCursor: "delivery-1",
+      total: 12,
     });
     expect(current.queries.at(-1)).toEqual({
       limit: 25,
