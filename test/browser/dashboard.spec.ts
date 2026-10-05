@@ -348,7 +348,7 @@ test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
       calls += 1;
       const body = route.request().postDataJSON() as { operation: string };
       operations.push(body.operation);
-      await new Promise((resolve) => setTimeout(resolve, 75));
+      await new Promise((resolve) => setTimeout(resolve, 250));
       await route.fulfill({
         json: {
           status: "success",
@@ -357,7 +357,7 @@ test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
             body.operation === "resolve"
               ? "PagerDuty accepted the test-incident resolve event."
               : "PagerDuty accepted the test alert. A real test incident was opened or updated.",
-          durationMs: 75,
+          durationMs: 250,
           operation: body.operation,
           service: { id: "Test PagerDuty", type: "pagerduty" },
         },
@@ -371,10 +371,10 @@ test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
     hasText: "Test PagerDuty",
   });
   const alertButton = card.getByRole("button", { name: "Test alert" });
-  await alertButton.evaluate((button) => {
-    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  });
+  await alertButton.click();
+  const inFlightButton = card.getByRole("button", { name: "Testing…" });
+  await expect(inFlightButton).toBeDisabled();
+  await inFlightButton.dispatchEvent("click");
   await expect(card.getByRole("status")).toContainText("real test incident");
   expect(calls).toBe(1);
 
