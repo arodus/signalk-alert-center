@@ -93,7 +93,15 @@ describe("occurrence storage", () => {
         .prepare("PRAGMA table_info(deliveries)")
         .all()
         .map((column) => (column as { name: string }).name),
-    ).toContain("cycle");
+    ).toEqual(
+      expect.arrayContaining([
+        "cycle",
+        "snapshot_state",
+        "snapshot_severity",
+        "snapshot_message",
+        "snapshot_at",
+      ]),
+    );
     expect(
       db.db
         .prepare(
@@ -138,7 +146,7 @@ describe("occurrence storage", () => {
     expect(migrated.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
-  it("adds Wyoming policy columns without losing an existing database", () => {
+  it("adds optional policy and delivery snapshot columns without data loss", () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-wyoming-schema-"));
     directories.push(directory);
     const filename = join(directory, "alerts.sqlite");
@@ -149,6 +157,10 @@ describe("occurrence storage", () => {
       )
       .replace(
         "  sound_enabled INTEGER NOT NULL DEFAULT 1,\n  sound_id TEXT,\n  speech_enabled INTEGER NOT NULL DEFAULT 1,\n  speech_minimum_severity TEXT NOT NULL DEFAULT 'warn',\n",
+        "",
+      )
+      .replace(
+        "  snapshot_state TEXT,\n  snapshot_severity TEXT,\n  snapshot_message TEXT,\n  snapshot_at TEXT,\n",
         "",
       );
     const existing = new DatabaseSync(filename);
@@ -181,6 +193,19 @@ describe("occurrence storage", () => {
         "sound_id",
         "speech_enabled",
         "speech_minimum_severity",
+      ]),
+    );
+    expect(
+      migrated.db
+        .prepare("PRAGMA table_info(deliveries)")
+        .all()
+        .map((column) => (column as { name: string }).name),
+    ).toEqual(
+      expect.arrayContaining([
+        "snapshot_state",
+        "snapshot_severity",
+        "snapshot_message",
+        "snapshot_at",
       ]),
     );
 
@@ -705,6 +730,99 @@ describe("occurrence storage", () => {
     ]);
   });
 
+  it("creates a new delivery cycle for every alert state change", () => {
+    const db = database();
+    const options = {
+      resolvingNotifierIds: ["ntfy"],
+      notifierMinimumSeverities: { ntfy: "alert" as const },
+    };
+    const occurrence = db.ingest(
+      active({ severity: "alert", message: "Initial alert" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:00:00Z"),
+      options,
+    )!;
+    const first = db.listDeliveriesForAlert(occurrence.id)[0];
+    expect(first).toMatchObject({
+      operation: "trigger",
+      cycle: 1,
+      state: "pending",
+      alertSnapshot: {
+        state: "active",
+        severity: "alert",
+        message: "Initial alert",
+      },
+    });
+
+    db.ingest(
+      active({ severity: "alarm", message: "Escalated" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:01:00Z"),
+      options,
+    );
+    const second = db
+      .listDeliveriesForAlert(occurrence.id)
+      .find((delivery) => delivery.cycle === 2)!;
+    expect(second).toMatchObject({
+      operation: "trigger",
+      state: "pending",
+      alertSnapshot: {
+        state: "active",
+        severity: "alarm",
+        message: "Escalated",
+      },
+    });
+    expect(
+      db.queryDeliveries(10).items.find((delivery) => delivery.id === first.id),
+    ).toMatchObject({ alert: { severity: "alert", message: "Initial alert" } });
+    expect(
+      db
+        .queryDeliveries(10)
+        .items.find((delivery) => delivery.id === second.id),
+    ).toMatchObject({ alert: { severity: "alarm", message: "Escalated" } });
+    expect(db.claimDelivery(first.id)).toBe(true);
+    db.recordDeliverySuccess(first.id);
+    expect(db.claimDelivery(second.id)).toBe(true);
+    db.recordDeliverySuccess(second.id);
+
+    db.ingest(
+      active({ severity: "alarm", message: "Message-only update" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:02:00Z"),
+      options,
+    );
+    expect(
+      db
+        .listDeliveriesForAlert(occurrence.id)
+        .filter((delivery) => delivery.operation === "trigger"),
+    ).toHaveLength(2);
+
+    db.ingest(
+      active({ severity: "warn", message: "De-escalated" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:03:00Z"),
+      options,
+    );
+    const third = db
+      .listDeliveriesForAlert(occurrence.id)
+      .find((delivery) => delivery.cycle === 3)!;
+    expect(third).toMatchObject({ operation: "trigger", state: "pending" });
+    expect(db.claimDelivery(third.id)).toBe(true);
+    db.recordDeliverySuccess(third.id);
+
+    db.ingest(
+      active({ state: "cleared", severity: "normal", message: "Recovered" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:04:00Z"),
+      options,
+    );
+    expect(
+      db
+        .listDeliveriesForAlert(occurrence.id)
+        .filter((delivery) => delivery.operation === "resolve"),
+    ).toMatchObject([{ state: "pending" }]);
+  });
+
   it("recovers a pending PagerDuty resolve after restart", () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-pagerduty-"));
     directories.push(directory);
@@ -809,7 +927,7 @@ describe("occurrence storage", () => {
     });
     expect(
       db.listDeliveries().map((delivery) => delivery.transportInstanceId),
-    ).toEqual(["ntfy", "pd"]);
+    ).toEqual(["ntfy", "ntfy", "pd"]);
   });
 
   it("cancels a pending delay when severity drops below its threshold", () => {

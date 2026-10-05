@@ -400,7 +400,7 @@ test("saves a Telegram service and selects it as a default", async ({
     .getByRole("button", { name: "Notification services", exact: true })
     .click();
   await page.getByRole("button", { name: "Add notification service" }).click();
-  const service = page.getByTestId("notification-service").last();
+  const service = page.getByTestId("notification-service").nth(0);
   await expect(service.getByText(/^Service \d+$/)).toBeVisible();
   await expect(
     service.getByText("Unnamed service", { exact: true }),
@@ -416,6 +416,15 @@ test("saves a Telegram service and selects it as a default", async ({
     .getByLabel("Repeat while the alert remains active (seconds)")
     .fill("300");
   await service.getByLabel("Send Telegram messages silently").check();
+  await page.getByRole("button", { name: "Add notification service" }).click();
+  const backup = page.getByTestId("notification-service").nth(1);
+  await backup.getByLabel("Service name").fill("Backup");
+  await backup.getByLabel("ntfy topic").fill("backup-alerts");
+  const failureRoutes = service.locator("label").filter({
+    hasText: "Send delivery failure alerts through",
+  });
+  await failureRoutes.getByRole("button").click();
+  await failureRoutes.getByRole("checkbox", { name: /Backup/ }).check();
   await page
     .getByRole("button", { name: "Alert defaults", exact: true })
     .click();
@@ -431,7 +440,13 @@ test("saves a Telegram service and selects it as a default", async ({
       response.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Save changes" }).click();
-  expect((await savedRequest).ok()).toBe(true);
+  const saved = await savedRequest;
+  expect(saved.ok()).toBe(true);
+  const savedConfig = saved.request().postDataJSON().configuration;
+  expect(
+    savedConfig.notifiers.find((item) => item.name === "Bridge")
+      .failureNotifierIds,
+  ).toEqual(["Backup"]);
   await expect(page.getByText("Save requested.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Errors" })).toHaveCount(0);
 });

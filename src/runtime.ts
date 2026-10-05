@@ -330,7 +330,6 @@ export class AlertCenterRuntime {
         data: {
           serviceId: service.id,
           serviceType: service.type,
-          pendingCount: service.pendingCount,
           retryingFailureCount: service.retryingFailureCount,
           terminalFailureCount: service.terminalFailureCount,
           ...(state !== "normal" && service.lastFailureCode
@@ -612,6 +611,11 @@ export class AlertCenterRuntime {
       entry.sourceTimestamp,
     );
     const serviceHealth = isServiceHealthPath(normalized.path);
+    const serviceHealthSource = serviceHealth
+      ? (this.config.notifiers ?? []).find(
+          (notifier) => serviceHealthPath(notifier.name) === normalized.path,
+        )
+      : undefined;
     const policy = this.policies().forPath(
       normalized.path,
       normalized.severity,
@@ -622,12 +626,16 @@ export class AlertCenterRuntime {
         notifier,
       ]),
     );
-    const notifierIds = (serviceHealth ? [] : policy.notifierIds).filter(
-      (id) => {
-        const notifier = configuredNotifiers.get(id);
-        return Boolean(notifier && notifier.enabled !== false);
-      },
-    );
+    const notifierIds = (
+      serviceHealth
+        ? (serviceHealthSource?.failureNotifierIds ?? []).filter(
+            (id) => id !== serviceHealthSource?.name,
+          )
+        : policy.notifierIds
+    ).filter((id) => {
+      const notifier = configuredNotifiers.get(id);
+      return Boolean(notifier && notifier.enabled !== false);
+    });
     const hasRemoteNotifier = notifierIds.some(
       (id) => configuredNotifiers.get(id)?.type !== "wyoming",
     );
@@ -655,27 +663,36 @@ export class AlertCenterRuntime {
         notifierRepeatIntervals: Object.fromEntries(
           notifierIds.map((id) => [
             id,
-            policy.notifierRepeatIntervals[id] ?? 0,
+            serviceHealth ? 0 : (policy.notifierRepeatIntervals[id] ?? 0),
           ]),
         ),
         notifierMinimumSeverities: Object.fromEntries(
-          notifierIds.map((id) => [id, notifierMinimumSeverity(id)]),
+          notifierIds.map((id) => [
+            id,
+            serviceHealth ? "normal" : notifierMinimumSeverity(id),
+          ]),
         ),
         resolvingNotifierIds: notifierIds.filter(
           (id) =>
-            configuredNotifiers.get(id)?.type === "pagerduty" ||
-            (configuredNotifiers.get(id)?.type === "wyoming" &&
-              policy.speechEnabled &&
-              policy.speechAnnounceClear),
+            configuredNotifiers.get(id)?.type !== "wyoming" ||
+            (policy.speechEnabled && policy.speechAnnounceClear),
         ),
         acknowledgingNotifierIds: notifierIds.filter(
           (id) => configuredNotifiers.get(id)?.type === "pagerduty",
         ),
-        speechTemplate: serviceHealth ? undefined : policy.speechTemplate,
-        soundEnabled: serviceHealth ? false : policy.soundEnabled,
+        speechTemplate: serviceHealth
+          ? this.config.defaults?.speechTemplate
+          : policy.speechTemplate,
+        soundEnabled: serviceHealth
+          ? (this.config.defaults?.soundEnabled ?? true)
+          : policy.soundEnabled,
         soundId: serviceHealth ? undefined : policy.soundId,
-        speechEnabled: serviceHealth ? false : policy.speechEnabled,
-        speechMinimumSeverity: policy.speechMinimumSeverity,
+        speechEnabled: serviceHealth
+          ? (this.config.defaults?.speechEnabled ?? true)
+          : policy.speechEnabled,
+        speechMinimumSeverity: serviceHealth
+          ? (this.config.defaults?.speechMinimumSeverity ?? "warn")
+          : policy.speechMinimumSeverity,
       },
     );
     if (!occurrence) return undefined;

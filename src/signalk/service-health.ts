@@ -46,7 +46,7 @@ export const serviceHealthMessage = (
     ? ` Last error: ${service.lastFailureCode}.`
     : "";
   if (service.terminalFailureCount > 0)
-    return `${service.name} has ${service.terminalFailureCount} failed notification ${service.terminalFailureCount === 1 ? "delivery" : "deliveries"} that will not be retried.${code}`;
+    return `${service.name} has ${service.terminalFailureCount} failed notification ${service.terminalFailureCount === 1 ? "delivery" : "deliveries"} that will not be retried${service.retryingFailureCount > 0 ? ` and ${service.retryingFailureCount} awaiting retry` : ""}.${code}`;
   if (service.retryingFailureCount > 0)
     return `${service.name} has ${service.retryingFailureCount} failed notification ${service.retryingFailureCount === 1 ? "delivery" : "deliveries"} awaiting retry.${code}`;
   return `${service.name} notification delivery is operating normally.`;

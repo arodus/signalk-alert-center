@@ -90,8 +90,12 @@ function ensureColumn(
 
 const deliveryContextSelect = `SELECT d.*,
   o.id AS occurrence_id, o.occurrence_number, o.definition_id,
-  o.path AS alert_path, o.message AS alert_message,
-  o.max_severity AS alert_severity, o.started_at AS alert_started_at,
+  o.path AS alert_path,
+  CASE WHEN d.snapshot_at IS NOT NULL THEN d.snapshot_message
+    ELSE o.message END AS alert_message,
+  CASE WHEN d.snapshot_at IS NOT NULL THEN d.snapshot_severity
+    ELSE o.max_severity END AS alert_severity,
+  o.started_at AS alert_started_at,
   f.name AS definition_name
 FROM deliveries d
 LEFT JOIN alert_occurrences o ON o.id=d.alert_id
@@ -105,6 +109,18 @@ const deliveryRecord = (row: Row): DeliveryRecord => ({
   state: row.state as DeliveryRecord["state"],
   attemptCount: Number(row.attempt_count),
   cycle: Number(row.cycle ?? 1),
+  ...(row.snapshot_state && row.snapshot_severity && row.snapshot_at
+    ? {
+        alertSnapshot: {
+          state: row.snapshot_state as AlertRecord["currentState"],
+          severity: row.snapshot_severity as AlertRecord["currentSeverity"],
+          message: row.snapshot_message
+            ? String(row.snapshot_message)
+            : undefined,
+          at: new Date(String(row.snapshot_at)),
+        },
+      }
+    : {}),
   nextAttemptAt: date(row.next_attempt_at),
   lastAttemptAt: date(row.last_attempt_at),
   deliveredAt: date(row.delivered_at),
@@ -264,6 +280,10 @@ export class AlertDatabase {
           "speech_minimum_severity",
           "TEXT NOT NULL DEFAULT 'warn'",
         ],
+        ["deliveries", "snapshot_state", "TEXT"],
+        ["deliveries", "snapshot_severity", "TEXT"],
+        ["deliveries", "snapshot_message", "TEXT"],
+        ["deliveries", "snapshot_at", "TEXT"],
       ].map(([table, column, definition]) =>
         ensureColumn(this.db, table, column, definition),
       );
@@ -905,7 +925,9 @@ export class AlertDatabase {
           options.resolvingNotifierIds,
           options.acknowledgingNotifierIds ?? options.resolvingNotifierIds,
         );
-        const previousSeverity = String(active.current_severity);
+        const previousSeverity = String(
+          active.current_severity,
+        ) as AlertRecord["currentSeverity"];
         const previousMessage = active.message
           ? String(active.message)
           : undefined;
@@ -981,6 +1003,11 @@ export class AlertDatabase {
         if (clearing) this.createActionDeliveryIntents(id, "resolve", now);
 
         if (!clearing) {
+          if (
+            previousSeverity !== alert.severity &&
+            active.activation_state === "eligible"
+          )
+            this.createStateChangeDeliveryIntents(id, now);
           const qualifies =
             severityRank(alert.severity) >=
             severityRank(
@@ -1187,22 +1214,69 @@ export class AlertDatabase {
         )
       )
         continue;
+      const operation = Number(row.supports_resolution) ? "trigger" : "notify";
       this.db
         .prepare(
           `INSERT OR IGNORE INTO deliveries
-            (id, alert_id, transport_instance_id, operation, state,
+            (id, alert_id, transport_instance_id, operation, cycle,
+             snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
              attempt_count, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
         )
         .run(
           randomUUID(),
           alertId,
           String(row.transport_instance_id),
-          Number(row.supports_resolution) ? "trigger" : "notify",
+          operation,
+          1,
+          alert.currentState,
+          alert.currentSeverity,
+          alert.message ?? null,
+          timestamp,
           timestamp,
           timestamp,
         );
     }
+  }
+
+  private createStateChangeDeliveryIntents(alertId: string, now: Date): void {
+    const timestamp = now.toISOString();
+    const alert = this.getAlert(alertId);
+    const rows = this.db
+      .prepare(
+        `SELECT n.transport_instance_id, n.supports_resolution,
+                MAX(existing.cycle) AS cycle
+         FROM occurrence_notifiers n
+         JOIN deliveries existing
+           ON existing.alert_id=n.alert_id
+          AND existing.transport_instance_id=n.transport_instance_id
+          AND existing.operation IN ('notify', 'trigger')
+         WHERE n.alert_id=?
+         GROUP BY n.transport_instance_id, n.supports_resolution
+         ORDER BY n.rowid`,
+      )
+      .all(alertId) as Row[];
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO deliveries
+        (id, alert_id, transport_instance_id, operation, cycle,
+         snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
+         attempt_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+    );
+    for (const row of rows)
+      insert.run(
+        randomUUID(),
+        alertId,
+        String(row.transport_instance_id),
+        Number(row.supports_resolution) ? "trigger" : "notify",
+        Number(row.cycle) + 1,
+        alert.currentState,
+        alert.currentSeverity,
+        alert.message ?? null,
+        timestamp,
+        timestamp,
+        timestamp,
+      );
   }
 
   private enableLifecycleActionsForNotifiers(
@@ -1242,6 +1316,7 @@ export class AlertDatabase {
     now: Date,
   ): void {
     const timestamp = now.toISOString();
+    const alert = this.getAlert(alertId);
     const rows = this.db
       .prepare(
         `SELECT n.transport_instance_id, MAX(trigger_delivery.cycle) AS trigger_cycle
@@ -1261,9 +1336,10 @@ export class AlertDatabase {
       .all(alertId, operation) as Row[];
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO deliveries
-        (id, alert_id, transport_instance_id, operation, cycle, state,
+        (id, alert_id, transport_instance_id, operation, cycle,
+         snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
          attempt_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
     );
     for (const row of rows)
       insert.run(
@@ -1272,6 +1348,10 @@ export class AlertDatabase {
         String(row.transport_instance_id),
         operation,
         operation === "acknowledge" ? Number(row.trigger_cycle) : 1,
+        alert.currentState,
+        alert.currentSeverity,
+        alert.message ?? null,
+        timestamp,
         timestamp,
         timestamp,
       );
@@ -1656,7 +1736,8 @@ export class AlertDatabase {
     try {
       const rows = this.db
         .prepare(
-          `SELECT n.alert_id, n.transport_instance_id, n.supports_resolution
+          `SELECT n.alert_id, n.transport_instance_id, n.supports_resolution,
+                  o.current_state, o.current_severity, o.message
            FROM occurrence_notifiers n
            JOIN alert_occurrences o ON o.id=n.alert_id
            WHERE n.next_repeat_at IS NOT NULL
@@ -1677,9 +1758,10 @@ export class AlertDatabase {
       );
       const insert = this.db.prepare(
         `INSERT INTO deliveries
-          (id, alert_id, transport_instance_id, operation, cycle, state,
+          (id, alert_id, transport_instance_id, operation, cycle,
+           snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
            attempt_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
       );
       let created = 0;
       for (const row of rows) {
@@ -1693,6 +1775,10 @@ export class AlertDatabase {
           transportId,
           Number(row.supports_resolution) ? "trigger" : "notify",
           Number(cycleRow.cycle),
+          String(row.current_state),
+          String(row.current_severity),
+          row.message ? String(row.message) : null,
+          timestamp,
           timestamp,
           timestamp,
         );

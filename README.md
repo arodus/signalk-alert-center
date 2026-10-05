@@ -31,7 +31,8 @@ current value changes:
 - **See service failures as Signal K notifications.** Each enabled notification
   service publishes its own health notification: `normal` when no delivery
   failure remains, `warn` while failed deliveries await retry, and `alert` when
-  a delivery has failed permanently.
+  a delivery has failed permanently. Each service can send these health alerts
+  and their recovery through selected backup services.
 
 ## Alert Center
 
@@ -82,6 +83,10 @@ its alert history while removing the delivery and its attempt history.
 
 Notification services are created globally in **Server → Plugin Config → Signal
 K Alert Center**. Individual alerts then select from those named services.
+For each service, **Send delivery failure alerts through** optionally selects
+other configured services that receive its warning, terminal-failure alert, and
+recovery. The affected service cannot select itself, and these internal alerts
+never use normal alert defaults or repeat delivery.
 
 | Service                | What is sent                                    | Notes                                                                                                  |
 | ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -190,8 +195,15 @@ service selected for that alert.
   current occurrence but does not delete its history.
 - Delivery is persisted before network activity begins. Pending work is recovered
   after a Signal K or plugin restart.
-- Service-health notifications are retained in Alert Center history but are never
-  routed to notification services themselves, preventing recursive failure alerts.
+- Every Signal K severity-state change creates a new durable delivery cycle for
+  services targeted by the earlier state. Each cycle keeps its own severity and
+  message snapshot, even when the previous cycle is still queued or retrying.
+  This includes escalation and de-escalation; a clear creates one recovery
+  delivery. Repeated updates that keep the same state do not create another
+  delivery.
+- Service-health notifications are retained in Alert Center history. They route
+  only through explicitly selected backup services and never through the service
+  whose failure they describe.
 - Retention cleanup is disabled by default and never removes active occurrences or
   pending delivery work.
 - Use the diagnostics section at the bottom of the webapp when troubleshooting.

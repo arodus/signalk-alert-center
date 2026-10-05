@@ -30,6 +30,18 @@ const serviceRepeatInterval = {
   description:
     "After this service delivers successfully, send through it again after this many seconds while the alert remains active. Leave empty or use 0 to send once.",
 };
+const serviceFailureNotifiers = {
+  type: "array",
+  title: "Services for delivery failure alerts",
+  description:
+    "Optional names of other configured services that receive this service's warn, alert, and recovery notifications. A service cannot notify through itself.",
+  uniqueItems: true,
+  default: [],
+  items: {
+    type: "string",
+    title: "Service name",
+  },
+};
 const serviceType = {
   type: "string",
   title: "Service type",
@@ -338,6 +350,7 @@ export const pluginConfigSchema = {
           enabled: serviceEnabled,
           minSeverity: serviceMinimumSeverity,
           repeatIntervalSeconds: serviceRepeatInterval,
+          failureNotifierIds: serviceFailureNotifiers,
         },
         required: ["name", "type"],
         dependencies: {

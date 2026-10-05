@@ -5,10 +5,16 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Create a new durable delivery cycle whenever an active Signal K alert changes
+  severity state, including while an earlier state is queued or retrying. Each
+  cycle retains its own severity and message snapshot. Escalation and
+  de-escalation are delivered separately, clear sends one recovery delivery, and
+  repeated updates in the same state remain coalesced.
 - Publish a Signal K health notification for every enabled notification service:
   normal with no unresolved failures, warn while delivery is retrying, and alert
-  after a terminal failure. These internal alerts are retained without creating
-  recursive outbound deliveries.
+  after a terminal failure. Each service can send its failure and recovery
+  notifications through explicitly selected other services; self-delivery and
+  repeat delivery are blocked to prevent recursive notification loops.
 - Failed deliveries can now be deleted individually or in bulk from the
   Deliveries tab. Their attempt rows are removed while the associated alert
   occurrence and alert history remain available.

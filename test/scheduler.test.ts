@@ -5,6 +5,62 @@ import { AlertDatabase } from "../src/storage/db";
 import { NotificationTransport } from "../src/transports/transport";
 
 describe("DeliveryScheduler", () => {
+  it("delivers the state snapshot for every queued severity transition", async () => {
+    const database = new AlertDatabase();
+    const options = { resolvingNotifierIds: ["service"] };
+    database.ingest(
+      {
+        sourceKey: "notifications.state-change",
+        path: "notifications.state-change",
+        severity: "warn",
+        state: "active",
+        message: "Warning state",
+      },
+      ["service"],
+      new Date("2026-01-01T00:00:00Z"),
+      options,
+    );
+    database.ingest(
+      {
+        sourceKey: "notifications.state-change",
+        path: "notifications.state-change",
+        severity: "alert",
+        state: "active",
+        message: "Alert state",
+      },
+      ["service"],
+      new Date("2026-01-01T00:01:00Z"),
+      options,
+    );
+    const sent: Array<{ severity: string; message?: string }> = [];
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map([
+        [
+          "service",
+          {
+            type: "test",
+            send: vi.fn(async (alert) => {
+              sent.push({
+                severity: alert.currentSeverity,
+                message: alert.message,
+              });
+              return { kind: "success" as const };
+            }),
+          },
+        ],
+      ]),
+    );
+
+    await scheduler.runOnce(new Date("2026-01-01T00:02:00Z"));
+
+    expect(sent).toEqual([
+      { severity: "warn", message: "Warning state" },
+      { severity: "alert", message: "Alert state" },
+    ]);
+    database.close();
+  });
+
   it("reports per-service success, retry, terminal failure, and overdue activation", async () => {
     const database = new AlertDatabase();
     const now = new Date("2026-01-01T00:00:00Z");

@@ -7,6 +7,8 @@ interface NotifierBaseConfig {
   minSeverity?: Severity;
   /** Seconds after a successful delivery before this service sends again. */
   repeatIntervalSeconds?: number;
+  /** Other configured services that receive this service's health alerts. */
+  failureNotifierIds?: string[];
 }
 export type NotifierConfig =
   | (NotifierBaseConfig & {
@@ -166,6 +168,16 @@ export function validateConfig(config: PluginConfig): void {
       throw new Error(
         `Notification service ${notifier.name} repeat interval must be an integer from 0 to 31536000`,
       );
+    if (
+      notifier.failureNotifierIds !== undefined &&
+      (!Array.isArray(notifier.failureNotifierIds) ||
+        notifier.failureNotifierIds.some(
+          (id) => typeof id !== "string" || !id.trim(),
+        ))
+    )
+      throw new Error(
+        `Notification service ${notifier.name} has invalid failure notification services`,
+      );
     if (notifier.type === "ntfy") {
       requireString(
         notifier.server,
@@ -260,6 +272,22 @@ export function validateConfig(config: PluginConfig): void {
           `Notification service ${notifier.name} has an invalid Wyoming urgent severity`,
         );
     }
+  }
+  for (const notifier of config.notifiers ?? []) {
+    const failureNotifierIds = notifier.failureNotifierIds ?? [];
+    if (new Set(failureNotifierIds).size !== failureNotifierIds.length)
+      throw new Error(
+        `Notification service ${notifier.name} repeats a failure notification service`,
+      );
+    if (failureNotifierIds.includes(notifier.name))
+      throw new Error(
+        `Notification service ${notifier.name} cannot send failure notifications through itself`,
+      );
+    const unknown = failureNotifierIds.find((id) => !notifierNames.has(id));
+    if (unknown)
+      throw new Error(
+        `Notification service ${notifier.name} references an unknown failure notification service: ${unknown}`,
+      );
   }
   validateRetry(config.retry);
   validateIngestion(config.ingestion);

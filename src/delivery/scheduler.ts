@@ -157,6 +157,20 @@ export class DeliveryScheduler {
       return;
     }
     const alert = this.database.getAlert(delivery.alertId);
+    const deliveryAlert = delivery.alertSnapshot
+      ? {
+          ...alert,
+          currentState: delivery.alertSnapshot.state,
+          currentSeverity: delivery.alertSnapshot.severity,
+          maxSeverity: delivery.alertSnapshot.severity,
+          message: delivery.alertSnapshot.message,
+          lastSeenAt: delivery.alertSnapshot.at,
+          clearedAt:
+            delivery.alertSnapshot.state === "cleared"
+              ? delivery.alertSnapshot.at
+              : undefined,
+        }
+      : alert;
     const controller = new AbortController();
     const startedAt = new Date();
     this.activeRequests.set(controller, startedAt);
@@ -181,8 +195,8 @@ export class DeliveryScheduler {
     let result: TransportResult;
     try {
       const sending = Promise.resolve(
-        transport.send(alert, delivery, {
-          rendered: renderAlert(alert),
+        transport.send(deliveryAlert, delivery, {
+          rendered: renderAlert(deliveryAlert),
           now,
           signal: controller.signal,
         }),
