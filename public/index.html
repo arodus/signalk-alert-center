@@ -264,14 +264,24 @@
             <h2>Notification deliveries</h2>
             <p>Delivery results and retries for your notification services.</p>
           </div>
-          <button
-            id="retry"
-            class="button button-quiet button-small"
-            type="button"
-          >
-            Retry all failed deliveries
-          </button>
+          <div class="section-actions">
+            <button
+              id="delete-failed"
+              class="button button-danger button-small"
+              type="button"
+            >
+              Delete all failed
+            </button>
+            <button
+              id="retry"
+              class="button button-quiet button-small"
+              type="button"
+            >
+              Retry all failed
+            </button>
+          </div>
         </div>
+        <p id="delivery-bulk-result" class="form-result" role="status"></p>
         <div id="delivery-list" class="table-shell" aria-live="polite">
           <div class="empty">Loading deliveries…</div>
         </div>
@@ -389,6 +399,14 @@
       </button>
       <p id="delivery-dialog-result" class="form-result" role="status"></p>
       <div class="dialog-actions delivery-dialog-actions">
+        <button
+          id="delivery-delete"
+          class="button button-danger button-small"
+          type="button"
+          hidden
+        >
+          Delete this failed delivery
+        </button>
         <button
           id="delivery-retry"
           class="button button-primary button-small"

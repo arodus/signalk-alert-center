@@ -28,6 +28,10 @@ current value changes:
   announcements.
 - **Understand every delivery.** The delivery view shows the destination,
   status, timing, retry attempts, and error details.
+- **See service failures as Signal K notifications.** Each enabled notification
+  service publishes its own health notification: `normal` when no delivery
+  failure remains, `warn` while failed deliveries await retry, and `alert` when
+  a delivery has failed permanently.
 
 ## Alert Center
 
@@ -68,7 +72,9 @@ You can configure:
 
 **Alert history** is a chronological record of Signal K alert changes. It is
 separate from **Deliveries**, which tracks attempts to send those alerts to
-notification services.
+notification services. Failed deliveries can be deleted individually or in
+bulk when they should no longer be retried; this keeps the alert occurrence and
+its alert history while removing the delivery and its attempt history.
 
 ![Notification delivery history and retry status](./docs/screenshots/delivery-history.png)
 
@@ -184,6 +190,8 @@ service selected for that alert.
   current occurrence but does not delete its history.
 - Delivery is persisted before network activity begins. Pending work is recovered
   after a Signal K or plugin restart.
+- Service-health notifications are retained in Alert Center history but are never
+  routed to notification services themselves, preventing recursive failure alerts.
 - Retention cleanup is disabled by default and never removes active occurrences or
   pending delivery work.
 - Use the diagnostics section at the bottom of the webapp when troubleshooting.

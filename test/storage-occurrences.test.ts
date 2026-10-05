@@ -1361,4 +1361,78 @@ describe("occurrence storage", () => {
     expect(db.retryDelivery(delivery.id)).toBe("not_retryable");
     expect(db.retryDelivery("missing")).toBe("not_found");
   });
+
+  it("deletes only failed deliveries while retaining an audit event", () => {
+    const db = database();
+    const failedAlert = db.ingest(active({ sourceKey: "delete-failed" }), [
+      "wyoming",
+    ])!;
+    const failed = db.listDeliveries()[0];
+    expect(db.claimDelivery(failed.id)).toBe(true);
+    db.recordDeliveryFailure(
+      failed.id,
+      "WYOMING_FAILED",
+      'unknown sound "missing"',
+      true,
+      new Date("2026-01-01T00:30:00Z"),
+    );
+    expect(db.operationalStatus().services).toContainEqual(
+      expect.objectContaining({
+        id: "wyoming",
+        retryingFailureCount: 1,
+        terminalFailureCount: 0,
+      }),
+    );
+    db.setWakeDue(failedAlert.id, new Date("2026-01-01T00:10:00Z"));
+    expect(db.operationalStatus().pendingWakeCount).toBe(1);
+
+    expect(db.deleteFailedDelivery(failed.id)).toBe("deleted");
+    expect(db.getDelivery(failed.id)).toBeUndefined();
+    expect(db.queryDeliveryAttempts(failed.id, 10)).toBeUndefined();
+    expect(db.operationalStatus().pendingWakeCount).toBe(0);
+    expect(db.listAlertEvents(failedAlert.id)).toContainEqual(
+      expect.objectContaining({
+        eventType: "delivery_deleted",
+        payload: expect.objectContaining({
+          deliveryId: failed.id,
+          service: "wyoming",
+          attempts: 1,
+          lastErrorCode: "WYOMING_FAILED",
+        }),
+      }),
+    );
+
+    db.ingest(active({ sourceKey: "keep-pending" }), ["ntfy"]);
+    const pending = db
+      .listDeliveries()
+      .find((delivery) => delivery.transportInstanceId === "ntfy")!;
+    expect(db.deleteFailedDelivery(pending.id)).toBe("not_failed");
+    expect(db.deleteFailedDelivery("missing")).toBe("not_found");
+
+    db.ingest(active({ sourceKey: "delete-terminal" }), ["discord"]);
+    const terminal = db
+      .listDeliveries()
+      .find((delivery) => delivery.transportInstanceId === "discord")!;
+    expect(db.claimDelivery(terminal.id)).toBe(true);
+    db.recordDeliveryFailure(terminal.id, "HTTP_401", "Unauthorized", false);
+    expect(db.operationalStatus().services).toContainEqual(
+      expect.objectContaining({
+        id: "discord",
+        retryingFailureCount: 0,
+        terminalFailureCount: 1,
+      }),
+    );
+
+    db.ingest(active({ sourceKey: "keep-delivered" }), ["telegram"]);
+    const delivered = db
+      .listDeliveries()
+      .find((delivery) => delivery.transportInstanceId === "telegram")!;
+    expect(db.claimDelivery(delivered.id)).toBe(true);
+    db.recordDeliverySuccess(delivered.id);
+
+    expect(db.deleteFailedDeliveries()).toBe(1);
+    expect(db.getDelivery(terminal.id)).toBeUndefined();
+    expect(db.getDelivery(pending.id)?.state).toBe("pending");
+    expect(db.getDelivery(delivered.id)?.state).toBe("delivered");
+  });
 });

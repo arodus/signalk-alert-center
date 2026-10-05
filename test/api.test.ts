@@ -131,6 +131,13 @@ function fixture() {
         : id === "pending"
           ? "not_retryable"
           : "not_found",
+    deleteFailedDelivery: (id) =>
+      id === "delivery-1"
+        ? "deleted"
+        : id === "pending"
+          ? "not_failed"
+          : "not_found",
+    deleteFailedDeliveries: () => 3,
     acknowledgeOccurrence: (id) =>
       id === "inactive" ? "inactive" : { status: "acknowledged" },
     silenceOccurrence: (id) =>
@@ -194,7 +201,7 @@ describe("alert-center routes", () => {
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
     expect(access.filter((value) => value === "readonly")).toHaveLength(11);
-    expect(access.filter((value) => value === "readwrite")).toHaveLength(7);
+    expect(access.filter((value) => value === "readwrite")).toHaveLength(9);
   });
 
   it("runs dedicated service tests and validates their operation", async () => {
@@ -226,7 +233,7 @@ describe("alert-center routes", () => {
     expect(busy.body).toMatchObject({ error: { code: "TEST_IN_PROGRESS" } });
   });
 
-  it("pages delivery summaries, details, attempts, and retries", async () => {
+  it("pages delivery summaries, details, attempts, retries, and deletes", async () => {
     const current = fixture();
     const list = await current.invoke("GET", "/deliveries", {
       query: { limit: "25", cursor: "previous" },
@@ -262,6 +269,18 @@ describe("alert-center routes", () => {
       params: { id: "pending" },
     });
     expect(conflict.statusCode).toBe(409);
+
+    const deleted = await current.invoke("DELETE", "/deliveries/:id", {
+      params: { id: "delivery-1" },
+    });
+    expect(deleted.body).toEqual({ status: "deleted" });
+    const deleteConflict = await current.invoke("DELETE", "/deliveries/:id", {
+      params: { id: "pending" },
+    });
+    expect(deleteConflict.statusCode).toBe(409);
+
+    const deletedAll = await current.invoke("DELETE", "/deliveries");
+    expect(deletedAll.body).toEqual({ status: "deleted", count: 3 });
   });
 
   it("streams change notifications and releases closed clients", async () => {

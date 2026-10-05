@@ -56,9 +56,11 @@ const elements = {
   deliveryDialogTitle: $("#delivery-dialog-title"),
   deliveryDialogBody: $("#delivery-dialog-body"),
   deliveryDialogResult: $("#delivery-dialog-result"),
+  deliveryBulkResult: $("#delivery-bulk-result"),
   deliveryAttempts: $("#delivery-attempt-list"),
   moreDeliveryAttempts: $("#delivery-attempts-more"),
   deliveryRetry: $("#delivery-retry"),
+  deliveryDelete: $("#delivery-delete"),
 };
 
 const escapeHtml = (value) =>
@@ -461,7 +463,7 @@ function renderDeliveries(deliveries) {
               <td data-label="Service"><strong class="cell-title">${escapeHtml(service.name ?? delivery.transportInstanceId)}</strong><span class="cell-detail">${escapeHtml(service.type ?? "unknown service")} · ${escapeHtml(delivery.operation ?? "notify")}${delivery.cycle > 1 ? ` · repeat ${delivery.cycle - 1}` : ""}</span></td>
               <td data-label="Status"><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span>${playback ? `<span class="cell-detail">Playback: ${escapeHtml(playback)}</span>` : ""}${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
               <td data-label="Timing"><span class="cell-title">${escapeHtml(primaryTime)}</span><span class="cell-detail">${escapeHtml(outcomeTime)}</span>${delivery.lastErrorMessage ? `<span class="cell-detail compact-detail error-detail" title="${escapeHtml(delivery.lastErrorMessage)}">${escapeHtml(delivery.lastErrorMessage)}</span>` : ""}</td>
-              <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail">Can retry</span>' : ""}</td>
+              <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail">Can retry or delete</span>' : ""}</td>
             </tr>`;
           })
           .join("")}</tbody></table>`
@@ -788,6 +790,8 @@ function renderDeliveryDetail(delivery) {
   elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(String(delivery.state).replaceAll("_", " "))}</span></dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>${service.type === "wyoming" ? "Accepted" : "Delivered"}</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(delivery.remoteId ?? "—")}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}${renderPlaybackDetails(delivery.playback)}`;
   elements.deliveryRetry.hidden = !retryable;
   elements.deliveryRetry.dataset.id = delivery.id;
+  elements.deliveryDelete.hidden = !retryable;
+  elements.deliveryDelete.dataset.id = delivery.id;
 }
 async function refreshDeliveryDetail() {
   if (!state.selectedDelivery) return;
@@ -813,6 +817,7 @@ async function openDelivery(id) {
     '<div class="empty">Loading attempts…</div>';
   elements.deliveryDialogResult.textContent = "";
   elements.deliveryRetry.hidden = true;
+  elements.deliveryDelete.hidden = true;
   if (!elements.deliveryDialog.open) elements.deliveryDialog.showModal();
   try {
     await refreshDeliveryDetail();
@@ -1348,6 +1353,29 @@ elements.deliveryRetry.addEventListener("click", async () => {
     elements.deliveryRetry.disabled = false;
   }
 });
+elements.deliveryDelete.addEventListener("click", async () => {
+  const id = elements.deliveryDelete.dataset.id;
+  if (
+    !id ||
+    !window.confirm(
+      "Delete this failed delivery and its complete attempt history? The alert occurrence and alert history will be kept.",
+    )
+  )
+    return;
+  elements.deliveryDelete.disabled = true;
+  elements.deliveryRetry.disabled = true;
+  elements.deliveryDialogResult.textContent = "Deleting this delivery…";
+  try {
+    await api(`/deliveries/${encodeURIComponent(id)}`, { method: "DELETE" });
+    closeDeliveryDialog();
+    await load();
+  } catch (error) {
+    elements.deliveryDialogResult.textContent = error.message;
+  } finally {
+    elements.deliveryDelete.disabled = false;
+    elements.deliveryRetry.disabled = false;
+  }
+});
 $("#retry").addEventListener("click", async () => {
   $("#retry").disabled = true;
   try {
@@ -1357,6 +1385,26 @@ $("#retry").addEventListener("click", async () => {
     showError(error);
   } finally {
     $("#retry").disabled = false;
+  }
+});
+$("#delete-failed").addEventListener("click", async () => {
+  if (
+    !window.confirm(
+      "Delete every failed delivery and its attempt history? Alert occurrences and alert history will be kept.",
+    )
+  )
+    return;
+  const button = $("#delete-failed");
+  button.disabled = true;
+  elements.deliveryBulkResult.textContent = "Deleting failed deliveries…";
+  try {
+    const result = await api("/deliveries", { method: "DELETE" });
+    elements.deliveryBulkResult.textContent = `${result.count} failed ${result.count === 1 ? "delivery" : "deliveries"} deleted.`;
+    await load();
+  } catch (error) {
+    elements.deliveryBulkResult.textContent = error.message;
+  } finally {
+    button.disabled = false;
   }
 });
 selectView(

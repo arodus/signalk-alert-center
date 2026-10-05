@@ -5,6 +5,13 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Publish a Signal K health notification for every enabled notification service:
+  normal with no unresolved failures, warn while delivery is retrying, and alert
+  after a terminal failure. These internal alerts are retained without creating
+  recursive outbound deliveries.
+- Failed deliveries can now be deleted individually or in bulk from the
+  Deliveries tab. Their attempt rows are removed while the associated alert
+  occurrence and alert history remain available.
 - Persist and display aggregate and per-satellite signalk-wyoming playback
   outcomes separately from notification delivery acceptance, including restart
   reconciliation and explicit unknown results when confirmation is lost.

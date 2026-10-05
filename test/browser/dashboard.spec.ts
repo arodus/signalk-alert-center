@@ -116,10 +116,10 @@ test("shows alert updates in a separate history tab without delivery data", asyn
   );
 });
 
-test("navigates delivery history, opens attempts, and retries one failure", async ({
-  page,
-}) => {
+test("opens, retries, and deletes failed deliveries", async ({ page }) => {
   let retryCount = 0;
+  let deleteCount = 0;
+  let bulkDeleteCount = 0;
   const delivery = {
     id: "delivery-1",
     alertId: "occurrence-4",
@@ -148,6 +148,20 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
       if (url.pathname.endsWith("/delivery-1/retry")) {
         retryCount += 1;
         return route.fulfill({ json: { status: "scheduled" } });
+      }
+      if (
+        url.pathname.endsWith("/delivery-1") &&
+        route.request().method() === "DELETE"
+      ) {
+        deleteCount += 1;
+        return route.fulfill({ json: { status: "deleted" } });
+      }
+      if (
+        url.pathname.endsWith("/deliveries") &&
+        route.request().method() === "DELETE"
+      ) {
+        bulkDeleteCount += 1;
+        return route.fulfill({ json: { status: "deleted", count: 2 } });
       }
       if (url.pathname.endsWith("/delivery-1/attempts"))
         return route.fulfill({
@@ -192,6 +206,20 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
     "scheduled for retry",
   );
   expect(retryCount).toBe(1);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Delete this failed delivery" })
+    .click();
+  await expect(page.locator("#delivery-dialog")).toBeHidden();
+  expect(deleteCount).toBe(1);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete all failed" }).click();
+  await expect(page.locator("#delivery-bulk-result")).toContainText(
+    "2 failed deliveries deleted",
+  );
+  expect(bulkDeleteCount).toBe(1);
 });
 
 test("shows an empty Deliveries tab", async ({ page }) => {

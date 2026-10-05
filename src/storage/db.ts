@@ -32,6 +32,8 @@ type Row = Record<string, unknown>;
 export interface ServiceOperationalStatus {
   id: string;
   pendingCount: number;
+  retryingFailureCount: number;
+  terminalFailureCount: number;
   lastSuccessAt?: Date;
   lastFailureAt?: Date;
   lastFailureCode?: string;
@@ -343,6 +345,11 @@ export class AlertDatabase {
         .prepare(
           `SELECT transport_instance_id,
              SUM(CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable') THEN 1 ELSE 0 END) AS pending,
+             SUM(CASE
+               WHEN state='failed_retryable'
+                 OR (state IN ('pending', 'waiting_connectivity', 'sending') AND attempt_count > 0)
+               THEN 1 ELSE 0 END) AS retrying_failures,
+             SUM(CASE WHEN state='failed_terminal' THEN 1 ELSE 0 END) AS terminal_failures,
              MAX(delivered_at) AS last_success
            FROM deliveries GROUP BY transport_instance_id
            ORDER BY transport_instance_id`,
@@ -371,6 +378,8 @@ export class AlertDatabase {
           return {
             id: String(row.transport_instance_id),
             pendingCount: Number(row.pending ?? 0),
+            retryingFailureCount: Number(row.retrying_failures ?? 0),
+            terminalFailureCount: Number(row.terminal_failures ?? 0),
             lastSuccessAt: date(row.last_success),
             lastFailureAt: date(failure?.finished_at),
             lastFailureCode: failure?.error_code
@@ -2231,5 +2240,103 @@ export class AlertDatabase {
       )
       .run(now.toISOString(), id);
     return "scheduled";
+  }
+
+  deleteFailedDelivery(
+    id: string,
+    now = new Date(),
+  ): "deleted" | "not_failed" | "not_found" {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const delivery = this.db
+        .prepare(
+          `SELECT alert_id, transport_instance_id, operation, cycle, state,
+                  attempt_count, last_error_code
+           FROM deliveries WHERE id=?`,
+        )
+        .get(id) as Row | undefined;
+      if (!delivery) {
+        this.db.exec("ROLLBACK");
+        return "not_found";
+      }
+      if (
+        !["failed_retryable", "failed_terminal"].includes(
+          String(delivery.state),
+        )
+      ) {
+        this.db.exec("ROLLBACK");
+        return "not_failed";
+      }
+      this.addEvent(String(delivery.alert_id), "delivery_deleted", now, {
+        deliveryId: id,
+        service: String(delivery.transport_instance_id),
+        operation: String(delivery.operation),
+        cycle: Number(delivery.cycle),
+        attempts: Number(delivery.attempt_count),
+        lastErrorCode: delivery.last_error_code
+          ? String(delivery.last_error_code)
+          : undefined,
+      });
+      this.db.prepare("DELETE FROM deliveries WHERE id=?").run(id);
+      this.db
+        .prepare(
+          `DELETE FROM wake_requests WHERE alert_id=?
+           AND NOT EXISTS (
+             SELECT 1 FROM deliveries
+             WHERE alert_id=?
+               AND state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+           )`,
+        )
+        .run(String(delivery.alert_id), String(delivery.alert_id));
+      this.db.exec("COMMIT");
+      return "deleted";
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  deleteFailedDeliveries(now = new Date()): number {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const deliveries = this.db
+        .prepare(
+          `SELECT id, alert_id, transport_instance_id, operation, cycle,
+                  attempt_count, last_error_code
+           FROM deliveries
+           WHERE state IN ('failed_retryable', 'failed_terminal')`,
+        )
+        .all() as Row[];
+      for (const delivery of deliveries)
+        this.addEvent(String(delivery.alert_id), "delivery_deleted", now, {
+          deliveryId: String(delivery.id),
+          service: String(delivery.transport_instance_id),
+          operation: String(delivery.operation),
+          cycle: Number(delivery.cycle),
+          attempts: Number(delivery.attempt_count),
+          lastErrorCode: delivery.last_error_code
+            ? String(delivery.last_error_code)
+            : undefined,
+        });
+      if (deliveries.length)
+        this.db
+          .prepare(
+            "DELETE FROM deliveries WHERE state IN ('failed_retryable', 'failed_terminal')",
+          )
+          .run();
+      this.db.exec(
+        `DELETE FROM wake_requests
+         WHERE NOT EXISTS (
+           SELECT 1 FROM deliveries
+           WHERE deliveries.alert_id=wake_requests.alert_id
+             AND deliveries.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+         )`,
+      );
+      this.db.exec("COMMIT");
+      return deliveries.length;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 }

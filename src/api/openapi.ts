@@ -68,6 +68,20 @@ export function getAlertCenterOpenApi() {
             ...errors,
           },
         },
+        delete: {
+          summary: "Delete all failed delivery intents and their attempts",
+          responses: {
+            "200": response("Failed deliveries deleted", {
+              type: "object",
+              required: ["status", "count"],
+              properties: {
+                status: { type: "string", enum: ["deleted"] },
+                count: { type: "integer", minimum: 0 },
+              },
+            }),
+            ...errors,
+          },
+        },
       },
       "/deliveries/{id}": {
         get: {
@@ -76,6 +90,23 @@ export function getAlertCenterOpenApi() {
           responses: {
             "200": response("Delivery detail", {
               $ref: "#/components/schemas/Delivery",
+            }),
+            ...errors,
+          },
+        },
+        delete: {
+          summary: "Delete one failed delivery and its attempt history",
+          parameters: [idParameter],
+          responses: {
+            "200": response("Failed delivery deleted", {
+              type: "object",
+              required: ["status"],
+              properties: {
+                status: { type: "string", enum: ["deleted"] },
+              },
+            }),
+            "409": response("Delivery is not failed", {
+              $ref: "#/components/schemas/Error",
             }),
             ...errors,
           },
@@ -427,13 +458,23 @@ export function getAlertCenterOpenApi() {
               type: "array",
               items: {
                 type: "object",
-                required: ["id", "name", "type", "enabled", "pendingCount"],
+                required: [
+                  "id",
+                  "name",
+                  "type",
+                  "enabled",
+                  "pendingCount",
+                  "retryingFailureCount",
+                  "terminalFailureCount",
+                ],
                 properties: {
                   id: { type: "string" },
                   name: { type: "string" },
                   type: { type: "string" },
                   enabled: { type: "boolean" },
                   pendingCount: { type: "integer", minimum: 0 },
+                  retryingFailureCount: { type: "integer", minimum: 0 },
+                  terminalFailureCount: { type: "integer", minimum: 0 },
                   lastSuccessAt: { type: "string", format: "date-time" },
                   lastFailureAt: { type: "string", format: "date-time" },
                   lastFailureCode: { type: "string" },
