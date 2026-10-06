@@ -197,6 +197,54 @@ describe("validateConfig", () => {
     ).toThrow("repeat interval");
   });
 
+  it("validates cross-service delivery failure notification routes", () => {
+    const serviceProperties =
+      pluginConfigSchema.properties.notifiers.items.properties;
+    expect(serviceProperties.failureNotifierIds.title).toBe(
+      "Services for delivery failure alerts",
+    );
+    const services = [
+      {
+        name: "Primary",
+        type: "ntfy" as const,
+        server: "https://ntfy.sh",
+        topic: "primary",
+        failureNotifierIds: ["Backup"],
+      },
+      {
+        name: "Backup",
+        type: "ntfy" as const,
+        server: "https://ntfy.sh",
+        topic: "backup",
+      },
+    ];
+    expect(() => validateConfig({ notifiers: services })).not.toThrow();
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          { ...services[0], failureNotifierIds: ["Primary"] },
+          services[1],
+        ],
+      }),
+    ).toThrow("cannot send failure notifications through itself");
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          { ...services[0], failureNotifierIds: ["Missing"] },
+          services[1],
+        ],
+      }),
+    ).toThrow("unknown failure notification service");
+    expect(() =>
+      validateConfig({
+        notifiers: [
+          { ...services[0], failureNotifierIds: ["Backup", "Backup"] },
+          services[1],
+        ],
+      }),
+    ).toThrow("repeats a failure notification service");
+  });
+
   it("validates Signal K Wyoming speech services and defaults", () => {
     expect(() =>
       validateConfig({

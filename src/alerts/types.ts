@@ -163,6 +163,13 @@ export interface DeliveryRecord {
   attemptCount: number;
   /** One-based send cycle for repeated notify/trigger deliveries. */
   cycle: number;
+  /** Alert state captured when this durable delivery cycle was created. */
+  alertSnapshot?: {
+    state: AlertState;
+    severity: Severity;
+    message?: string;
+    at: Date;
+  };
   nextAttemptAt?: Date;
   lastAttemptAt?: Date;
   deliveredAt?: Date;
@@ -251,7 +258,7 @@ export interface IngestOptions {
   oneTime?: boolean;
   notifierMinimumSeverities?: Record<string, Severity>;
   notifierRepeatIntervals?: Record<string, number>;
-  /** Notifiers, such as PagerDuty, that require a trigger followed by resolve. */
+  /** Notifiers that receive a resolve delivery after an accepted trigger. */
   resolvingNotifierIds?: string[];
   /** Notifiers, such as PagerDuty, that accept an acknowledgement action. */
   acknowledgingNotifierIds?: string[];

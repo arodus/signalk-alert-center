@@ -116,10 +116,10 @@ test("shows alert updates in a separate history tab without delivery data", asyn
   );
 });
 
-test("navigates delivery history, opens attempts, and retries one failure", async ({
-  page,
-}) => {
+test("opens, retries, and deletes failed deliveries", async ({ page }) => {
   let retryCount = 0;
+  let deleteCount = 0;
+  let bulkDeleteCount = 0;
   const delivery = {
     id: "delivery-1",
     alertId: "occurrence-4",
@@ -148,6 +148,20 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
       if (url.pathname.endsWith("/delivery-1/retry")) {
         retryCount += 1;
         return route.fulfill({ json: { status: "scheduled" } });
+      }
+      if (
+        url.pathname.endsWith("/delivery-1") &&
+        route.request().method() === "DELETE"
+      ) {
+        deleteCount += 1;
+        return route.fulfill({ json: { status: "deleted" } });
+      }
+      if (
+        url.pathname.endsWith("/deliveries") &&
+        route.request().method() === "DELETE"
+      ) {
+        bulkDeleteCount += 1;
+        return route.fulfill({ json: { status: "deleted", count: 2 } });
       }
       if (url.pathname.endsWith("/delivery-1/attempts"))
         return route.fulfill({
@@ -192,6 +206,20 @@ test("navigates delivery history, opens attempts, and retries one failure", asyn
     "scheduled for retry",
   );
   expect(retryCount).toBe(1);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Delete this failed delivery" })
+    .click();
+  await expect(page.locator("#delivery-dialog")).toBeHidden();
+  expect(deleteCount).toBe(1);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete all failed" }).click();
+  await expect(page.locator("#delivery-bulk-result")).toContainText(
+    "2 failed deliveries deleted",
+  );
+  expect(bulkDeleteCount).toBe(1);
 });
 
 test("shows an empty Deliveries tab", async ({ page }) => {
@@ -320,7 +348,7 @@ test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
       calls += 1;
       const body = route.request().postDataJSON() as { operation: string };
       operations.push(body.operation);
-      await new Promise((resolve) => setTimeout(resolve, 75));
+      await new Promise((resolve) => setTimeout(resolve, 250));
       await route.fulfill({
         json: {
           status: "success",
@@ -329,7 +357,7 @@ test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
             body.operation === "resolve"
               ? "PagerDuty accepted the test-incident resolve event."
               : "PagerDuty accepted the test alert. A real test incident was opened or updated.",
-          durationMs: 75,
+          durationMs: 250,
           operation: body.operation,
           service: { id: "Test PagerDuty", type: "pagerduty" },
         },
@@ -343,10 +371,10 @@ test("tests a PagerDuty alert and resolve without overlapping clicks", async ({
     hasText: "Test PagerDuty",
   });
   const alertButton = card.getByRole("button", { name: "Test alert" });
-  await alertButton.evaluate((button) => {
-    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  });
+  await alertButton.click();
+  const inFlightButton = card.getByRole("button", { name: "Testing…" });
+  await expect(inFlightButton).toBeDisabled();
+  await inFlightButton.dispatchEvent("click");
   await expect(card.getByRole("status")).toContainText("real test incident");
   expect(calls).toBe(1);
 
@@ -372,7 +400,7 @@ test("saves a Telegram service and selects it as a default", async ({
     .getByRole("button", { name: "Notification services", exact: true })
     .click();
   await page.getByRole("button", { name: "Add notification service" }).click();
-  const service = page.getByTestId("notification-service").last();
+  const service = page.getByTestId("notification-service").nth(0);
   await expect(service.getByText(/^Service \d+$/)).toBeVisible();
   await expect(
     service.getByText("Unnamed service", { exact: true }),
@@ -388,6 +416,15 @@ test("saves a Telegram service and selects it as a default", async ({
     .getByLabel("Repeat while the alert remains active (seconds)")
     .fill("300");
   await service.getByLabel("Send Telegram messages silently").check();
+  await page.getByRole("button", { name: "Add notification service" }).click();
+  const backup = page.getByTestId("notification-service").nth(1);
+  await backup.getByLabel("Service name").fill("Backup");
+  await backup.getByLabel("ntfy topic").fill("backup-alerts");
+  const failureRoutes = service.locator("label").filter({
+    hasText: "Send delivery failure alerts through",
+  });
+  await failureRoutes.getByRole("button").click();
+  await failureRoutes.getByRole("checkbox", { name: /Backup/ }).check();
   await page
     .getByRole("button", { name: "Alert defaults", exact: true })
     .click();
@@ -403,7 +440,13 @@ test("saves a Telegram service and selects it as a default", async ({
       response.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Save changes" }).click();
-  expect((await savedRequest).ok()).toBe(true);
+  const saved = await savedRequest;
+  expect(saved.ok()).toBe(true);
+  const savedConfig = saved.request().postDataJSON().configuration;
+  expect(
+    savedConfig.notifiers.find((item) => item.name === "Bridge")
+      .failureNotifierIds,
+  ).toEqual(["Backup"]);
   await expect(page.getByText("Save requested.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Errors" })).toHaveCount(0);
 });

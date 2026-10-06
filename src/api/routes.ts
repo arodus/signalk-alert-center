@@ -99,6 +99,10 @@ export interface AlertCenterRepository {
   retryDelivery(
     id: string,
   ): MaybePromise<"scheduled" | "not_retryable" | "not_found">;
+  deleteFailedDelivery(
+    id: string,
+  ): MaybePromise<"deleted" | "not_failed" | "not_found">;
+  deleteFailedDeliveries(): MaybePromise<number>;
   acknowledgeOccurrence(
     id: string,
   ): MaybePromise<ActionResult | "inactive" | false | undefined>;
@@ -833,6 +837,16 @@ export function registerAlertCenterRoutes(
   );
   addRoute(
     router,
+    "delete",
+    "/deliveries",
+    "readwrite",
+    wrap(async (_req, res) => {
+      const count = await repo().deleteFailedDeliveries();
+      res.json({ status: "deleted", count });
+    }),
+  );
+  addRoute(
+    router,
     "get",
     "/deliveries/:id",
     "readonly",
@@ -873,6 +887,24 @@ export function registerAlertCenterRoutes(
           "Only failed deliveries can be retried",
         );
       res.json({ status: "scheduled" });
+    }),
+  );
+  addRoute(
+    router,
+    "delete",
+    "/deliveries/:id",
+    "readwrite",
+    wrap(async (req, res) => {
+      const result = await repo().deleteFailedDelivery(req.params?.id ?? "");
+      if (result === "not_found")
+        throw new ApiError(404, "NOT_FOUND", "Delivery was not found");
+      if (result === "not_failed")
+        throw new ApiError(
+          409,
+          "DELIVERY_NOT_FAILED",
+          "Only failed deliveries can be deleted",
+        );
+      res.json({ status: "deleted" });
     }),
   );
   const actions = {

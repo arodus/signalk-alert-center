@@ -30,7 +30,9 @@ export class PagerDutyTransport implements NotificationTransport {
       payload: {
         summary: context.rendered.body,
         severity:
-          alert.maxSeverity === "emergency" ? "critical" : alert.maxSeverity,
+          context.rendered.severity === "emergency"
+            ? "critical"
+            : context.rendered.severity,
         source: alert.path,
         timestamp: context.now.toISOString(),
       },

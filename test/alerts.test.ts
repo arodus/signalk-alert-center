@@ -83,7 +83,7 @@ describe("AlertLifecycle", () => {
     expect(database.listDeliveries()).toHaveLength(1);
   });
 
-  it("coalesces duplicate active updates and retains the highest severity", () => {
+  it("keeps one occurrence and creates a delivery for each severity state", () => {
     const { database, lifecycle } = createLifecycle(["ntfy-main"]);
     const firstSeenAt = new Date("2026-09-05T10:00:00.000Z");
     const updatedAt = new Date("2026-09-05T10:05:00.000Z");
@@ -99,7 +99,10 @@ describe("AlertLifecycle", () => {
     expect(second.lastSeenAt).toEqual(updatedAt);
     expect(second.currentSeverity).toBe("emergency");
     expect(second.maxSeverity).toBe("emergency");
-    expect(database.listDeliveries()).toHaveLength(1);
+    expect(database.listDeliveries()).toMatchObject([
+      { cycle: 1, alertSnapshot: { severity: "warn" } },
+      { cycle: 2, alertSnapshot: { severity: "emergency" } },
+    ]);
   });
 
   it("retains a cleared alert and its pending delivery when it clears before delivery", () => {

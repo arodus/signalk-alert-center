@@ -41,6 +41,12 @@ import {
   SignalKNotificationInput,
 } from "./signalk/notifications";
 import { BoundedIngestionQueue } from "./signalk/ingestion-queue";
+import {
+  isServiceHealthPath,
+  serviceHealthMessage,
+  serviceHealthPath,
+  serviceHealthState,
+} from "./signalk/service-health";
 import { AlertDatabase } from "./storage/db";
 import { DiscordTransport } from "./transports/discord";
 import { NtfyTransport } from "./transports/ntfy";
@@ -113,6 +119,7 @@ export class AlertCenterRuntime {
   private config: PluginConfig = {};
   private transports = new Map<string, NotificationTransport>();
   private notifierTests = new Set<string>();
+  private serviceHealthFingerprints = new Map<string, string>();
   private wyomingApi?: WyomingAnnouncementApi;
   private wyomingUnsubscribe?: () => void;
   private wyomingAnnouncementUnsubscribe?: () => void;
@@ -184,6 +191,8 @@ export class AlertCenterRuntime {
         type: notifier.type,
         enabled: notifier.enabled !== false,
         pendingCount: service?.pendingCount ?? 0,
+        retryingFailureCount: service?.retryingFailureCount ?? 0,
+        terminalFailureCount: service?.terminalFailureCount ?? 0,
         lastSuccessAt: service?.lastSuccessAt,
         lastFailureAt: service?.lastFailureAt,
         lastFailureCode: service?.lastFailureCode,
@@ -217,14 +226,10 @@ export class AlertCenterRuntime {
         .filter(
           (service) =>
             service.enabled &&
-            service.lastFailureAt &&
-            (!service.lastSuccessAt ||
-              service.lastFailureAt > service.lastSuccessAt),
+            (service.retryingFailureCount > 0 ||
+              service.terminalFailureCount > 0),
         )
-        .map(
-          (service) =>
-            `${service.name} last failed${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
-        ),
+        .map((service) => serviceHealthMessage(service)),
     ].filter((reason): reason is string => Boolean(reason));
     const health = faultReasons.length
       ? { state: "fault" as const, reasons: faultReasons }
@@ -310,6 +315,62 @@ export class AlertCenterRuntime {
     if (this.database) this.app.setPluginStatus(this.statusMessage());
   }
 
+  private publishServiceHealthNotifications(): void {
+    if (!this.database || this.stopping) return;
+    const services = this.status().services.filter(
+      (service) => service.enabled,
+    );
+    for (const service of services) {
+      const state = serviceHealthState(service);
+      const message = serviceHealthMessage(service);
+      const value = {
+        state,
+        method: ["visual"],
+        message,
+        data: {
+          serviceId: service.id,
+          serviceType: service.type,
+          retryingFailureCount: service.retryingFailureCount,
+          terminalFailureCount: service.terminalFailureCount,
+          ...(state !== "normal" && service.lastFailureCode
+            ? { lastFailureCode: service.lastFailureCode }
+            : {}),
+        },
+      };
+      const fingerprint = JSON.stringify(value);
+      if (this.serviceHealthFingerprints.get(service.id) === fingerprint)
+        continue;
+      this.serviceHealthFingerprints.set(service.id, fingerprint);
+      this.app.handleMessage("signalk-alert-center", {
+        context: this.app.selfContext as Context,
+        updates: [
+          {
+            values: [{ path: serviceHealthPath(service.id) as Path, value }],
+          },
+        ],
+      });
+      this.debug(
+        `Published service health: service=${service.id}, state=${state}, retryingFailures=${service.retryingFailureCount}, terminalFailures=${service.terminalFailureCount}`,
+      );
+    }
+  }
+
+  private clearServiceHealthNotifications(): void {
+    for (const service of (this.config.notifiers ?? []).filter(
+      (candidate) => candidate.enabled !== false,
+    ))
+      this.app.handleMessage("signalk-alert-center", {
+        context: this.app.selfContext as Context,
+        updates: [
+          {
+            values: [
+              { path: serviceHealthPath(service.name) as Path, value: null },
+            ],
+          },
+        ],
+      });
+  }
+
   private emitChange(reason: string): void {
     const change = {
       revision: ++this.changeRevision,
@@ -326,6 +387,7 @@ export class AlertCenterRuntime {
         );
       }
     }
+    this.publishServiceHealthNotifications();
     this.app.setPluginStatus(this.statusMessage());
   }
 
@@ -548,6 +610,12 @@ export class AlertCenterRuntime {
       entry.source,
       entry.sourceTimestamp,
     );
+    const serviceHealth = isServiceHealthPath(normalized.path);
+    const serviceHealthSource = serviceHealth
+      ? (this.config.notifiers ?? []).find(
+          (notifier) => serviceHealthPath(notifier.name) === normalized.path,
+        )
+      : undefined;
     const policy = this.policies().forPath(
       normalized.path,
       normalized.severity,
@@ -558,7 +626,13 @@ export class AlertCenterRuntime {
         notifier,
       ]),
     );
-    const notifierIds = policy.notifierIds.filter((id) => {
+    const notifierIds = (
+      serviceHealth
+        ? (serviceHealthSource?.failureNotifierIds ?? []).filter(
+            (id) => id !== serviceHealthSource?.name,
+          )
+        : policy.notifierIds
+    ).filter((id) => {
       const notifier = configuredNotifiers.get(id);
       return Boolean(notifier && notifier.enabled !== false);
     });
@@ -575,37 +649,50 @@ export class AlertCenterRuntime {
       receivedAt,
       {
         definitionId: this.policies().ensureDefinitionForPath(normalized.path),
-        activationDelaySeconds: policy.activationDelaySeconds,
+        activationDelaySeconds: serviceHealth
+          ? 0
+          : policy.activationDelaySeconds,
         // Local Wyoming speech must never wake an Internet connection by itself.
-        connectivity: hasRemoteNotifier
-          ? policy.connectivity
-          : { mode: "queue" },
-        minimumSeverity: policy.minimumSeverity,
-        oneTime: policy.oneTime,
+        connectivity: serviceHealth
+          ? { mode: "queue" }
+          : hasRemoteNotifier
+            ? policy.connectivity
+            : { mode: "queue" },
+        minimumSeverity: serviceHealth ? "normal" : policy.minimumSeverity,
+        oneTime: serviceHealth ? false : policy.oneTime,
         notifierRepeatIntervals: Object.fromEntries(
           notifierIds.map((id) => [
             id,
-            policy.notifierRepeatIntervals[id] ?? 0,
+            serviceHealth ? 0 : (policy.notifierRepeatIntervals[id] ?? 0),
           ]),
         ),
         notifierMinimumSeverities: Object.fromEntries(
-          notifierIds.map((id) => [id, notifierMinimumSeverity(id)]),
+          notifierIds.map((id) => [
+            id,
+            serviceHealth ? "normal" : notifierMinimumSeverity(id),
+          ]),
         ),
         resolvingNotifierIds: notifierIds.filter(
           (id) =>
-            configuredNotifiers.get(id)?.type === "pagerduty" ||
-            (configuredNotifiers.get(id)?.type === "wyoming" &&
-              policy.speechEnabled &&
-              policy.speechAnnounceClear),
+            configuredNotifiers.get(id)?.type !== "wyoming" ||
+            (policy.speechEnabled && policy.speechAnnounceClear),
         ),
         acknowledgingNotifierIds: notifierIds.filter(
           (id) => configuredNotifiers.get(id)?.type === "pagerduty",
         ),
-        speechTemplate: policy.speechTemplate,
-        soundEnabled: policy.soundEnabled,
-        soundId: policy.soundId,
-        speechEnabled: policy.speechEnabled,
-        speechMinimumSeverity: policy.speechMinimumSeverity,
+        speechTemplate: serviceHealth
+          ? this.config.defaults?.speechTemplate
+          : policy.speechTemplate,
+        soundEnabled: serviceHealth
+          ? (this.config.defaults?.soundEnabled ?? true)
+          : policy.soundEnabled,
+        soundId: serviceHealth ? undefined : policy.soundId,
+        speechEnabled: serviceHealth
+          ? (this.config.defaults?.speechEnabled ?? true)
+          : policy.speechEnabled,
+        speechMinimumSeverity: serviceHealth
+          ? (this.config.defaults?.speechMinimumSeverity ?? "warn")
+          : policy.speechMinimumSeverity,
       },
     );
     if (!occurrence) return undefined;
@@ -1049,6 +1136,30 @@ export class AlertCenterRuntime {
         }
         return result;
       },
+      deleteFailedDelivery: (id) => {
+        const result = this.db().deleteFailedDelivery(id);
+        if (result === "deleted") {
+          this.scheduleNextDelivery();
+          this.scheduleNextWake();
+          if (this.connectivity && this.db().pendingDeliveryCount() === 0)
+            this.connectivity.beginCooldown();
+          this.debug(`Deleted failed delivery: deliveryId=${id}`);
+          this.emitChange("deliveries");
+        }
+        return result;
+      },
+      deleteFailedDeliveries: () => {
+        const count = this.db().deleteFailedDeliveries();
+        if (count) {
+          this.scheduleNextDelivery();
+          this.scheduleNextWake();
+          if (this.connectivity && this.db().pendingDeliveryCount() === 0)
+            this.connectivity.beginCooldown();
+          this.debug(`Deleted failed deliveries: count=${count}`);
+          this.emitChange("deliveries");
+        }
+        return count;
+      },
       acknowledgeOccurrence: async (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
@@ -1104,6 +1215,7 @@ export class AlertCenterRuntime {
       `Starting: configuredServices=${options.notifiers?.length ?? 0}, deliveryBatchSize=${options.delivery?.batchSize ?? 50}, deliveryConcurrency=${options.delivery?.concurrency ?? 4}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
     );
     this.config = options;
+    this.serviceHealthFingerprints.clear();
     this.database = new AlertDatabase(this.databasePath(options));
     if (this.database.migrationApplied)
       this.debug("Migrated the database without removing stored alert data");
@@ -1342,6 +1454,7 @@ export class AlertCenterRuntime {
         ),
       );
     this.app.setPluginStatus(this.statusMessage());
+    this.publishServiceHealthNotifications();
     this.debug("Started and subscribed to Signal K notifications");
   }
 
@@ -1475,6 +1588,7 @@ export class AlertCenterRuntime {
     this.ingestionQueue.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.clearServiceHealthNotifications();
     this.wyomingUnsubscribe?.();
     this.wyomingUnsubscribe = undefined;
     this.wyomingAnnouncementUnsubscribe?.();
@@ -1502,6 +1616,7 @@ export class AlertCenterRuntime {
     this.connectivity = undefined;
     this.policy = undefined;
     this.transports.clear();
+    this.serviceHealthFingerprints.clear();
     this.activationTimer = undefined;
     this.deliveryTimer = undefined;
     this.zoneRefreshTimer = undefined;

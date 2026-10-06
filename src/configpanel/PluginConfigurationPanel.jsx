@@ -534,29 +534,44 @@ const emptyService = () => ({
   type: "ntfy",
   enabled: true,
   minSeverity: "normal",
+  failureNotifierIds: [],
   server: "https://ntfy.sh",
   topic: "",
 });
 
 function NotificationServices({ config, update }) {
   const change = (index, patch, replace = false) => {
-    const items = [...config.notifiers];
+    let items = [...config.notifiers];
     const old = items[index];
     items[index] = replace ? patch : { ...old, ...patch };
-    update("notifiers", items);
-    if (patch.name !== undefined && old.name && old.name !== patch.name)
+    if (patch.name !== undefined && old.name && old.name !== patch.name) {
+      items = items.map((item) => ({
+        ...item,
+        failureNotifierIds: (item.failureNotifierIds ?? []).map((name) =>
+          name === old.name ? patch.name : name,
+        ),
+      }));
       update("defaults", {
         ...config.defaults,
         notifiers: (config.defaults.notifiers ?? []).map((name) =>
           name === old.name ? patch.name : name,
         ),
       });
+    }
+    update("notifiers", items);
   };
   const remove = (index) => {
     const removed = config.notifiers[index];
     update(
       "notifiers",
-      config.notifiers.filter((_, itemIndex) => itemIndex !== index),
+      config.notifiers
+        .filter((_, itemIndex) => itemIndex !== index)
+        .map((item) => ({
+          ...item,
+          failureNotifierIds: (item.failureNotifierIds ?? []).filter(
+            (name) => name !== removed.name,
+          ),
+        })),
     );
     update("defaults", {
       ...config.defaults,
@@ -616,6 +631,7 @@ function NotificationServices({ config, update }) {
                     enabled: service.enabled,
                     minSeverity: service.minSeverity,
                     repeatIntervalSeconds: service.repeatIntervalSeconds,
+                    failureNotifierIds: service.failureNotifierIds ?? [],
                     type,
                   };
                   if (type === "ntfy")
@@ -705,6 +721,22 @@ function NotificationServices({ config, update }) {
                 change(index, { repeatIntervalSeconds })
               }
             />
+            <Field
+              label="Send delivery failure alerts through"
+              hint="Optional. Select other services to receive this service's warning, terminal-failure alert, and recovery. The service itself is excluded to prevent a notification loop."
+              full
+            >
+              <ServicePicker
+                services={config.notifiers.filter(
+                  (candidate, candidateIndex) =>
+                    candidateIndex !== index && candidate.enabled !== false,
+                )}
+                selected={service.failureNotifierIds ?? []}
+                onChange={(failureNotifierIds) =>
+                  change(index, { failureNotifierIds })
+                }
+              />
+            </Field>
             <label style={{ ...styles.checkLabel, alignSelf: "center" }}>
               <input
                 style={styles.checkbox}

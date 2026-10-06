@@ -127,6 +127,7 @@ describe("AlertCenterRuntime", () => {
         }),
       },
       selfContext: "vessels.self",
+      handleMessage: vi.fn(),
       setPluginStatus: vi.fn(),
       subscriptionmanager: {
         subscribe: (
@@ -196,7 +197,9 @@ describe("AlertCenterRuntime", () => {
       expect(runtime.status()).toMatchObject({
         health: {
           state: "degraded",
-          reasons: ["warning last failed (NETWORK)"],
+          reasons: [
+            "warning has 1 failed notification delivery awaiting retry. Last error: NETWORK.",
+          ],
         },
         reconciliation: {
           state: "complete",
@@ -217,12 +220,39 @@ describe("AlertCenterRuntime", () => {
             id: "warning",
             type: "ntfy",
             pendingCount: 1,
+            retryingFailureCount: 1,
+            terminalFailureCount: 0,
             lastFailureCode: "NETWORK",
           },
-          { id: "critical", type: "ntfy", pendingCount: 0 },
+          {
+            id: "critical",
+            type: "ntfy",
+            pendingCount: 0,
+            retryingFailureCount: 0,
+            terminalFailureCount: 0,
+          },
         ],
       });
     });
+    expect(app.handleMessage).toHaveBeenCalledWith(
+      "signalk-alert-center",
+      expect.objectContaining({
+        updates: [
+          expect.objectContaining({
+            values: [
+              expect.objectContaining({
+                path: "notifications.plugins.signalkAlertCenter.services.warning",
+                value: expect.objectContaining({
+                  state: "warn",
+                  message:
+                    "warning has 1 failed notification delivery awaiting retry. Last error: NETWORK.",
+                }),
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
     expect(app.setPluginStatus).toHaveBeenCalledWith(
       expect.stringContaining("degraded:"),
     );
@@ -365,6 +395,7 @@ describe("AlertCenterRuntime", () => {
       getDataDirPath: () => directory,
       getPath: vi.fn(() => ({})),
       selfContext: "vessels.self",
+      handleMessage: vi.fn(),
       setPluginStatus: vi.fn(),
       subscriptionmanager: {
         subscribe: (
@@ -450,6 +481,198 @@ describe("AlertCenterRuntime", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it("stores service health notifications without delivering them", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-health-"));
+    directories.push(directory);
+    let subscriber: ((delta: unknown) => void) | undefined;
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(() => ({})),
+      selfContext: "vessels.self",
+      handleMessage: vi.fn(),
+      setPluginStatus: vi.fn(),
+      subscriptionmanager: {
+        subscribe: (
+          _command: unknown,
+          unsubscribes: Array<() => void>,
+          _onError: (error: unknown) => void,
+          callback: (delta: unknown) => void,
+        ) => {
+          subscriber = callback;
+          unsubscribes.push(vi.fn());
+        },
+      },
+    } as unknown as ServerAPI;
+    const runtime = new AlertCenterRuntime(app);
+    runtime.start({
+      notifiers: [
+        {
+          name: "crew",
+          type: "ntfy",
+          server: "https://notify.invalid",
+          topic: "test",
+        },
+      ],
+      defaults: { notifiers: ["crew"] },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(runtime.status().reconciliation.state).toBe("complete");
+      });
+      subscriber?.({
+        updates: [
+          {
+            $source: "signalk-alert-center",
+            values: [
+              {
+                path: "notifications.plugins.signalkAlertCenter.services.crew",
+                value: {
+                  state: "warn",
+                  method: ["visual"],
+                  message: "crew has one failed delivery awaiting retry.",
+                },
+              },
+            ],
+          },
+        ],
+      });
+      await vi.waitFor(() => {
+        expect(runtime.status().alerts.active).toBe(1);
+      });
+      const database = (runtime as unknown as { database: AlertDatabase })
+        .database;
+      expect(database.listDeliveries()).toEqual([]);
+      expect(
+        database
+          .listDefinitions()
+          .find((definition) =>
+            definition.pathPattern.endsWith("services.crew"),
+          ),
+      ).toBeDefined();
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("delivers service failures and recovery only through selected other services", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-health-route-"));
+    directories.push(directory);
+    let subscriber: ((delta: unknown) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(undefined, { status: 204 })),
+    );
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(() => ({})),
+      selfContext: "vessels.self",
+      handleMessage: vi.fn(),
+      setPluginStatus: vi.fn(),
+      subscriptionmanager: {
+        subscribe: (
+          _command: unknown,
+          unsubscribes: Array<() => void>,
+          _onError: (error: unknown) => void,
+          callback: (delta: unknown) => void,
+        ) => {
+          subscriber = callback;
+          unsubscribes.push(vi.fn());
+        },
+      },
+    } as unknown as ServerAPI;
+    const runtime = new AlertCenterRuntime(app);
+    runtime.start({
+      notifiers: [
+        {
+          name: "primary",
+          type: "ntfy",
+          server: "https://notify.invalid",
+          topic: "primary",
+          failureNotifierIds: ["backup"],
+        },
+        {
+          name: "backup",
+          type: "ntfy",
+          server: "https://notify.invalid",
+          topic: "backup",
+        },
+      ],
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(runtime.status().reconciliation.state).toBe("complete");
+      });
+      const publishHealth = (
+        state: "warn" | "alert" | "normal",
+        message: string,
+      ) =>
+        subscriber?.({
+          updates: [
+            {
+              $source: "signalk-alert-center",
+              values: [
+                {
+                  path: "notifications.plugins.signalkAlertCenter.services.primary",
+                  value: { state, method: ["visual"], message },
+                },
+              ],
+            },
+          ],
+        });
+      publishHealth("warn", "primary delivery is awaiting retry.");
+      const database = (runtime as unknown as { database: AlertDatabase })
+        .database;
+      await vi.waitFor(() => {
+        expect(database.listDeliveries()).toMatchObject([
+          {
+            transportInstanceId: "backup",
+            operation: "trigger",
+            state: "delivered",
+          },
+        ]);
+      });
+      expect(
+        database
+          .listDeliveries()
+          .some((delivery) => delivery.transportInstanceId === "primary"),
+      ).toBe(false);
+
+      publishHealth("alert", "primary delivery failed permanently.");
+      await vi.waitFor(() => {
+        expect(
+          database
+            .listDeliveries()
+            .filter((delivery) => delivery.operation === "trigger")
+            .map((delivery) => delivery.cycle)
+            .sort(),
+        ).toEqual([1, 2]);
+      });
+
+      publishHealth("normal", "primary delivery is operating normally.");
+      await vi.waitFor(() => {
+        const deliveries = database.listDeliveries();
+        expect(deliveries).toHaveLength(3);
+        expect(
+          deliveries.every(
+            (delivery) =>
+              delivery.transportInstanceId === "backup" &&
+              delivery.state === "delivered",
+          ),
+        ).toBe(true);
+        expect(
+          deliveries.filter((delivery) => delivery.operation === "resolve"),
+        ).toHaveLength(1);
+      });
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it("completes startup while live notifications exceed the queue limit", async () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-startup-pressure-"));
     directories.push(directory);
@@ -460,6 +683,7 @@ describe("AlertCenterRuntime", () => {
       error: vi.fn(),
       getDataDirPath: () => directory,
       selfContext: "vessels.self",
+      handleMessage: vi.fn(),
       setPluginStatus: vi.fn(),
       getPath: vi.fn((path: string) => {
         if (path !== "vessels.self.notifications") return {};
@@ -563,6 +787,7 @@ describe("AlertCenterRuntime", () => {
       getDataDirPath: () => directory,
       getPath: vi.fn(() => ({})),
       selfContext: "vessels.self",
+      handleMessage: vi.fn(),
       setPluginStatus: vi.fn(),
       onPropertyValues: (
         _name: string,

@@ -27,6 +27,15 @@ async function eventually(load, predicate, label) {
   assert.fail(`${label}: ${JSON.stringify(value)}`);
 }
 
+function notificationValues(value) {
+  if (!value || typeof value !== "object") return [];
+  const direct = value.value;
+  return [
+    ...(direct && typeof direct === "object" ? [direct] : []),
+    ...Object.values(value).flatMap(notificationValues),
+  ];
+}
+
 await json(`${mockUrl}/reset`, { method: "POST" });
 await json(`${mockUrl}/outcomes`, {
   method: "PUT",
@@ -267,6 +276,25 @@ await eventually(
   () => json(`${signalkUrl}/plugins/signalk-alert-center/notifiers`),
   (page) => page.items.some((item) => item.id === "Acceptance ntfy"),
   "test notification service was not configured",
+);
+const serviceHealth = await eventually(
+  () =>
+    json(
+      `${signalkUrl}/signalk/v1/api/vessels/self/notifications/plugins/signalkAlertCenter/services`,
+    ),
+  (tree) =>
+    notificationValues(tree).some(
+      (value) =>
+        value.state === "normal" && value.data?.serviceId === "Acceptance ntfy",
+    ),
+  "notification service health was not published to Signal K",
+);
+assert.equal(
+  notificationValues(serviceHealth).some(
+    (value) =>
+      value.state === "normal" && value.data?.serviceId === "Acceptance ntfy",
+  ),
+  true,
 );
 const occurrencesBeforeTest = await json(
   `${signalkUrl}/plugins/signalk-alert-center/occurrences?limit=100`,
