@@ -825,7 +825,11 @@ describe("AlertCenterRuntime", () => {
             values: [
               {
                 path: "notifications.navigation.anchor",
-                value: { state: "alarm", message: "Anchor dragging" },
+                value: {
+                  state: "alarm",
+                  method: ["visual", "sound"],
+                  message: "Anchor dragging",
+                },
               },
             ],
           },

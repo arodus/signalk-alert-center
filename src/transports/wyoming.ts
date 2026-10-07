@@ -236,6 +236,10 @@ export class WyomingTransport implements NotificationTransport {
     context: TransportContext,
   ): Promise<TransportResult> {
     if (delivery.operation === "acknowledge") return { kind: "success" };
+    const payload = alert.sourcePayload as
+      { method?: unknown } | null | undefined;
+    if (!Array.isArray(payload?.method) || !payload.method.includes("sound"))
+      return { kind: "success", remoteId: "suppressed:method" };
     const name =
       this.options.definitionName?.(alert.definitionId) ?? alert.path;
     const priority =

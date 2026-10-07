@@ -7,7 +7,10 @@ import {
   WyomingAnnouncementApi,
   WyomingTransport,
 } from "../src/transports/wyoming";
-import { renderAlert } from "../src/transports/transport";
+import {
+  NotificationTransport,
+  renderAlert,
+} from "../src/transports/transport";
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 const alert: AlertRecord = {
@@ -21,6 +24,7 @@ const alert: AlertRecord = {
   currentSeverity: "alarm",
   maxSeverity: "alarm",
   message: "Anchor dragging",
+  sourcePayload: { method: ["visual", "sound"] },
   fireCount: 1,
   oneTime: false,
   minimumSeverity: "normal",
@@ -51,6 +55,118 @@ function context() {
 }
 
 describe("WyomingTransport", () => {
+  it.each([
+    { method: ["visual"] },
+    { method: [] },
+    {},
+    { method: "sound" },
+    { method: null },
+    null,
+  ])(
+    "suppresses all audio without a sound method: %j",
+    async (sourcePayload) => {
+      const announce = vi.fn();
+      const transport = new WyomingTransport({
+        api: () => ({ version: 1, announce }),
+      });
+
+      for (const operation of ["trigger", "resolve"] as const) {
+        await expect(
+          transport.send(
+            { ...alert, sourcePayload },
+            delivery(operation),
+            context(),
+          ),
+        ).resolves.toEqual({ kind: "success", remoteId: "suppressed:method" });
+      }
+      expect(announce).not.toHaveBeenCalled();
+    },
+  );
+
+  it("suppresses visual alerts even when Wyoming is unavailable", async () => {
+    const transport = new WyomingTransport({ api: () => undefined });
+
+    await expect(
+      transport.send(
+        { ...alert, sourcePayload: { method: ["visual"] } },
+        delivery("trigger"),
+        context(),
+      ),
+    ).resolves.toEqual({ kind: "success", remoteId: "suppressed:method" });
+  });
+
+  it("keeps remote delivery and history when a queued alert becomes visual-only", async () => {
+    const database = new AlertDatabase();
+    const announce = vi.fn();
+    const remoteSend = vi.fn().mockResolvedValue({ kind: "success" });
+    const occurrence = database.ingest(
+      {
+        sourceKey: alert.sourceKey,
+        path: alert.path,
+        state: "active",
+        severity: "alarm",
+        message: alert.message,
+        sourcePayload: alert.sourcePayload,
+      },
+      ["Bridge speakers", "Crew"],
+      now,
+    )!;
+    database.ingest(
+      {
+        sourceKey: alert.sourceKey,
+        path: alert.path,
+        state: "active",
+        severity: "alarm",
+        message: alert.message,
+        sourcePayload: { method: ["visual"] },
+      },
+      ["Bridge speakers", "Crew"],
+      new Date(now.getTime() + 1000),
+    );
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map<string, NotificationTransport>([
+        [
+          "Bridge speakers",
+          new WyomingTransport({ api: () => ({ version: 1, announce }) }),
+        ],
+        ["Crew", { type: "ntfy", send: remoteSend }],
+      ]),
+    );
+
+    try {
+      await expect(
+        scheduler.runOnce(new Date(now.getTime() + 2000)),
+      ).resolves.toMatchObject({ processed: 2, succeeded: 2 });
+      expect(announce).not.toHaveBeenCalled();
+      expect(remoteSend).toHaveBeenCalledOnce();
+      expect(database.getAlert(occurrence.id).sourcePayload).toEqual({
+        method: ["visual"],
+      });
+      expect(database.listAlertEvents(occurrence.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ eventType: "raised" }),
+          expect.objectContaining({ eventType: "updated" }),
+        ]),
+      );
+      expect(database.listDeliveriesForAlert(occurrence.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            transportInstanceId: "Bridge speakers",
+            state: "delivered",
+            remoteId: "suppressed:method",
+          }),
+          expect.objectContaining({
+            transportInstanceId: "Crew",
+            state: "delivered",
+          }),
+        ]),
+      );
+    } finally {
+      database.close();
+    }
+  });
+
   it("renders bounded alert text from the occurrence policy snapshot", () => {
     expect(renderSpeechText(alert, "Anchor alarm", "trigger")).toBe(
       "Anchor alarm: alarm. Anchor dragging. notifications.navigation.anchor. active",
@@ -254,6 +370,7 @@ describe("WyomingTransport", () => {
         state: "active",
         severity: "alarm",
         message: alert.message,
+        sourcePayload: alert.sourcePayload,
       },
       ["Bridge speakers"],
       now,
