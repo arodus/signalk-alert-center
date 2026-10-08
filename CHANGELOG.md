@@ -5,6 +5,11 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Display zone bounds using Signal K preferred units, with Kelvin-to-Celsius
+  fallback when display preferences are unavailable.
+  Apply conversions to explicitly unit-labelled values and generated range
+  messages sent through all notifiers, including Wyoming speech. Server-global
+  unit settings are fetched locally and cached for five minutes.
 - Use the Signal K path as the alert name when zone metadata has an empty or
   whitespace-only description. Existing blank names are repaired on zone discovery.
 - Follow the Signal K severity order (`normal`, `alert`, `warn`, `alarm`,

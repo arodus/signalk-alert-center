@@ -5,6 +5,20 @@ This guide covers local development, architecture, tests, and releases. The
 
 ## Requirements
 
+### Server unit preferences
+
+Outgoing messages fetch the running server's public unit-preference endpoints
+(`active`, `definitions`, and `default-category/:path`) over its local HTTP port.
+The port follows Signal K's PORT/settings.port/3000 convention, including its
+secondary HTTP listener when HTTPS is enabled. Settings are cached for five minutes,
+with one shared refresh and a bounded category cache. Requests time out after two
+seconds, reject redirects, and never block delivery permanently. Failed refreshes
+retain the last good settings and log a diagnostic. Older or read-restricted servers
+fall back to explicit metadata conversions or SI/Celsius defaults.
+Background sends use the server-global preset plus path overrides; browser users
+may select their own display preset. No internal server modules or credentials are
+loaded. Original messages and delivery snapshots remain unchanged in storage.
+
 - Node.js 22.5 or newer (`node:sqlite` is used directly)
 - npm
 - Docker with Compose for Signal K integration and browser tests

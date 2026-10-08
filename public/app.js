@@ -298,13 +298,40 @@ function formatZoneRange(zone, units) {
   return `${range}${units ? ` ${units}` : ""}`;
 }
 function zoneBadges(definition) {
-  const units = definition.metadata?.units;
   return definitionZones(definition)
-    .map(
-      (zone) =>
-        `<span class="zone-badge"><span class="zone-state ${escapeHtml(zone.state)}">${escapeHtml(zone.state)}</span>${escapeHtml(formatZoneRange(zone, units))}${zone.message ? ` · ${escapeHtml(zone.message)}` : ""}</span>`,
-    )
+    .map((zone) => {
+      const displayed = displayZone(zone, definition.metadata);
+      return `<span class="zone-badge"><span class="zone-state ${escapeHtml(zone.state)}">${escapeHtml(zone.state)}</span>${escapeHtml(formatZoneRange(displayed.zone, displayed.units))}${zone.message ? ` · ${escapeHtml(zone.message)}` : ""}</span>`;
+    })
     .join("");
+}
+
+async function loadDisplayUnits(definition) {
+  if (!definition || !definitionZones(definition).length) return;
+  const path = definition.pathPattern.replace(/^notifications\./, "");
+  try {
+    const response = await fetch(
+      `/signalk/v1/api/vessels/self/${path.split(".").map(encodeURIComponent).join("/")}/meta`,
+      {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+    if (response.status === 401 || response.status === 403) {
+      elements.login.hidden = false;
+      return;
+    }
+    if (!response.ok) return;
+    const metadata = await response.json();
+    definition.metadata = {
+      ...definition.metadata,
+      units: metadata.units ?? definition.metadata?.units,
+      displayUnits: metadata.displayUnits,
+    };
+  } catch {
+    // Keep the detail usable when live metadata is unavailable.
+  }
 }
 function renderDefinitions() {
   const showActive = $("#state-filter").value === "active";
@@ -876,6 +903,7 @@ async function openDefinition(id) {
     );
     const recent = pageItems(page);
     if (recent.length) return openOccurrence(recent[0].id);
+    await loadDisplayUnits(definition);
     state.selectedOccurrence = undefined;
     state.selectedDefinition = id;
     elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
@@ -901,6 +929,7 @@ async function openOccurrence(id) {
       `/occurrences?definitionId=${encodeURIComponent(occurrence.definitionId)}&limit=5`,
     );
     const recent = pageItems(recentPage);
+    await loadDisplayUnits(definition);
     state.selectedOccurrence = id;
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
