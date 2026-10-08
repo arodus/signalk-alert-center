@@ -333,6 +333,39 @@ assert.deepEqual(
   deliveriesAfterTest.items.map((item) => item.id),
   deliveriesBeforeTest.items.map((item) => item.id),
 );
+// Exercise the running server's preference resolver, not just a mocked formula.
+await json(`${signalkUrl}/plugins/signalk-test-fixture/unit-metadata`, {
+  method: "POST",
+});
+const convertedDefinition =
+  "path:notifications.environment.inside.refrigerator.temperature";
+await json(
+  `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(convertedDefinition)}/policy`,
+  {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      enabled: true,
+      notifierIds: ["Acceptance ntfy"],
+      minimumSeverity: "normal",
+      activationDelaySeconds: 0,
+    }),
+  },
+);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    source: "unit-conversion",
+    message: "Fridge 283.15 K",
+  }),
+});
+await eventually(
+  () => json(`${mockUrl}/requests`),
+  (requests) =>
+    requests.some((request) => request.body.includes("Fridge 50 °F")),
+  "outgoing message did not honor Signal K Fahrenheit path preference",
+);
 await json(`${signalkUrl}/skServer/plugins/signalk-alert-center/config`, {
   method: "POST",
   headers: { "content-type": "application/json" },

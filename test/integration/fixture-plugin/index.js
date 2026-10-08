@@ -217,6 +217,25 @@ module.exports = function fixturePlugin(app) {
           ),
         );
       });
+      writes.post("/unit-metadata", (request, response) => {
+        app.handleMessage("signalk-test-fixture", {
+          context: "vessels.self",
+          updates: [
+            {
+              meta: [
+                {
+                  path: ZONE_PATH,
+                  value: {
+                    units: "K",
+                    displayUnits: { category: "temperature", targetUnit: "F" },
+                  },
+                },
+              ],
+            },
+          ],
+        });
+        response.json({ updated: true });
+      });
       writes.post("/clear", (request, response) => {
         const body = request.body ?? {};
         response.json(publish(body.path ?? DEFAULT_PATH, null, body.source));
