@@ -46,6 +46,16 @@ describe("validateConfig", () => {
       "wyoming",
     ]);
     expect(notifierItems.properties.type.default).toBe("ntfy");
+    expect(
+      pluginConfigSchema.properties.defaults.properties.minSeverity.enum,
+    ).toEqual(["normal", "alert", "warn", "alarm", "emergency"]);
+    expect(notifierItems.properties.minSeverity.enum).toEqual([
+      "normal",
+      "alert",
+      "warn",
+      "alarm",
+      "emergency",
+    ]);
     expect(variants.map((variant) => variant.properties.type.enum[0])).toEqual([
       "ntfy",
       "pagerduty",

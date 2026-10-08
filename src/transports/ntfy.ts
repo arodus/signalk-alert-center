@@ -21,7 +21,7 @@ export class NtfyTransport implements NotificationTransport {
       const headers: Record<string, string> = {
         Title: context.rendered.title,
         Priority: String(
-          { normal: 2, warn: 3, alert: 3, alarm: 4, emergency: 5 }[
+          { normal: 2, alert: 3, warn: 3, alarm: 4, emergency: 5 }[
             context.rendered.severity
           ],
         ),

@@ -34,7 +34,7 @@ const serviceFailureNotifiers = {
   type: "array",
   title: "Services for delivery failure alerts",
   description:
-    "Optional names of other configured services that receive this service's warn, alert, and recovery notifications. A service cannot notify through itself.",
+    "Optional names of other configured services that receive this service's retry alert, terminal-failure warning, and recovery notifications. A service cannot notify through itself.",
   uniqueItems: true,
   default: [],
   items: {

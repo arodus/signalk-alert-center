@@ -12,6 +12,12 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
 }) => {
   await page.goto("/signalk-alert-center/");
   await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
+  expect(
+    await page.locator("#severity-filter option").allTextContents(),
+  ).toEqual(["All", "emergency", "alarm", "warn", "alert", "normal"]);
+  expect(
+    await page.locator("#history-severity-filter option").allTextContents(),
+  ).toEqual(["All", "emergency", "alarm", "warn", "alert", "normal"]);
   await expect(page.locator("#health-state")).toHaveText(/healthy|degraded/);
   const diagnostics = page.locator(".system-diagnostics");
   await expect(diagnostics).not.toHaveAttribute("open", "");
@@ -53,6 +59,12 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await expect(recentOccurrences.first().locator("time")).not.toHaveText("—");
   await page.getByRole("button", { name: "Alert settings" }).click();
   await expect(page.locator("#policy-dialog")).toBeVisible();
+  expect(
+    await page.locator("#minimum-severity option").allTextContents(),
+  ).toEqual(["normal", "alert", "warn", "alarm", "emergency"]);
+  expect(
+    await page.locator("#speech-minimum-severity option").allTextContents(),
+  ).toEqual(["normal", "alert", "warn", "alarm", "emergency"]);
   await expect(
     page.getByRole("button", { name: "Remove stored alert" }),
   ).toBeDisabled();
@@ -396,6 +408,12 @@ test("saves a Telegram service and selects it as a default", async ({
   await expect(
     page.getByRole("heading", { name: "Alert Center settings" }),
   ).toBeVisible();
+  expect(
+    await page
+      .getByLabel("Lowest severity sent")
+      .locator("option")
+      .allTextContents(),
+  ).toEqual(["normal", "alert", "warn", "alarm", "emergency"]);
   await page
     .getByRole("button", { name: "Notification services", exact: true })
     .click();
@@ -408,6 +426,12 @@ test("saves a Telegram service and selects it as a default", async ({
   await service.getByLabel("Service name").fill("Bridge");
   await expect(service.getByText("Bridge", { exact: true })).toBeVisible();
   await service.getByLabel("Service type").selectOption("telegram");
+  expect(
+    await service
+      .getByLabel("Lowest severity sent")
+      .locator("option")
+      .allTextContents(),
+  ).toEqual(["normal", "alert", "warn", "alarm", "emergency"]);
   await service
     .getByLabel("Telegram bot token")
     .fill("123456:browser-test-bot-token");

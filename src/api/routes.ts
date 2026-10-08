@@ -1,4 +1,4 @@
-import { AlertPolicyField, alertPolicyFields } from "../alerts/types";
+import { AlertPolicyField, alertPolicyFields, Severity } from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
 import {
   NotificationTestOperation,
@@ -24,7 +24,7 @@ export interface OccurrenceQuery {
   path?: string;
   source?: string;
   state?: "active" | "cleared";
-  severity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  severity?: Severity;
   from?: Date;
   to?: Date;
 }
@@ -38,7 +38,7 @@ export interface AlertHistoryQuery extends EventQuery {
   path?: string;
   source?: string;
   state?: "active" | "cleared";
-  severity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  severity?: Severity;
   from?: Date;
   to?: Date;
 }
@@ -53,11 +53,11 @@ export interface AlertPolicyPatch {
   notifierIds?: string[];
   notifierRepeatOverrides?: Record<string, number>;
   activationDelaySeconds?: number;
-  minimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  minimumSeverity?: Severity;
   soundEnabled?: boolean;
   soundId?: string;
   speechEnabled?: boolean;
-  speechMinimumSeverity?: "normal" | "warn" | "alert" | "alarm" | "emergency";
+  speechMinimumSeverity?: Severity;
   speechTemplate?: string;
   speechAnnounceClear?: boolean;
   connectivity?:
@@ -304,8 +304,8 @@ function parseOccurrences(request: RequestLike): OccurrenceQuery {
     state: enumParam(q.state, "state", ["active", "cleared"] as const),
     severity: enumParam(q.severity, "severity", [
       "normal",
-      "warn",
       "alert",
+      "warn",
       "alarm",
       "emergency",
     ] as const),
@@ -327,8 +327,8 @@ function parseAlertHistory(request: RequestLike): AlertHistoryQuery {
     state: enumParam(q.state, "state", ["active", "cleared"] as const),
     severity: enumParam(q.severity, "severity", [
       "normal",
-      "warn",
       "alert",
+      "warn",
       "alarm",
       "emergency",
     ] as const),
@@ -442,7 +442,7 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
   }
   if (value.minimumSeverity !== undefined) {
     if (
-      !["normal", "warn", "alert", "alarm", "emergency"].includes(
+      !["normal", "alert", "warn", "alarm", "emergency"].includes(
         String(value.minimumSeverity),
       )
     )
@@ -452,7 +452,7 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
   }
   if (value.speechMinimumSeverity !== undefined) {
     if (
-      !["normal", "warn", "alert", "alarm", "emergency"].includes(
+      !["normal", "alert", "warn", "alarm", "emergency"].includes(
         String(value.speechMinimumSeverity),
       )
     )

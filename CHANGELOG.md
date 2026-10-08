@@ -5,13 +5,17 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Follow the Signal K severity order (`normal`, `alert`, `warn`, `alarm`,
+  `emergency`) in threshold evaluation, alert sorting, schemas, and every
+  severity dropdown. Retryable service failures now use `alert` and terminal
+  failures use the higher `warn` state.
 - Create a new durable delivery cycle whenever an active Signal K alert changes
   severity state, including while an earlier state is queued or retrying. Each
   cycle retains its own severity and message snapshot. Escalation and
   de-escalation are delivered separately, clear sends one recovery delivery, and
   repeated updates in the same state remain coalesced.
 - Publish a Signal K health notification for every enabled notification service:
-  normal with no unresolved failures, warn while delivery is retrying, and alert
+  normal with no unresolved failures, alert while delivery is retrying, and warn
   after a terminal failure. Each service can send its failure and recovery
   notifications through explicitly selected other services; self-delivery and
   repeat delivery are blocked to prevent recursive notification loops.

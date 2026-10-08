@@ -1,7 +1,7 @@
 export const severities = [
   "normal",
-  "warn",
   "alert",
+  "warn",
   "alarm",
   "emergency",
 ] as const;

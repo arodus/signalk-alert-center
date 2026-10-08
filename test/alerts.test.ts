@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { AlertLifecycle } from "../src/alerts/lifecycle";
-import { NormalizedAlert } from "../src/alerts/types";
+import { NormalizedAlert, severities, severityRank } from "../src/alerts/types";
 import { AlertDatabase } from "../src/storage/db";
 
 describe("AlertLifecycle", () => {
@@ -28,6 +28,17 @@ describe("AlertLifecycle", () => {
       ...overrides,
     };
   }
+
+  it("uses the Signal K severity order", () => {
+    expect(severities).toEqual([
+      "normal",
+      "alert",
+      "warn",
+      "alarm",
+      "emergency",
+    ]);
+    expect(severityRank("alert")).toBeLessThan(severityRank("warn"));
+  });
 
   it("creates an alert and one pending delivery per transport on first ingest", () => {
     const { database, lifecycle } = createLifecycle([

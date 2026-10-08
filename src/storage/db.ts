@@ -218,7 +218,7 @@ const alertHistoryRecord = (row: Row): AlertHistoryRecord => {
       : undefined;
   const payloadSeverity =
     typeof payloadRecord?.state === "string" &&
-    ["normal", "warn", "alert", "alarm", "emergency"].includes(
+    ["normal", "alert", "warn", "alarm", "emergency"].includes(
       payloadRecord.state,
     )
       ? payloadRecord.state

@@ -30,7 +30,7 @@ current value changes:
   status, timing, retry attempts, and error details.
 - **See service failures as Signal K notifications.** Each enabled notification
   service publishes its own health notification: `normal` when no delivery
-  failure remains, `warn` while failed deliveries await retry, and `alert` when
+  failure remains, `alert` while failed deliveries await retry, and `warn` when
   a delivery has failed permanently. Each service can send these health alerts
   and their recovery through selected backup services.
 
@@ -84,9 +84,13 @@ its alert history while removing the delivery and its attempt history.
 Notification services are created globally in **Server → Plugin Config → Signal
 K Alert Center**. Individual alerts then select from those named services.
 For each service, **Send delivery failure alerts through** optionally selects
-other configured services that receive its warning, terminal-failure alert, and
-recovery. The affected service cannot select itself, and these internal alerts
-never use normal alert defaults or repeat delivery.
+other configured services that receive its retry alert, terminal-failure warning,
+and recovery. The affected service cannot select itself, and these internal
+alerts never use normal alert defaults or repeat delivery.
+
+Signal K severities are ordered from lowest to highest as `normal`, `alert`,
+`warn`, `alarm`, and `emergency`. Signal K's special `nominal` state is treated
+as `normal`.
 
 | Service                | What is sent                                    | Notes                                                                                                  |
 | ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |

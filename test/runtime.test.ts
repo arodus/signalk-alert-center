@@ -243,7 +243,7 @@ describe("AlertCenterRuntime", () => {
               expect.objectContaining({
                 path: "notifications.plugins.signalkAlertCenter.services.warning",
                 value: expect.objectContaining({
-                  state: "warn",
+                  state: "alert",
                   message:
                     "warning has 1 failed notification delivery awaiting retry. Last error: NETWORK.",
                 }),
@@ -623,7 +623,7 @@ describe("AlertCenterRuntime", () => {
             },
           ],
         });
-      publishHealth("warn", "primary delivery is awaiting retry.");
+      publishHealth("alert", "primary delivery is awaiting retry.");
       const database = (runtime as unknown as { database: AlertDatabase })
         .database;
       await vi.waitFor(() => {
@@ -641,7 +641,7 @@ describe("AlertCenterRuntime", () => {
           .some((delivery) => delivery.transportInstanceId === "primary"),
       ).toBe(false);
 
-      publishHealth("alert", "primary delivery failed permanently.");
+      publishHealth("warn", "primary delivery failed permanently.");
       await vi.waitFor(() => {
         expect(
           database
