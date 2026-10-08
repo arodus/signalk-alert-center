@@ -128,6 +128,57 @@ test("shows alert updates in a separate history tab without delivery data", asyn
   );
 });
 
+test("labels suppressed audio as skipped in the queue and attempt history", async ({
+  page,
+}) => {
+  const delivery = {
+    id: "skipped-audio",
+    state: "delivered",
+    remoteId: "suppressed:method",
+    transportInstanceId: "Speakers",
+    attemptCount: 1,
+    deliveredAt: "2026-10-08T10:00:00Z",
+    service: { name: "Speakers", type: "wyoming" },
+  };
+  await page.route(
+    /\/plugins\/signalk-alert-center\/deliveries(?:\/.*)?(?:\?.*)?$/,
+    (route) => {
+      const path = new URL(route.request().url()).pathname;
+      return route.fulfill({
+        json: path.endsWith("/attempts")
+          ? {
+              items: [
+                {
+                  attemptNumber: 1,
+                  outcome: "delivered",
+                  remoteId: "suppressed:method",
+                },
+              ],
+            }
+          : path.endsWith("/skipped-audio")
+            ? delivery
+            : { items: [delivery], total: 1 },
+      });
+    },
+  );
+  await page.goto("/signalk-alert-center/#deliveries");
+  const row = page.locator("[data-delivery-id='skipped-audio']");
+  await expect(row).toContainText("Skipped — audio disabled by Signal K");
+  await row.click();
+  await expect(page.locator("#delivery-dialog-body")).toContainText(
+    "Skipped — audio disabled by Signal K",
+  );
+  await expect(page.locator("#delivery-attempt-list")).toContainText(
+    "Attempt 1 · Skipped — audio disabled by Signal K",
+  );
+  await expect(page.locator("#delivery-dialog")).not.toContainText(
+    "suppressed:method",
+  );
+  await expect(page.locator("#delivery-attempt-list")).not.toContainText(
+    "delivered",
+  );
+});
+
 test("opens, retries, and deletes failed deliveries", async ({ page }) => {
   let retryCount = 0;
   let deleteCount = 0;

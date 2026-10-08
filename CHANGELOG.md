@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Label Wyoming audio suppressed by Signal K methods as skipped in delivery lists,
+  details, and attempt history instead of claiming it was delivered.
 - Use the Signal K path as the alert name when zone metadata has an empty or
   whitespace-only description. Existing blank names are repaired on zone discovery.
 - Follow the Signal K severity order (`normal`, `alert`, `warn`, `alarm`,
