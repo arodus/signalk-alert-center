@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Label Wyoming audio suppressed by Signal K methods as skipped in delivery lists,
+  details, and attempt history instead of claiming it was delivered.
 - Display zone bounds using Signal K preferred units, with Kelvin-to-Celsius
   fallback when display preferences are unavailable.
   Apply conversions to explicitly unit-labelled values and generated range
