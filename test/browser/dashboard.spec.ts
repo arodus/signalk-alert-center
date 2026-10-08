@@ -7,6 +7,71 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${fixture}/seed`);
 });
 
+test("uses compact Signal K styling without overflowing the viewport", async ({
+  page,
+}) => {
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#definition-list tbody tr").first()).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS(
+    "background-color",
+    "rgb(228, 229, 230)",
+  );
+  await expect(page.locator("#alerts-tab")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  await expect(page.locator(".admin-link")).toHaveAttribute(
+    "href",
+    "../admin/",
+  );
+  for (const tab of ["alerts-tab", "alert-history-tab", "deliveries-tab"]) {
+    await page.locator(`#${tab}`).click();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page.locator("#alerts-tab").click();
+  await expect
+    .poll(() =>
+      page.locator(".status-summary").evaluateAll((items) =>
+        items.flatMap((item) => {
+          const badge = item.querySelector(".alert-severity");
+          if (!badge) return [];
+          const bounds = item.getBoundingClientRect();
+          const badgeBounds = badge.getBoundingClientRect();
+          const cellWidth = item.closest("td")!.getBoundingClientRect().width;
+          const minimum =
+            parseFloat(getComputedStyle(document.documentElement).fontSize) * 8;
+          return cellWidth >= minimum && badgeBounds.right <= bounds.right
+            ? []
+            : [
+                {
+                  label: badge.textContent,
+                  cellWidth,
+                  minimum,
+                  availableWidth: bounds.width,
+                  badgeWidth: badgeBounds.width,
+                  overflow: badgeBounds.right - bounds.right,
+                },
+              ];
+        }),
+      ),
+    )
+    .toEqual([]);
+  await page.screenshot({
+    path: `test-results/native-ui-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
 test("shows alerts, opens details, edits settings, and filters exact sources", async ({
   page,
 }) => {
@@ -184,13 +249,41 @@ test("labels suppressed audio as skipped in the queue and attempt history", asyn
   );
   await page.goto("/signalk-alert-center/#deliveries");
   const row = page.locator("[data-delivery-id='skipped-audio']");
-  await expect(row).toContainText("Skipped — audio disabled by Signal K");
+  await expect(row.locator(".status-pill")).toHaveText("Skipped");
+  await expect(row.locator(".status-pill")).toHaveCSS(
+    "background-color",
+    "rgb(233, 236, 239)",
+  );
+  await expect(row.locator(".delivery-skip-reason")).toHaveText(
+    "Audio disabled by Signal K",
+  );
+  // Live updates replace rows. Measure both elements in one browser task rather
+  // than taking separate bounding boxes across a possible refresh.
+  await expect
+    .poll(() =>
+      row.evaluateAll((rows) => {
+        const badge = rows[0]
+          ?.querySelector(".status-pill")
+          ?.getBoundingClientRect();
+        const reason = rows[0]
+          ?.querySelector(".delivery-skip-reason")
+          ?.getBoundingClientRect();
+        return Boolean(
+          badge?.height && reason?.height && reason.top >= badge.bottom,
+        );
+      }),
+    )
+    .toBe(true);
+  await page.screenshot({
+    path: `test-results/skipped-${test.info().project.name}.png`,
+    fullPage: true,
+  });
   await row.click();
   await expect(page.locator("#delivery-dialog-body")).toContainText(
-    "Skipped — audio disabled by Signal K",
+    "Audio disabled by Signal K",
   );
   await expect(page.locator("#delivery-attempt-list")).toContainText(
-    "Attempt 1 · Skipped — audio disabled by Signal K",
+    "Attempt 1 · Skipped",
   );
   await expect(page.locator("#delivery-dialog")).not.toContainText(
     "suppressed:method",
@@ -480,6 +573,10 @@ test("saves a Telegram service and selects it as a default", async ({
   await expect(
     page.getByRole("heading", { name: "Alert Center settings" }),
   ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/native-settings.png",
+    fullPage: true,
+  });
   expect(
     await page
       .getByLabel("Lowest severity sent")

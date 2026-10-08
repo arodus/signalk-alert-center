@@ -130,7 +130,7 @@ reported by Wyoming, including aggregate and per-satellite outcomes. A reported
 `played` state confirms completion from the satellite process; it cannot prove
 that the physical speaker was audible.
 
-![Global defaults and notification services in plugin settings](./docs/screenshots/plugin-settings.png)
+![Notification service settings in the Signal K-style configuration panel](./docs/screenshots/plugin-settings.png)
 
 ## Installation and first run
 

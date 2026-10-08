@@ -5,6 +5,17 @@ This guide covers local development, architecture, tests, and releases. The
 
 ## Requirements
 
+### UI styling
+
+The standalone dashboard follows the Signal K Admin UI's CoreUI palette and
+system typography (blue `#003399`, grey `#e4e5e6`, white bordered panels), based
+on the official server's `packages/server-admin-ui/scss/_bootstrap-variables.scss`.
+The embedded settings panel consumes host Bootstrap CSS variables with matching
+fallbacks. Dashboard styles remain local rather than loading the entire admin
+stylesheet: this avoids global selector collisions and keeps older/offline server
+installations working without relying on a Vite manifest. No framework or remote
+font is required. Browser tests cover desktop/tablet layout and existing actions.
+
 ### Server unit preferences
 
 Outgoing messages fetch the running server's public unit-preference endpoints
