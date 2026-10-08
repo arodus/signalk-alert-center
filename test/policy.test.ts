@@ -4,6 +4,33 @@ import { PluginConfig } from "../src/config";
 import { AlertDatabase } from "../src/storage/db";
 
 describe("AlertPolicyResolver", () => {
+  it.each([undefined, "", " \t\n "])(
+    "uses the zone path when its description is blank (%j)",
+    (description) => {
+      const database = new AlertDatabase();
+      try {
+        const resolver = new AlertPolicyResolver(database, {});
+        const path = "environment.refrigerator.temperature";
+        const id = pathDefinitionId(`notifications.${path}`);
+        const zone = { path, zones: [{ state: "alert" }], description };
+        database.upsertDefinition({
+          id,
+          sourceType: "zone",
+          pathPattern: `notifications.${path}`,
+          name: "",
+        });
+        resolver.seedDefinitions([zone]);
+        expect(database.getDefinition(id).name).toBe(path);
+        resolver.seedDefinitions([
+          { ...zone, description: " Fridge temperature " },
+        ]);
+        expect(database.getDefinition(id).name).toBe("Fridge temperature");
+      } finally {
+        database.close();
+      }
+    },
+  );
+
   it("uses global defaults until a discovered alert gets a dashboard override", () => {
     const database = new AlertDatabase();
     const config: PluginConfig = {
