@@ -7,6 +7,56 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${fixture}/seed`);
 });
 
+test("uses compact Signal K styling without overflowing the viewport", async ({
+  page,
+}) => {
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#definition-list tbody tr").first()).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS(
+    "background-color",
+    "rgb(228, 229, 230)",
+  );
+  await expect(page.locator("#alerts-tab")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  await expect(page.locator(".admin-link")).toHaveAttribute(
+    "href",
+    "../admin/",
+  );
+  for (const tab of ["alerts-tab", "alert-history-tab", "deliveries-tab"]) {
+    await page.locator(`#${tab}`).click();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page.locator("#alerts-tab").click();
+  expect(
+    await page.locator(".status-summary").evaluateAll((items) =>
+      items.every((item) => {
+        const badge = item.querySelector(".alert-severity");
+        return (
+          !badge ||
+          badge.getBoundingClientRect().right <=
+            item.getBoundingClientRect().right
+        );
+      }),
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: `test-results/native-ui-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
 test("shows alerts, opens details, edits settings, and filters exact sources", async ({
   page,
 }) => {
@@ -184,13 +234,27 @@ test("labels suppressed audio as skipped in the queue and attempt history", asyn
   );
   await page.goto("/signalk-alert-center/#deliveries");
   const row = page.locator("[data-delivery-id='skipped-audio']");
-  await expect(row).toContainText("Skipped — audio disabled by Signal K");
+  await expect(row.locator(".status-pill")).toHaveText("Skipped");
+  await expect(row.locator(".status-pill")).toHaveCSS(
+    "background-color",
+    "rgb(233, 236, 239)",
+  );
+  await expect(row.locator(".delivery-skip-reason")).toHaveText(
+    "Audio disabled by Signal K",
+  );
+  const badgeBox = await row.locator(".status-pill").boundingBox();
+  const reasonBox = await row.locator(".delivery-skip-reason").boundingBox();
+  expect(reasonBox!.y).toBeGreaterThanOrEqual(badgeBox!.y + badgeBox!.height);
+  await page.screenshot({
+    path: `test-results/skipped-${test.info().project.name}.png`,
+    fullPage: true,
+  });
   await row.click();
   await expect(page.locator("#delivery-dialog-body")).toContainText(
-    "Skipped — audio disabled by Signal K",
+    "Audio disabled by Signal K",
   );
   await expect(page.locator("#delivery-attempt-list")).toContainText(
-    "Attempt 1 · Skipped — audio disabled by Signal K",
+    "Attempt 1 · Skipped",
   );
   await expect(page.locator("#delivery-dialog")).not.toContainText(
     "suppressed:method",
@@ -480,6 +544,10 @@ test("saves a Telegram service and selects it as a default", async ({
   await expect(
     page.getByRole("heading", { name: "Alert Center settings" }),
   ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/native-settings.png",
+    fullPage: true,
+  });
   expect(
     await page
       .getByLabel("Lowest severity sent")

@@ -454,9 +454,18 @@ function renderDefinitions() {
 function audioWasSkipped(item) {
   return item.remoteId === "suppressed:method";
 }
+function renderSkipReason(item) {
+  return audioWasSkipped(item)
+    ? '<span class="cell-detail delivery-skip-reason">Audio disabled by Signal K</span>'
+    : "";
+}
+function renderDeliveryStatus(item) {
+  const state = audioWasSkipped(item) ? "skipped" : item.state;
+  return `<span class="status-pill ${escapeHtml(state)}">${escapeHtml(deliveryStatus(item))}</span>${renderSkipReason(item)}`;
+}
 function deliveryStatus(item) {
   return audioWasSkipped(item)
-    ? "Skipped — audio disabled by Signal K"
+    ? "Skipped"
     : String(item.state ?? item.outcome).replaceAll("_", " ");
 }
 function renderDeliveries(deliveries) {
@@ -493,7 +502,7 @@ function renderDeliveries(deliveries) {
             return `<tr class="clickable-row delivery-row" data-delivery-id="${escapeHtml(delivery.id)}" tabindex="0" aria-label="Open delivery for ${escapeHtml(alertTitle)}">
               <td data-label="Alert"><strong class="cell-title">${escapeHtml(alertTitle)}</strong><span class="cell-detail">${escapeHtml(alert.path ?? "Occurrence unavailable")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</span></td>
               <td data-label="Service"><strong class="cell-title">${escapeHtml(service.name ?? delivery.transportInstanceId)}</strong><span class="cell-detail">${escapeHtml(service.type ?? "unknown service")} · ${escapeHtml(delivery.operation ?? "notify")}${delivery.cycle > 1 ? ` · repeat ${delivery.cycle - 1}` : ""}</span></td>
-              <td data-label="Status"><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(deliveryStatus(delivery))}</span>${playback ? `<span class="cell-detail">Playback: ${escapeHtml(playback)}</span>` : ""}${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
+              <td data-label="Status">${renderDeliveryStatus(delivery)}${playback ? `<span class="cell-detail">Playback: ${escapeHtml(playback)}</span>` : ""}${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
               <td data-label="Timing"><span class="cell-title">${escapeHtml(primaryTime)}</span><span class="cell-detail">${escapeHtml(outcomeTime)}</span>${delivery.lastErrorMessage ? `<span class="cell-detail compact-detail error-detail" title="${escapeHtml(delivery.lastErrorMessage)}">${escapeHtml(delivery.lastErrorMessage)}</span>` : ""}</td>
               <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail">Can retry or delete</span>' : ""}</td>
             </tr>`;
@@ -803,7 +812,7 @@ function renderDeliveryAttempts() {
     ? state.deliveryAttempts
         .map(
           (attempt) =>
-            `<article class="event-row"><span class="event-dot"></span><div><strong>Attempt ${attempt.attemptNumber} · ${escapeHtml(deliveryStatus(attempt))}</strong><time>${formatDate(attempt.startedAt)} → ${formatDate(attempt.finishedAt)}</time>${attempt.errorCode || attempt.errorMessage ? `<p>${escapeHtml([attempt.errorCode, attempt.errorMessage].filter(Boolean).join(" · "))}</p>` : ""}${!audioWasSkipped(attempt) && attempt.remoteId ? `<p>Remote ID: ${escapeHtml(attempt.remoteId)}</p>` : ""}</div></article>`,
+            `<article class="event-row"><span class="event-dot ${audioWasSkipped(attempt) ? "skipped" : ""}"></span><div><strong>Attempt ${attempt.attemptNumber} · ${escapeHtml(deliveryStatus(attempt))}</strong>${renderSkipReason(attempt)}<time>${formatDate(attempt.startedAt)} → ${formatDate(attempt.finishedAt)}</time>${attempt.errorCode || attempt.errorMessage ? `<p>${escapeHtml([attempt.errorCode, attempt.errorMessage].filter(Boolean).join(" · "))}</p>` : ""}${!audioWasSkipped(attempt) && attempt.remoteId ? `<p>Remote ID: ${escapeHtml(attempt.remoteId)}</p>` : ""}</div></article>`,
         )
         .join("")
     : '<div class="empty">No delivery attempt has started yet.</div>';
@@ -819,7 +828,7 @@ function renderDeliveryDetail(delivery) {
     delivery.state,
   );
   elements.deliveryDialogTitle.textContent = alertTitle;
-  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd><span class="status-pill ${escapeHtml(delivery.state)}">${escapeHtml(deliveryStatus(delivery))}</span></dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>${audioWasSkipped(delivery) ? "Skipped" : service.type === "wyoming" ? "Accepted" : "Delivered"}</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(audioWasSkipped(delivery) ? "—" : (delivery.remoteId ?? "—"))}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}${renderPlaybackDetails(delivery.playback)}`;
+  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd>${renderDeliveryStatus(delivery)}</dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>${audioWasSkipped(delivery) ? "Skipped" : service.type === "wyoming" ? "Accepted" : "Delivered"}</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(audioWasSkipped(delivery) ? "—" : (delivery.remoteId ?? "—"))}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}${renderPlaybackDetails(delivery.playback)}`;
   elements.deliveryRetry.hidden = !retryable;
   elements.deliveryRetry.dataset.id = delivery.id;
   elements.deliveryDelete.hidden = !retryable;

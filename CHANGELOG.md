@@ -5,6 +5,11 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Show skipped deliveries with a neutral grey badge and the reason below it,
+  keeping delivery status separate from explanatory text in lists and details.
+- Align the dashboard and plugin settings with Signal K administration styling:
+  blue controls, neutral panels, compact typography, bordered tabs, and consistent
+  form buttons. Keep the full available width on desktop and tablet.
 - Label Wyoming audio suppressed by Signal K methods as skipped in delivery lists,
   details, and attempt history instead of claiming it was delivered.
 - Display zone bounds using Signal K preferred units, with Kelvin-to-Celsius
