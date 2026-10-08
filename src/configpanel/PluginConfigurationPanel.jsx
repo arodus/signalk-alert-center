@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const severityOptions = ["normal", "warn", "alert", "alarm", "emergency"];
+const severityOptions = ["normal", "alert", "warn", "alarm", "emergency"];
 const defaultSounds = {
   normal: "chime",
   warn: "warning",
@@ -723,7 +723,7 @@ function NotificationServices({ config, update }) {
             />
             <Field
               label="Send delivery failure alerts through"
-              hint="Optional. Select other services to receive this service's warning, terminal-failure alert, and recovery. The service itself is excluded to prevent a notification loop."
+              hint="Optional. Select other services to receive this service's retry alert, terminal-failure warning, and recovery. The service itself is excluded to prevent a notification loop."
               full
             >
               <ServicePicker

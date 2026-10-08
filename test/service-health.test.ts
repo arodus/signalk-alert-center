@@ -20,7 +20,7 @@ describe("notification service health", () => {
       "Crew notification delivery is operating normally.",
     );
     expect(serviceHealthState({ ...healthy, retryingFailureCount: 2 })).toBe(
-      "warn",
+      "alert",
     );
     expect(
       serviceHealthState({
@@ -28,7 +28,7 @@ describe("notification service health", () => {
         retryingFailureCount: 2,
         terminalFailureCount: 1,
       }),
-    ).toBe("alert");
+    ).toBe("warn");
   });
 
   it("creates stable Signal K paths for simple and human-readable names", () => {

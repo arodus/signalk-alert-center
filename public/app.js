@@ -1,4 +1,5 @@
 const apiBase = "/plugins/signalk-alert-center";
+const severityOrder = ["normal", "alert", "warn", "alarm", "emergency"];
 const state = {
   definitions: [],
   occurrences: [],
@@ -359,12 +360,8 @@ function renderDefinitions() {
       (left, right) =>
         Number(right.active) - Number(left.active) ||
         (left.active && right.active
-          ? ["normal", "warn", "alert", "alarm", "emergency"].indexOf(
-              right.latest?.currentSeverity,
-            ) -
-            ["normal", "warn", "alert", "alarm", "emergency"].indexOf(
-              left.latest?.currentSeverity,
-            )
+          ? severityOrder.indexOf(right.latest?.currentSeverity) -
+            severityOrder.indexOf(left.latest?.currentSeverity)
           : 0) ||
         String(left.definition.name).localeCompare(
           String(right.definition.name),

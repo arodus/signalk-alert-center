@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 export const serviceHealthPathPrefix =
   "notifications.plugins.signalkAlertCenter.services.";
 
-export type ServiceHealthState = "normal" | "warn" | "alert";
+export type ServiceHealthState = "normal" | "alert" | "warn";
 
 export interface ServiceHealthSnapshot {
   id: string;
@@ -34,9 +34,9 @@ export const serviceHealthState = (
   service: ServiceHealthSnapshot,
 ): ServiceHealthState =>
   service.terminalFailureCount > 0
-    ? "alert"
+    ? "warn"
     : service.retryingFailureCount > 0
-      ? "warn"
+      ? "alert"
       : "normal";
 
 export const serviceHealthMessage = (

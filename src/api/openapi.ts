@@ -485,7 +485,7 @@ export function getAlertCenterOpenApi() {
         },
         Severity: {
           type: "string",
-          enum: ["normal", "warn", "alert", "alarm", "emergency"],
+          enum: ["normal", "alert", "warn", "alarm", "emergency"],
         },
         PolicyValues: {
           type: "object",

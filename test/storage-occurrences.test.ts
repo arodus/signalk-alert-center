@@ -930,6 +930,41 @@ describe("occurrence storage", () => {
     ).toEqual(["ntfy", "ntfy", "pd"]);
   });
 
+  it("keeps alert below a warn delivery threshold", () => {
+    const db = database();
+    const occurrence = db.ingest(
+      active({ severity: "alert" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:00:00Z"),
+      {
+        minimumSeverity: "warn",
+        notifierMinimumSeverities: { ntfy: "warn" },
+      },
+    )!;
+
+    expect(occurrence.activationState).toBe("suppressed");
+    expect(db.listDeliveries()).toEqual([]);
+
+    const escalated = db.ingest(
+      active({ severity: "warn" }),
+      ["ntfy"],
+      new Date("2026-01-01T00:01:00Z"),
+      {
+        minimumSeverity: "warn",
+        notifierMinimumSeverities: { ntfy: "warn" },
+      },
+    )!;
+
+    expect(escalated.activationState).toBe("eligible");
+    expect(escalated.maxSeverity).toBe("warn");
+    expect(db.listDeliveries()).toMatchObject([
+      {
+        transportInstanceId: "ntfy",
+        alertSnapshot: { severity: "warn" },
+      },
+    ]);
+  });
+
   it("cancels a pending delay when severity drops below its threshold", () => {
     const db = database();
     const occurrence = db.ingest(
