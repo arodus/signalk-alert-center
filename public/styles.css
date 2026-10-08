@@ -571,7 +571,7 @@ h2 {
 }
 .alert-table th:nth-child(2),
 .alert-table td:nth-child(2) {
-  width: 16%;
+  width: max(16%, 128px);
 }
 .alert-table th:nth-child(3),
 .alert-table td:nth-child(3) {

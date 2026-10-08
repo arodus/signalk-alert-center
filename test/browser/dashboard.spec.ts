@@ -242,9 +242,23 @@ test("labels suppressed audio as skipped in the queue and attempt history", asyn
   await expect(row.locator(".delivery-skip-reason")).toHaveText(
     "Audio disabled by Signal K",
   );
-  const badgeBox = await row.locator(".status-pill").boundingBox();
-  const reasonBox = await row.locator(".delivery-skip-reason").boundingBox();
-  expect(reasonBox!.y).toBeGreaterThanOrEqual(badgeBox!.y + badgeBox!.height);
+  // Live updates replace rows. Measure both elements in one browser task rather
+  // than taking separate bounding boxes across a possible refresh.
+  await expect
+    .poll(() =>
+      row.evaluateAll((rows) => {
+        const badge = rows[0]
+          ?.querySelector(".status-pill")
+          ?.getBoundingClientRect();
+        const reason = rows[0]
+          ?.querySelector(".delivery-skip-reason")
+          ?.getBoundingClientRect();
+        return Boolean(
+          badge?.height && reason?.height && reason.top >= badge.bottom,
+        );
+      }),
+    )
+    .toBe(true);
   await page.screenshot({
     path: `test-results/skipped-${test.info().project.name}.png`,
     fullPage: true,
