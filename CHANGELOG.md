@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Use the Signal K path as the alert name when zone metadata has an empty or
+  whitespace-only description. Existing blank names are repaired on zone discovery.
 - Follow the Signal K severity order (`normal`, `alert`, `warn`, `alarm`,
   `emergency`) in threshold evaluation, alert sorting, schemas, and every
   severity dropdown. Retryable service failures now use `alert` and terminal
