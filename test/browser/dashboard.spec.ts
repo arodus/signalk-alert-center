@@ -88,6 +88,27 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   );
 });
 
+test("displays zone bounds using Signal K preferred units", async ({
+  page,
+}) => {
+  await page.route("**/signalk/v1/api/vessels/self/**/meta", (route) =>
+    route.fulfill({
+      json: {
+        units: "K",
+        displayUnits: { formula: "value - 273.15", symbol: "°C" },
+      },
+    }),
+  );
+  await page.goto("/signalk-alert-center/");
+  await page
+    .locator("tr.clickable-row")
+    .filter({ hasText: "Refrigerator temperature" })
+    .first()
+    .click();
+  await expect(page.locator(".drawer-zones")).toContainText("°C");
+  await expect(page.locator(".drawer-zones")).not.toContainText(" K");
+});
+
 test("refreshes from the live event stream without a page reload", async ({
   page,
   request,
