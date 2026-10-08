@@ -6,6 +6,8 @@ import {
   TransportResult,
 } from "../transports/transport";
 import { nextRetry, RetryPolicy } from "./retry";
+import { convertAlertMessage } from "../alerts/message-units";
+import { UnitMetadata } from "../../public/units";
 
 export interface DeliveryRunSummary {
   processed: number;
@@ -25,6 +27,9 @@ export interface DeliverySchedulerStatus {
 }
 
 export interface DeliverySchedulerOptions {
+  unitMetadata?: (
+    path: string,
+  ) => UnitMetadata | undefined | Promise<UnitMetadata | undefined>;
   batchSize?: number;
   concurrency?: number;
   requestTimeoutSeconds?: number;
@@ -194,13 +199,27 @@ export class DeliveryScheduler {
     );
     let result: TransportResult;
     try {
-      const sending = Promise.resolve(
-        transport.send(deliveryAlert, delivery, {
-          rendered: renderAlert(deliveryAlert),
+      const sending = (async () => {
+        // Presentation-only copy: durable snapshots and original payload stay intact.
+        let messageAlert = deliveryAlert;
+        try {
+          const metadata = await this.options.unitMetadata?.(alert.path);
+          if (metadata)
+            messageAlert = {
+              ...deliveryAlert,
+              message: convertAlertMessage(deliveryAlert.message, metadata),
+            };
+        } catch {
+          // Missing/malformed metadata must never block notification delivery.
+        }
+
+        if (controller.signal.aborted) return await aborted;
+        return transport.send(messageAlert, delivery, {
+          rendered: renderAlert(messageAlert),
           now,
           signal: controller.signal,
-        }),
-      ).catch((error): TransportResult => ({
+        });
+      })().catch((error): TransportResult => ({
         kind: "retryable",
         code: "TRANSPORT_ERROR",
         message: error instanceof Error ? error.message : String(error),

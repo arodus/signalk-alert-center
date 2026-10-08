@@ -35,6 +35,7 @@ import { ConnectivityManager } from "./connectivity/manager";
 import { createInternetProbe } from "./connectivity/internet";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { DeliveryScheduler } from "./delivery/scheduler";
+import { ServerDisplayUnits } from "./signalk/display-units";
 import {
   extractNotificationEntries,
   iterateSnapshotNotificationEntries,
@@ -1338,6 +1339,13 @@ export class AlertCenterRuntime {
           }),
         );
     }
+    const serverSettings = (
+      this.app as ServerAPI & { config?: { settings?: { port?: number } } }
+    ).config?.settings;
+    const unitResolver = new ServerDisplayUnits(
+      `http://127.0.0.1:${Number(process.env.PORT) || serverSettings?.port || 3000}`,
+      (message) => this.debug(message),
+    );
     this.scheduler = new DeliveryScheduler(
       this.database,
       this.transports,
@@ -1351,6 +1359,17 @@ export class AlertCenterRuntime {
         batchSize: options.delivery?.batchSize ?? 50,
         concurrency: options.delivery?.concurrency ?? 4,
         requestTimeoutSeconds: options.delivery?.requestTimeoutSeconds ?? 15,
+        unitMetadata: (notificationPath) => {
+          const path = notificationPath.replace(/^notifications\./, "");
+          const metadata = this.app.getPath(
+            `${this.app.selfContext}.` + path + ".meta",
+          );
+          const schema = this.app.getMetadata?.(`vessels.self.${path}`);
+          return unitResolver.resolve(path, {
+            ...schema,
+            ...(metadata && typeof metadata === "object" ? metadata : {}),
+          });
+        },
       },
     );
     const switchConfig = options.connectivity?.switch;

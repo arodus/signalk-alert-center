@@ -97,6 +97,14 @@ metadata. Kelvin defaults to °C when no preference is available. Unsupported
 conversion formulas retain the original values and unit; stored thresholds are
 never changed by display conversion.
 
+Outgoing messages through all services (including Wyoming speech) use the same
+conversion for explicitly unit-labelled quantities and Signal K-generated zone
+range messages. Custom prose without units is preserved. Original messages and
+delivery snapshots remain unchanged in storage. Outgoing messages use the server's
+global unit preset and path overrides; a browser user's personal preset may differ.
+If the server's unit-settings endpoints are unavailable, explicit metadata conversions
+are used, with °C as the Kelvin fallback and other units unchanged.
+
 | Service                | What is sent                                    | Notes                                                                                                  |
 | ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | ntfy                   | Alert title, severity, message, and state       | Supports self-hosted or hosted ntfy servers.                                                           |

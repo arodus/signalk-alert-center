@@ -72,3 +72,7 @@ function displayZone(zone, metadata = {}) {
     return { zone, units: metadata.units };
   }
 }
+
+// The server and browser share exactly the same conversion implementation.
+if (typeof module !== "undefined" && module.exports)
+  module.exports = { convertDisplayValue, displayZone };
