@@ -82,9 +82,9 @@ async function preparePage(browser, viewport) {
   return browser.newPage({ viewport });
 }
 
-async function capture(page, name) {
+async function capture(page, name, options = {}) {
   const path = `${output}/${name}`;
-  await page.screenshot({ path, animations: "disabled" });
+  await page.screenshot({ path, animations: "disabled", ...options });
   const bytes = statSync(path).size;
   if (bytes > 500_000)
     throw new Error(
@@ -150,7 +150,7 @@ try {
   );
 
   browser = await launchBrowser();
-  const desktop = await preparePage(browser, { width: 1280, height: 800 });
+  const desktop = await preparePage(browser, { width: 1280, height: 1000 });
   await desktop.goto(`${baseUrl}/signalk-alert-center/`);
   await desktop.locator("#definition-list tr.clickable-row").first().waitFor();
   await capture(desktop, "alert-center-overview.png");
@@ -222,18 +222,29 @@ try {
       },
     ],
   });
+  await desktop.setViewportSize({ width: 1800, height: 1200 });
   await desktop.goto(
     `${baseUrl}/admin/#/apps/configuration/signalk-alert-center`,
   );
   await desktop
     .getByRole("heading", { name: "Alert Center settings" })
     .waitFor();
-  await capture(desktop, "plugin-defaults.png");
+  const settingsPanel = desktop
+    .locator("main")
+    .filter({
+      has: desktop.getByRole("heading", { name: "Alert Center settings" }),
+    })
+    .last();
+  // The fixed host header otherwise overlays the top of an element screenshot.
+  const settingsCapture = {
+    style: ".app-header { visibility: hidden !important; }",
+  };
+  await capture(settingsPanel, "plugin-defaults.png", settingsCapture);
   await desktop
     .getByRole("button", { name: "Notification services", exact: true })
     .click();
   await desktop.getByTestId("notification-service").first().waitFor();
-  await capture(desktop, "plugin-settings.png");
+  await capture(settingsPanel, "plugin-settings.png", settingsCapture);
   await desktop.close();
 } finally {
   await browser?.close();
