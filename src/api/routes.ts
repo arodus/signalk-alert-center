@@ -734,7 +734,7 @@ export function registerAlertCenterRoutes(
           throw new ApiError(
             409,
             "SNOOZED",
-            "Notification tests are blocked while snoozed",
+            "Notification tests are blocked by snooze or this service’s quiet hours",
           );
         if (result === "unsupported")
           throw new ApiError(
