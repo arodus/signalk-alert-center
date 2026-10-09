@@ -266,3 +266,38 @@ service secrets and personal vessel information first.
 ## License
 
 [MIT](./LICENSE)
+
+### Snooze all alerts
+
+![Global snooze banner](./docs/screenshots/global-snooze.jpg)
+
+Use **Snooze all alerts** to pause every Alert Center notification service,
+including emergency alerts, for up to eight hours. Incoming alerts and live
+readings remain visible and history continues. The deadline survives restarts;
+**End snooze now** resumes scheduling immediately. Snooze is separate from
+per-occurrence Acknowledge and Silence and does not change Signal K alert state.
+
+Queued or playing Wyoming announcements belonging to Alert Center are cancelled
+through its announcement cancellation API. An older Wyoming version without that
+capability blocks new announcements but may finish audio already queued; the
+banner and diagnostics show cancellation errors. Requests already sent to remote
+services cannot be recalled.
+
+Unsent triggers for alerts that clear during snooze are retained as suppressed
+work. Active alerts resume without replaying missed repeats. Previously cleared
+historical delivery work remains durable. PagerDuty resolutions and
+acknowledgements are deferred until snooze ends, preserving existing incidents.
+
+Authenticated controls share the same persisted state:
+
+- `POST /plugins/signalk-alert-center/snooze` with `{"durationSeconds":900}`.
+- `DELETE /plugins/signalk-alert-center/snooze` ends snooze.
+- `GET /plugins/signalk-alert-center/snooze` reads its state.
+- Signal K PUT `digital.alertCenter.snooze.active`: `true` starts one hour;
+  repeated `true` preserves the deadline; `false` ends snooze.
+- Signal K PUT `digital.alertCenter.snooze.duration`: integer seconds from 1 to
+  28800 starts/replaces snooze; `0` ends it. Its published value is the remaining
+  duration at the last state change, not a ticking countdown.
+- Read-only `digital.alertCenter.snooze.startedAt` and `.endsAt` publish ISO
+  timestamps or `null`. These are plugin-specific paths. Ordinary deltas never
+  invoke commands. Manual service tests are blocked during snooze.

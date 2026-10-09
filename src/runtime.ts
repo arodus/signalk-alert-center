@@ -1,3 +1,5 @@
+import { SuppressionStore, SuppressionReason } from "./suppression/store";
+import { publishSnooze, registerSnoozePuts } from "./signalk/snooze";
 import path from "node:path";
 import {
   Context,
@@ -115,6 +117,9 @@ export class AlertCenterRuntime {
   private deliveryRerunRequested = false;
   private runtimeGeneration = 0;
   private stopping = false;
+  private suppression?: SuppressionStore;
+  private suppressionTimer?: ReturnType<typeof setTimeout>;
+  private readonly manualAnnouncements = new Set<string>();
   private startCount = 0;
   private stopCount = 0;
   private lastQueueWarningAt = 0;
@@ -240,6 +245,8 @@ export class AlertCenterRuntime {
         : { state: "healthy" as const, reasons: [] as string[] };
     return {
       health,
+      snooze: this.suppression?.getSnooze(),
+      suppressionEvents: this.suppression?.events() ?? [],
       runtime: {
         generation: this.runtimeGeneration,
         startCount: this.startCount,
@@ -405,9 +412,111 @@ export class AlertCenterRuntime {
     return () => this.changeListeners.delete(listener);
   }
 
+  private suppressionReason(
+    _delivery?: DeliveryRecord,
+  ): SuppressionReason | undefined {
+    const snooze = this.suppression?.getSnooze();
+    // Expiry is reconciled before removing the guard, including at startup.
+    if (snooze?.active)
+      return {
+        reason: "snooze",
+        startedAt: snooze.startedAt!,
+        endsAt: snooze.endsAt!,
+      };
+    return undefined;
+  }
+
+  private maySend(delivery: DeliveryRecord): boolean {
+    const reason = this.suppressionReason(delivery);
+    if (!reason) return true;
+    this.suppression?.hold(
+      this.db().getDelivery(delivery.id) ?? delivery,
+      reason,
+    );
+    return false;
+  }
+
+  private cancelAnnouncement(
+    snapshot: WyomingAnnouncementSnapshot,
+    deliveryId?: string,
+  ): void {
+    const delivery = deliveryId
+      ? this.database?.getDelivery(deliveryId)
+      : undefined;
+    const reason = this.suppressionReason(delivery);
+    if (!reason || !["queued", "playing", "partial"].includes(snapshot.state))
+      return;
+    try {
+      if (!this.wyomingApi?.cancelAnnouncement)
+        throw new Error(
+          "Installed Wyoming cannot cancel queued or playing audio; new announcements are blocked.",
+        );
+      const result = this.wyomingApi.cancelAnnouncement(snapshot.id);
+      if (result && delivery)
+        this.suppression?.hold(delivery, reason, new Date(), true);
+      if (!result || ["queued", "playing"].includes(result.state))
+        throw new Error("Wyoming has not confirmed audio cancellation.");
+      if (delivery) {
+        this.suppression?.hold(delivery, reason, new Date(), true);
+        const playback = this.database?.getWyomingPlayback(snapshot.id);
+        if (playback)
+          this.recordWyomingAnnouncement(delivery.id, playback.kind, result);
+      }
+    } catch (error) {
+      this.suppression?.setCleanupError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  private reconcileSuppression(): void {
+    if (!this.database || !this.suppression) return;
+    this.suppression.reconcile((delivery) => this.suppressionReason(delivery));
+    for (const playback of this.database.listIncompleteWyomingPlaybacks()) {
+      const snapshot = this.wyomingApi?.getAnnouncement?.(
+        playback.announcementId,
+      );
+      if (snapshot) this.cancelAnnouncement(snapshot, playback.deliveryId);
+    }
+    for (const id of this.manualAnnouncements) {
+      const snapshot = this.wyomingApi?.getAnnouncement?.(id);
+      if (snapshot) this.cancelAnnouncement(snapshot);
+      if (!snapshot || !["queued", "playing"].includes(snapshot.state))
+        this.manualAnnouncements.delete(id);
+    }
+    if (this.suppressionTimer) clearTimeout(this.suppressionTimer);
+    const snooze = this.suppression.getSnooze();
+    if (snooze.active)
+      this.suppressionTimer = setTimeout(
+        () => {
+          if (!this.reconcilingStartup) this.setSnooze(0, "expiry");
+        },
+        Math.max(0, Date.parse(snooze.endsAt!) - Date.now()),
+      );
+  }
+
+  setSnooze(seconds: number, source = "dashboard"): void {
+    if (!this.suppression || !this.database)
+      throw new Error("Plugin is not started");
+    // First commit the guard; no new external call can start after this point.
+    this.suppression.setSnooze(seconds, source);
+    this.reconcileSuppression();
+    this.scheduleNextWake();
+    this.requestDeliveryRun();
+    publishSnooze(this.app, this.suppression.getSnooze());
+    this.debug(
+      `Snooze ${seconds ? "started/replaced" : "ended"}: source=${source}, seconds=${seconds}`,
+    );
+    this.emitChange("snooze");
+  }
+
   private async runScheduler(): Promise<void> {
-    const repeatsCreated = this.database?.processDueRepeats() ?? 0;
+    const repeatsCreated = this.suppressionReason()
+      ? 0
+      : (this.database?.processDueRepeats() ?? 0);
+    this.reconcileSuppression();
     const summary = await this.scheduler?.runOnce();
+    this.reconcileSuppression();
     if (summary?.processed && this.wyomingApi)
       this.reconcileWyomingAnnouncements(this.wyomingApi);
     if (summary?.processed) {
@@ -423,7 +532,7 @@ export class AlertCenterRuntime {
   }
 
   private requestDeliveryRun(): void {
-    if (this.stopping) return;
+    if (this.stopping || this.reconcilingStartup) return;
     if (this.deliveryRun) {
       this.deliveryRerunRequested = true;
       return;
@@ -453,6 +562,7 @@ export class AlertCenterRuntime {
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     this.deliveryTimer = undefined;
     if (this.stopping) return;
+    if (this.suppressionReason()) return;
     const dueAt = this.database?.nextDeliveryDueAt();
     if (!dueAt) return;
     const delay = Math.min(
@@ -467,7 +577,9 @@ export class AlertCenterRuntime {
 
   private scheduleNextWake(): void {
     if (this.stopping) return;
-    const nextWake = this.database?.listWakeRequests()[0];
+    const nextWake = this.suppressionReason()
+      ? undefined
+      : this.database?.listWakeRequests()[0];
     this.connectivity?.cancelScheduledWake();
     if (nextWake) this.connectivity?.scheduleWakeAt(nextWake.dueAt);
   }
@@ -549,6 +661,7 @@ export class AlertCenterRuntime {
   }
 
   private afterIngestionBatch(): void {
+    this.reconcileSuppression();
     this.scheduleNextWake();
     this.scheduleNextActivation();
     this.requestDeliveryRun();
@@ -1226,6 +1339,7 @@ export class AlertCenterRuntime {
     this.config = options;
     this.serviceHealthFingerprints.clear();
     this.database = new AlertDatabase(this.databasePath(options));
+    this.suppression = new SuppressionStore(this.database);
     if (this.database.migrationApplied)
       this.debug("Migrated the database without removing stored alert data");
     this.database.configureResolvingNotifiers(
@@ -1288,6 +1402,7 @@ export class AlertCenterRuntime {
           );
           this.debug("Connected to signalk-wyoming announcement API");
           this.reconcileWyomingAnnouncements(candidate);
+          this.reconcileSuppression();
           this.requestDeliveryRun();
         },
       );
@@ -1330,6 +1445,12 @@ export class AlertCenterRuntime {
           notifier.name,
           new WyomingTransport({
             api: () => this.wyomingApi,
+            canAnnounce: (id) =>
+              !(id && this.suppression?.interruptedAudio(id)) &&
+              !this.suppressionReason(
+                id ? this.database?.getDelivery(id) : undefined,
+              ),
+            onAccepted: (snapshot, id) => this.cancelAnnouncement(snapshot, id),
             targets: notifier.targets,
             voice: notifier.voice,
             urgentAt: notifier.urgentAt,
@@ -1364,6 +1485,7 @@ export class AlertCenterRuntime {
         jitter: options.retry?.jitter ?? 0.2,
       },
       {
+        beforeSend: (delivery) => this.maySend(delivery),
         batchSize: options.delivery?.batchSize ?? 50,
         concurrency: options.delivery?.concurrency ?? 4,
         requestTimeoutSeconds: options.delivery?.requestTimeoutSeconds ?? 15,
@@ -1400,13 +1522,28 @@ export class AlertCenterRuntime {
         (options.connectivity.bootTimeoutSeconds ?? 240) * 1000,
         (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
         () => ({
-          pendingDelivery: (this.database?.pendingDeliveryCount() ?? 0) > 0,
-          activeWakeAlert: this.database?.hasActiveConnectivityAlert() ?? false,
-          scheduledWake: this.database?.hasWakeRequests() ?? false,
+          pendingDelivery:
+            !this.suppressionReason() &&
+            (this.database?.pendingDeliveryCount() ?? 0) > 0,
+          activeWakeAlert:
+            !this.suppressionReason() &&
+            (this.database?.hasActiveConnectivityAlert() ?? false),
+          scheduledWake:
+            !this.suppressionReason() &&
+            (this.database?.hasWakeRequests() ?? false),
           sendInFlight: this.scheduler?.isRunning ?? false,
         }),
+        () => !this.suppressionReason(),
       );
 
+    this.reconcileSuppression();
+    if (typeof this.app.registerPutHandler === "function")
+      registerSnoozePuts(
+        this.app,
+        () => this.suppression!.getSnooze(),
+        (seconds, source) => this.setSnooze(seconds, source),
+      );
+    publishSnooze(this.app, this.suppression.getSnooze());
     this.scheduleNextWake();
     this.database.processDueActivations();
     this.scheduleNextActivation();
@@ -1502,6 +1639,11 @@ export class AlertCenterRuntime {
     );
     registerAlertCenterRoutes(compatible, {
       repository: () => (this.database ? repository : undefined),
+      snooze: () => this.suppression?.getSnooze(),
+      setSnooze: (seconds) => {
+        this.setSnooze(seconds);
+        return this.suppression!.getSnooze();
+      },
       listNotifiers: () =>
         (this.config.notifiers ?? [])
           .filter((notifier) => notifier.enabled !== false)
@@ -1527,6 +1669,7 @@ export class AlertCenterRuntime {
     | "disabled"
     | "in_progress"
     | "unsupported"
+    | "snoozed"
   > {
     const notifier = (this.config.notifiers ?? []).find(
       (candidate) => candidate.name === id,
@@ -1535,6 +1678,7 @@ export class AlertCenterRuntime {
     if (notifier.enabled === false) return "disabled";
     if (operation === "resolve" && notifier.type !== "pagerduty")
       return "unsupported";
+    if (this.suppressionReason()) return "snoozed";
     if (this.notifierTests.has(id)) return "in_progress";
     this.notifierTests.add(id);
     const startedAt = Date.now();
@@ -1578,6 +1722,11 @@ export class AlertCenterRuntime {
     timeout.unref?.();
     const transport = new WyomingTransport({
       api: () => this.wyomingApi,
+      canAnnounce: () => !this.suppressionReason(),
+      onAccepted: (snapshot) => {
+        this.manualAnnouncements.add(snapshot.id);
+        this.cancelAnnouncement(snapshot);
+      },
       targets: notifier.targets,
       voice: notifier.voice,
       urgentAt: notifier.urgentAt,
@@ -1628,6 +1777,7 @@ export class AlertCenterRuntime {
     this.ingestionImmediate = undefined;
     this.deliveryImmediate = undefined;
     this.deliveryRerunRequested = false;
+    if (this.suppressionTimer) clearTimeout(this.suppressionTimer);
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     if (this.zoneRefreshTimer) clearInterval(this.zoneRefreshTimer);
@@ -1637,6 +1787,8 @@ export class AlertCenterRuntime {
     this.connectivity?.stop();
     this.database?.close();
     this.database = undefined;
+    this.suppression = undefined;
+    this.manualAnnouncements.clear();
     this.changeListeners.clear();
     this.scheduler = undefined;
     this.deliveryRun = undefined;

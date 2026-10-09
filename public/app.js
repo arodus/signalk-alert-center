@@ -153,6 +153,16 @@ function renderDiagnostics(status) {
   renderNotifierTests(services);
   const items = [
     [
+      "Global snooze",
+      `${status.snooze?.active ? `Until ${formatDate(status.snooze.endsAt)}` : "Off"}${status.snooze?.cleanupError ? ` · ${status.snooze.cleanupError}` : ""}`,
+    ],
+    [
+      "Last suppression event",
+      status.suppressionEvents?.[0]
+        ? `${status.suppressionEvents[0].event} · ${formatDate(status.suppressionEvents[0].at)}`
+        : "None",
+    ],
+    [
       "Startup reconciliation",
       `${reconciliation.state ?? "unknown"}${reconciliation.durationMs === undefined ? "" : ` · ${reconciliation.durationMs} ms`} · ${reconciliation.snapshotEntries ?? 0} snapshot / ${reconciliation.queuedEntries ?? 0} queued`,
     ],
@@ -872,6 +882,7 @@ async function load(preserveLoadedHistory = false) {
       : "delivery intents waiting";
     state.lastStatus = status;
     renderDiagnostics(status);
+    renderSnooze();
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     elements.moreOccurrences.hidden = !state.occurrenceCursor;
     renderDefinitions();
@@ -1586,3 +1597,59 @@ selectView(
 );
 connectLiveUpdates();
 void load();
+
+function renderSnooze() {
+  const snooze = state.lastStatus?.snooze;
+  $("#snooze-banner").hidden = !snooze?.active;
+  if (!snooze?.active) return;
+  const remaining = Math.max(
+    0,
+    Math.ceil((Date.parse(snooze.endsAt) - Date.now()) / 1000),
+  );
+  $("#snooze-summary").textContent =
+    `All notifications snoozed until ${formatDate(snooze.endsAt)} · ${Math.floor(remaining / 60)}m ${remaining % 60}s remaining`;
+  $("#snooze-cleanup").textContent = snooze.cleanupError ?? "";
+}
+setInterval(renderSnooze, 1000);
+$("#snooze-open").addEventListener("click", () => {
+  $("#snooze-result").textContent = "";
+  $("#snooze-dialog").showModal();
+});
+$("#snooze-cancel").addEventListener("click", () =>
+  $("#snooze-dialog").close(),
+);
+$("#snooze-duration").addEventListener("change", () => {
+  $("#snooze-custom-label").hidden = $("#snooze-duration").value !== "custom";
+});
+$("#snooze-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const durationSeconds =
+    $("#snooze-duration").value === "custom"
+      ? Number($("#snooze-custom").value) * 60
+      : Number($("#snooze-duration").value);
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    await api("/snooze", {
+      method: "POST",
+      body: JSON.stringify({ durationSeconds }),
+    });
+    $("#snooze-dialog").close();
+    await load();
+  } catch (error) {
+    $("#snooze-result").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+$("#snooze-end").addEventListener("click", async (event) => {
+  event.currentTarget.disabled = true;
+  try {
+    await api("/snooze", { method: "DELETE" });
+    await load();
+  } catch (error) {
+    showError(error);
+  } finally {
+    $("#snooze-end").disabled = false;
+  }
+});

@@ -5,6 +5,7 @@ import { AlertDatabase } from "../src/storage/db";
 import {
   renderSpeechText,
   WyomingAnnouncementApi,
+  WyomingAnnouncementSnapshot,
   WyomingTransport,
 } from "../src/transports/wyoming";
 import {
@@ -422,4 +423,34 @@ describe("WyomingTransport", () => {
     );
     database.close();
   });
+});
+
+it("checks suppression between sound and speech and observes late accepted audio", async () => {
+  let blocked = false;
+  let accept!: (value: WyomingAnnouncementSnapshot) => void;
+  const announce = vi.fn(
+    () =>
+      new Promise<WyomingAnnouncementSnapshot>((resolve) => {
+        accept = resolve;
+      }),
+  );
+  const accepted = vi.fn();
+  const transport = new WyomingTransport({
+    api: () => ({ version: 1, announce }),
+    canAnnounce: () => !blocked,
+    onAccepted: accepted,
+  });
+  const controller = new AbortController();
+  const queued = transport.announce("test", "normal", controller.signal);
+  blocked = true;
+  accept({ id: "late", state: "queued" });
+  expect(await queued).toMatchObject({ kind: "success" });
+  expect(accepted).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "late" }),
+    undefined,
+  );
+  expect(
+    await transport.announce("blocked", "normal", controller.signal),
+  ).toMatchObject({ kind: "retryable" });
+  expect(announce).toHaveBeenCalledTimes(1);
 });
