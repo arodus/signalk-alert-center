@@ -587,6 +587,14 @@ h2 {
 .alert-table td {
   padding: 0;
 }
+.alert-table th:first-child,
+.alert-table td:first-child {
+  padding-left: 8px;
+}
+.alert-table th:last-child,
+.alert-table td:last-child {
+  padding-right: 8px;
+}
 .alert-table .table-actions {
   display: flex;
   justify-content: flex-end;
