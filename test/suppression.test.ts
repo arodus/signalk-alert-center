@@ -283,3 +283,43 @@ it("runtime cancels owned audio, blocks emergency tests, and resumes with a fres
   expect(db.getDelivery(delivery.id)?.state).toBe("delivered");
   await runtime.stop();
 });
+
+it("preserves an old delivery snapshot while resuming a raised severity with a new identity", () => {
+  const db = new AlertDatabase();
+  const store = new SuppressionStore(db);
+  const now = new Date("2026-01-01T23:00:00Z");
+  const input = {
+    sourceKey: "notifications.rising",
+    path: "notifications.rising",
+    state: "active" as const,
+    severity: "warn" as const,
+    message: "low",
+  };
+  const alert = db.ingest(input, ["phone"], now)!;
+  const original = db.listDeliveriesForAlert(alert.id)[0];
+  store.hold(
+    original,
+    {
+      reason: "snooze",
+      startedAt: now.toISOString(),
+      endsAt: new Date(now.getTime() + 3600000).toISOString(),
+    },
+    now,
+  );
+  db.ingest(
+    { ...input, severity: "emergency", message: "high" },
+    ["phone"],
+    new Date(now.getTime() + 1000),
+  );
+  store.reconcile(() => undefined, new Date(now.getTime() + 1000));
+  expect(db.getDelivery(original.id)).toMatchObject({
+    state: "suppressed",
+    alertSnapshot: { severity: "warn", message: "low" },
+  });
+  expect(
+    db.listDeliveriesForAlert(alert.id).filter((d) => d.state === "pending"),
+  ).toMatchObject([
+    { alertSnapshot: { severity: "emergency", message: "high" } },
+  ]);
+  db.close();
+});

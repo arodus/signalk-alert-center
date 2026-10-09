@@ -106,9 +106,9 @@ export class SuppressionStore {
     return Boolean(
       this.database.db
         .prepare(
-          "SELECT 1 FROM alert_events WHERE event_type='notification_paused' AND json_extract(payload_json,'$.deliveryId')=? AND json_extract(payload_json,'$.replay')=1 LIMIT 1",
+          "SELECT 1 FROM alert_events WHERE alert_id=(SELECT alert_id FROM deliveries WHERE id=?) AND event_type='notification_paused' AND json_extract(payload_json,'$.deliveryId')=? AND json_extract(payload_json,'$.replay')=1 LIMIT 1",
         )
-        .get(deliveryId),
+        .get(deliveryId, deliveryId),
     );
   }
   pending(): DeliveryRecord[] {
@@ -129,6 +129,9 @@ export class SuppressionStore {
     const db = this.database.db;
     db.exec("BEGIN IMMEDIATE");
     try {
+      const previous = db
+        .prepare("SELECT replay FROM delivery_holds WHERE delivery_id=?")
+        .get(delivery.id);
       const inserted = db
         .prepare(
           `INSERT OR IGNORE INTO delivery_holds(delivery_id,previous_state,reason,started_at,ends_at,replay) VALUES (?,?,?,?,?,?)`,
@@ -149,7 +152,7 @@ export class SuppressionStore {
         db.prepare(
           "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=? AND transport_instance_id=?",
         ).run(delivery.alertId, delivery.transportInstanceId);
-      if (inserted.changes) {
+      if (inserted.changes || (replay && !previous?.replay)) {
         this.database.recordOccurrenceEvent(
           delivery.alertId,
           "notification_paused",
@@ -165,6 +168,10 @@ export class SuppressionStore {
         db.prepare(
           "UPDATE delivery_holds SET reason=?,ends_at=? WHERE delivery_id=?",
         ).run(reason.reason, reason.endsAt, delivery.id);
+      if (replay)
+        db.prepare(
+          "UPDATE delivery_holds SET replay=1 WHERE delivery_id=?",
+        ).run(delivery.id);
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
@@ -175,6 +182,7 @@ export class SuppressionStore {
   reconcile(
     reasonFor: (delivery: DeliveryRecord) => SuppressionReason | undefined,
     now = new Date(),
+    preserveAction: (delivery: DeliveryRecord) => boolean = () => true,
   ): void {
     for (const delivery of this.pending()) {
       const reason = reasonFor(delivery);
@@ -192,25 +200,49 @@ export class SuppressionStore {
         (!alert.clearedAt ||
           alert.clearedAt.toISOString() >= String(row.started_at));
       const suppress =
-        ["notify", "trigger"].includes(delivery.operation) && clearedDuringHold;
+        clearedDuringHold &&
+        (["notify", "trigger"].includes(delivery.operation) ||
+          !preserveAction(delivery));
+      const refreshSnapshot =
+        !Number(row.replay) &&
+        alert.currentState === "active" &&
+        delivery.alertSnapshot &&
+        (delivery.alertSnapshot.severity !== alert.currentSeverity ||
+          delivery.alertSnapshot.message !== alert.message ||
+          JSON.stringify(delivery.alertSnapshot.messageSample) !==
+            JSON.stringify(alert.messageSample));
       const db = this.database.db;
+      const hasNewerIntent = Boolean(
+        db
+          .prepare(
+            "SELECT 1 FROM deliveries WHERE alert_id=? AND transport_instance_id=? AND operation=? AND cycle>? AND state IN ('pending','paused','sending','failed_retryable','delivered') LIMIT 1",
+          )
+          .get(
+            delivery.alertId,
+            delivery.transportInstanceId,
+            delivery.operation,
+            delivery.cycle,
+          ),
+      );
       db.exec("BEGIN IMMEDIATE");
       try {
-        if (Number(row.replay)) {
+        if (Number(row.replay) || refreshSnapshot || hasNewerIntent) {
           db.prepare(
             "UPDATE deliveries SET state='suppressed',updated_at=? WHERE id=? AND state <> 'delivered'",
           ).run(now.toISOString(), delivery.id);
-          db.prepare(
-            "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=? AND transport_instance_id=?",
-          ).run(delivery.alertId, delivery.transportInstanceId);
+          if (!hasNewerIntent)
+            db.prepare(
+              "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=? AND transport_instance_id=?",
+            ).run(delivery.alertId, delivery.transportInstanceId);
           if (
             !suppress &&
+            !hasNewerIntent &&
             alert.currentState === "active" &&
-            !alert.acknowledgedAt &&
-            !alert.silencedAt
+            (!Number(row.replay) ||
+              (!alert.acknowledgedAt && !alert.silencedAt))
           ) {
-            // An accepted delivery remains successful. Resuming interrupted audio
-            // gets a new identity so Wyoming does not deduplicate it as cancelled.
+            // Preserve the original snapshot. Changed readings and interrupted
+            // audio resume under a new identity, without rewriting past work.
             db.prepare(
               `INSERT INTO deliveries(id,alert_id,transport_instance_id,operation,cycle,snapshot_state,snapshot_severity,snapshot_message,message_sample_json,snapshot_at,state,created_at,updated_at)
               SELECT ?,alert_id,transport_instance_id,operation,(SELECT MAX(cycle)+1 FROM deliveries WHERE alert_id=d.alert_id AND transport_instance_id=d.transport_instance_id AND operation=d.operation),?,?,?,?,?,'pending',?,? FROM deliveries d WHERE id=?`,
@@ -246,6 +278,7 @@ export class SuppressionStore {
             reason: row.reason,
             startedAt: row.started_at,
             endsAt: row.ends_at,
+            refreshedSnapshot: Boolean(refreshSnapshot),
           },
           now,
         );

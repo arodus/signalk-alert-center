@@ -2253,7 +2253,7 @@ export class AlertDatabase {
     return (
       this.db
         .prepare(
-          "SELECT * FROM wyoming_playbacks WHERE state IN ('queued', 'playing') ORDER BY updated_at",
+          "SELECT * FROM wyoming_playbacks WHERE state IN ('queued', 'playing') OR (state='partial' AND EXISTS (SELECT 1 FROM json_each(targets_json) WHERE json_extract(value,'$.state') IN ('queued','playing'))) ORDER BY updated_at",
         )
         .all() as Row[]
     ).map(wyomingPlaybackRecord);

@@ -471,7 +471,16 @@ export class AlertCenterRuntime {
 
   private reconcileSuppression(): void {
     if (!this.database || !this.suppression) return;
-    this.suppression.reconcile((delivery) => this.suppressionReason(delivery));
+    this.suppression.reconcile(
+      (delivery) => this.suppressionReason(delivery),
+      new Date(),
+      (delivery) =>
+        this.config.notifiers?.some(
+          (service) =>
+            service.name === delivery.transportInstanceId &&
+            service.type === "pagerduty",
+        ) ?? false,
+    );
     for (const playback of this.database.listIncompleteWyomingPlaybacks()) {
       const snapshot = this.wyomingApi?.getAnnouncement?.(
         playback.announcementId,
