@@ -451,4 +451,119 @@ await eventually(
   "automatic snooze expiry",
 );
 
+// Per-service quiet hours: hold warnings, allow emergencies, and suppress clears.
+const quietApi = `${signalkUrl}/plugins/signalk-alert-center`;
+const quietPlugins = await json(`${signalkUrl}/skServer/plugins`);
+const quietPlugin = quietPlugins.find(
+  (item) => item.id === "signalk-alert-center",
+);
+const clockTime = (offset) =>
+  new Date(Date.now() + offset * 60000).toISOString().slice(11, 16);
+const quietSettings = {
+  enabled: true,
+  start: clockTime(-5),
+  end: clockTime(120),
+  timeZone: "UTC",
+  minimumSeverity: "emergency",
+};
+const quietConfig = {
+  ...quietPlugin.data.configuration,
+  notifiers: quietPlugin.data.configuration.notifiers.map((service) => ({
+    ...service,
+    quietHours: quietSettings,
+  })),
+};
+const saveQuietConfig = (configuration) =>
+  json(`${signalkUrl}/skServer/plugins/signalk-alert-center/config`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...quietPlugin.data, configuration }),
+  });
+await saveQuietConfig(quietConfig);
+await eventually(
+  () => json(`${quietApi}/status`),
+  (status) => status.services.some((service) => service.quietHours?.active),
+  "quiet-hours status",
+);
+await json(
+  `${quietApi}/definitions/${encodeURIComponent(convertedDefinition)}/policy`,
+  {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      enabled: true,
+      notifierIds: ["Acceptance ntfy"],
+      minimumSeverity: "normal",
+      activationDelaySeconds: 0,
+    }),
+  },
+);
+const quietRaise = (source, state) =>
+  json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source, state, message: source }),
+  });
+await quietRaise("quiet.clear", "warn");
+await quietRaise("quiet.active", "warn");
+await quietRaise("quiet.escalation", "warn");
+await quietRaise("quiet.emergency", "emergency");
+await eventually(
+  () => json(`${quietApi}/deliveries?limit=100`),
+  (page) => page.items.filter((d) => d.state === "paused").length >= 3,
+  "quiet warning deliveries paused",
+);
+await quietRaise("quiet.escalation", "emergency");
+await eventually(
+  () => json(`${mockUrl}/requests`),
+  (requests) =>
+    requests.some((request) => request.body.includes("quiet.escalation")),
+  "escalation releases the current delivery once",
+);
+await eventually(
+  () => json(`${mockUrl}/requests`),
+  (requests) =>
+    requests.some((request) => request.body.includes("quiet.emergency")),
+  "emergency bypasses quiet hours",
+);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/clear`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ source: "quiet.clear" }),
+});
+await eventually(
+  () => json(`${quietApi}/occurrences?source=quiet.clear`),
+  (page) => page.items[0]?.state === "cleared",
+  "quiet alert clear persisted",
+);
+await saveQuietConfig({
+  ...quietConfig,
+  notifiers: quietConfig.notifiers.map((service) => ({
+    ...service,
+    quietHours: { ...quietSettings, enabled: false },
+  })),
+});
+await eventually(
+  () => json(`${mockUrl}/requests`),
+  (requests) =>
+    requests.some((request) => request.body.includes("quiet.active")),
+  "active warning resumes when quiet hours ends",
+);
+const quietRequests = await json(`${mockUrl}/requests`);
+assert.equal(
+  quietRequests.filter((request) => request.body.includes("quiet.clear"))
+    .length,
+  0,
+);
+assert.equal(
+  quietRequests.filter((request) => request.body.includes("quiet.active"))
+    .length,
+  1,
+);
+assert.equal(
+  quietRequests.filter((request) => request.body.includes("quiet.escalation"))
+    .length,
+  1,
+);
+
 console.log("Docker acceptance smoke test passed");

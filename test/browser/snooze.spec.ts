@@ -5,6 +5,7 @@ test("global snooze dialog, persistent banner, cancellation and expiry", async (
   request,
 }) => {
   await request.delete(`${api}/snooze`);
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/signalk-alert-center/");
   await page.locator("#snooze-open").click();
   const dialog = page.locator("#snooze-dialog");
@@ -13,6 +14,15 @@ test("global snooze dialog, persistent banner, cancellation and expiry", async (
     .getByRole("button", { name: "Snooze all alerts", exact: true })
     .click();
   await expect(page.locator("#snooze-banner")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: `test-results/snooze-mobile-${test.info().project.name}.png`,
+    fullPage: true,
+  });
   await page.reload();
   await expect(page.locator("#snooze-summary")).toContainText("remaining");
   await page.locator("#snooze-end").click();

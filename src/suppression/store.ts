@@ -1,3 +1,4 @@
+import { QuietHoursWindow } from "./quiet-hours";
 import { randomUUID } from "node:crypto";
 import { AlertDatabase } from "../storage/db";
 import { DeliveryRecord } from "../alerts/types";
@@ -110,6 +111,20 @@ export class SuppressionStore {
         )
         .get(deliveryId, deliveryId),
     );
+  }
+  recordQuietWindow(service: string, window: QuietHoursWindow): void {
+    const key = `quiet-hours:${service}`;
+    const value = JSON.stringify(window);
+    const previous = this.database.db
+      .prepare("SELECT value FROM notification_controls WHERE key=?")
+      .get(key);
+    if (previous?.value === value || (!previous && !window.enabled)) return;
+    this.database.db
+      .prepare(
+        "INSERT INTO notification_controls(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      )
+      .run(key, value);
+    this.audit("quiet_hours_changed", { service, ...window });
   }
   pending(): DeliveryRecord[] {
     return (

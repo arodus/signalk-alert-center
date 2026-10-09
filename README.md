@@ -301,3 +301,31 @@ Authenticated controls share the same persisted state:
 - Read-only `digital.alertCenter.snooze.startedAt` and `.endsAt` publish ISO
   timestamps or `null`. These are plugin-specific paths. Ordinary deltas never
   invoke commands. Manual service tests are blocked during snooze.
+
+### Quiet hours per notification service
+
+In **Plugin settings → Notification services**, enable **Quiet hours** on each
+service that should be quieter overnight. Choose a daily start/end time, an IANA
+timezone (for example `America/Curacao`), and the lowest severity allowed during
+that period. Quiet hours is off by default and works for Wyoming, ntfy,
+PagerDuty, Discord and Telegram independently.
+
+![Per-service quiet hours settings](docs/screenshots/service-quiet-hours.jpg)
+
+For example, cabin speakers and phone notifications can allow only `alarm` and
+`emergency` from 22:00 to 07:00 while Discord continues receiving everything.
+This threshold only restricts normal alert/service policies; it never enables an
+otherwise-ineligible notification. Existing PagerDuty incidents still receive
+acknowledgements and resolutions. Global snooze takes precedence over both.
+
+The schedule follows the configured local wall clock, including overnight spans
+and daylight-saving changes. A skipped clock interval is skipped; a repeated
+interval follows the local clock again. Changing the boat's location does not
+change the configured timezone automatically. The service's status and next
+transition appear under System diagnostics.
+
+Below-threshold Wyoming audio is cancelled through the same owned-announcement
+API as global snooze. Held work remains durable; cleared alerts do not produce a
+morning flood, active alerts resume once eligible, and missed repeats are not
+replayed. Manual test notifications are treated as normal severity. Quiet work
+does not wake connectivity. Configuration changes take effect when saved.
