@@ -25,6 +25,7 @@ import { currentSchemaVersion, schema } from "./schema";
 import {
   migrateLegacyRepeatSchema,
   migrateMessageSamples,
+  migrateSuppression,
   migrateWyomingPlaybackSchema,
 } from "./migrations";
 
@@ -299,11 +300,13 @@ export class AlertDatabase {
       );
       const soundMigrationApplied = soundMigrationResults.some(Boolean);
       const samplesMigrationApplied = migrateMessageSamples(this.db);
+      const suppressionMigrationApplied = migrateSuppression(this.db);
       this.db.exec("COMMIT");
       this.migrationApplied =
         repeatMigrationApplied ||
         playbackMigrationApplied ||
         samplesMigrationApplied ||
+        suppressionMigrationApplied ||
         soundMigrationApplied;
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -320,6 +323,9 @@ export class AlertDatabase {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
+        "delivery_holds",
+        "notification_controls",
+        "suppression_events",
         "wyoming_playbacks",
         "delivery_attempts",
         "deliveries",
@@ -358,7 +364,7 @@ export class AlertDatabase {
              MIN(CASE WHEN next_attempt_at IS NULL OR next_attempt_at <= ?
                THEN COALESCE(next_attempt_at, created_at) END) AS oldest_due
            FROM deliveries
-           WHERE state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')`,
+           WHERE state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')`,
         )
         .get(now.toISOString()) as Row;
       const activation = this.db
@@ -376,7 +382,7 @@ export class AlertDatabase {
       const serviceRows = this.db
         .prepare(
           `SELECT transport_instance_id,
-             SUM(CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable') THEN 1 ELSE 0 END) AS pending,
+             SUM(CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused') THEN 1 ELSE 0 END) AS pending,
              SUM(CASE
                WHEN state='failed_retryable'
                  OR (state IN ('pending', 'waiting_connectivity', 'sending') AND attempt_count > 0)
@@ -572,7 +578,7 @@ export class AlertDatabase {
            AND NOT EXISTS (
              SELECT 1 FROM deliveries d
              WHERE d.alert_id=o.id
-               AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+               AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
            )
            AND NOT EXISTS (
              SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
@@ -597,7 +603,7 @@ export class AlertDatabase {
                AND NOT EXISTS (
                  SELECT 1 FROM deliveries d
                  WHERE d.alert_id=o.id
-                   AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+                   AND d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
                )
                AND NOT EXISTS (
                  SELECT 1 FROM wake_requests w WHERE w.alert_id=o.id
@@ -1718,7 +1724,7 @@ export class AlertDatabase {
   pendingDeliveryCount(): number {
     const row = this.db
       .prepare(
-        "SELECT COUNT(*) AS count FROM deliveries WHERE state NOT IN ('delivered', 'failed_terminal')",
+        "SELECT COUNT(*) AS count FROM deliveries WHERE state NOT IN ('delivered', 'failed_terminal', 'suppressed')",
       )
       .get() as Row;
     return Number(row.count);
@@ -1750,7 +1756,7 @@ export class AlertDatabase {
         `SELECT MIN(due_at) AS due_at FROM (
            SELECT COALESCE(next_attempt_at, created_at) AS due_at
            FROM deliveries
-           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending')
+           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed')
            UNION ALL
            SELECT n.next_repeat_at AS due_at
            FROM occurrence_notifiers n
@@ -1931,7 +1937,7 @@ export class AlertDatabase {
       const row = this.db
         .prepare(
           `SELECT rowid,
-                  CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+                  CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
                        THEN 0 ELSE 1 END AS priority
            FROM deliveries WHERE id=?`,
         )
@@ -1944,11 +1950,11 @@ export class AlertDatabase {
       .prepare(
         `${deliveryContextSelect}
          WHERE ? IS NULL
-            OR CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+            OR CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
                     THEN 0 ELSE 1 END > ?
-            OR (CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+            OR (CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
                      THEN 0 ELSE 1 END = ? AND d.rowid < ?)
-         ORDER BY CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+         ORDER BY CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
                        THEN 0 ELSE 1 END,
                   d.rowid DESC LIMIT ?`,
       )
@@ -1987,7 +1993,7 @@ export class AlertDatabase {
       this.db
         .prepare(
           `SELECT * FROM deliveries
-           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending')
+           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed')
              AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
            ORDER BY COALESCE(next_attempt_at, created_at), rowid
            LIMIT ?`,
@@ -2247,7 +2253,7 @@ export class AlertDatabase {
     return (
       this.db
         .prepare(
-          "SELECT * FROM wyoming_playbacks WHERE state IN ('queued', 'playing') ORDER BY updated_at",
+          "SELECT * FROM wyoming_playbacks WHERE state IN ('queued', 'playing') OR (state='partial' AND EXISTS (SELECT 1 FROM json_each(targets_json) WHERE json_extract(value,'$.state') IN ('queued','playing'))) ORDER BY updated_at",
         )
         .all() as Row[]
     ).map(wyomingPlaybackRecord);
@@ -2403,7 +2409,7 @@ export class AlertDatabase {
            AND NOT EXISTS (
              SELECT 1 FROM deliveries
              WHERE alert_id=?
-               AND state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+               AND state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
            )`,
         )
         .run(String(delivery.alert_id), String(delivery.alert_id));
@@ -2448,7 +2454,7 @@ export class AlertDatabase {
          WHERE NOT EXISTS (
            SELECT 1 FROM deliveries
            WHERE deliveries.alert_id=wake_requests.alert_id
-             AND deliveries.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable')
+             AND deliveries.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
          )`,
       );
       this.db.exec("COMMIT");

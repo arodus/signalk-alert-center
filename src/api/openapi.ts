@@ -45,6 +45,50 @@ export function getAlertCenterOpenApi() {
     openapi: "3.0.3",
     info: { title: "Signal K Alert Center", version: "1.0.0" },
     paths: {
+      "/snooze": {
+        get: {
+          summary: "Get durable global snooze state",
+          responses: {
+            "200": response("Snooze state", {
+              $ref: "#/components/schemas/Snooze",
+            }),
+            ...errors,
+          },
+        },
+        post: {
+          summary: "Snooze every service, including emergency alerts",
+          requestBody: {
+            required: true,
+            content: json({
+              type: "object",
+              required: ["durationSeconds"],
+              properties: {
+                durationSeconds: {
+                  type: "integer",
+                  minimum: 1,
+                  maximum: 28800,
+                },
+              },
+            }),
+          },
+          responses: {
+            "200": response(
+              "Snooze committed; inspect cleanupError for audio cancellation limitations",
+              { $ref: "#/components/schemas/Snooze" },
+            ),
+            ...errors,
+          },
+        },
+        delete: {
+          summary: "End snooze and reconcile eligible work",
+          responses: {
+            "200": response("Snooze ended", {
+              $ref: "#/components/schemas/Snooze",
+            }),
+            ...errors,
+          },
+        },
+      },
       "/status": {
         get: {
           summary: "Get plugin, queue, database, and connectivity health",
@@ -423,6 +467,16 @@ export function getAlertCenterOpenApi() {
     },
     components: {
       schemas: {
+        Snooze: {
+          type: "object",
+          required: ["active", "startedAt", "endsAt"],
+          properties: {
+            active: { type: "boolean" },
+            startedAt: { type: "string", format: "date-time", nullable: true },
+            endsAt: { type: "string", format: "date-time", nullable: true },
+            cleanupError: { type: "string" },
+          },
+        },
         OperationalStatus: {
           type: "object",
           required: [
@@ -436,6 +490,19 @@ export function getAlertCenterOpenApi() {
             "services",
           ],
           properties: {
+            snooze: { $ref: "#/components/schemas/Snooze" },
+            suppressionEvents: {
+              type: "array",
+              maxItems: 100,
+              items: {
+                type: "object",
+                properties: {
+                  event: { type: "string" },
+                  at: { type: "string", format: "date-time" },
+                  details: { type: "object", additionalProperties: true },
+                },
+              },
+            },
             health: {
               type: "object",
               required: ["state", "reasons"],
@@ -754,6 +821,8 @@ export function getAlertCenterOpenApi() {
                 "delivered",
                 "failed_retryable",
                 "failed_terminal",
+                "paused",
+                "suppressed",
               ],
             },
             attemptCount: { type: "integer", minimum: 0 },

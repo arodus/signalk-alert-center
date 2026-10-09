@@ -27,6 +27,7 @@ export interface DeliverySchedulerStatus {
 }
 
 export interface DeliverySchedulerOptions {
+  beforeSend?: (delivery: DeliveryRecord) => boolean;
   unitMetadata?: (
     path: string,
   ) => UnitMetadata | undefined | Promise<UnitMetadata | undefined>;
@@ -145,6 +146,16 @@ export class DeliveryScheduler {
     summary: DeliveryRunSummary,
     now: Date,
   ): Promise<void> {
+    let metadata: UnitMetadata | undefined;
+    try {
+      metadata = await this.options.unitMetadata?.(
+        this.database.getAlert(delivery.alertId).path,
+      );
+    } catch {
+      /* use captured units */
+    }
+    if (this.stopped || this.options.beforeSend?.(delivery) === false) return;
+    // No await between the final suppression check, durable claim and send.
     // Claim and commit before leaving the database for external network I/O.
     if (!this.database.claimDelivery(delivery.id, now)) return;
     summary.processed += 1;
@@ -211,7 +222,6 @@ export class DeliveryScheduler {
           ),
         };
         try {
-          const metadata = await this.options.unitMetadata?.(alert.path);
           if (metadata || deliveryAlert.messageSample)
             messageAlert = {
               ...deliveryAlert,

@@ -22,6 +22,8 @@
             aria-label="Back to Signal K administration"
             >← Back to Signal K</a
           ><span id="updated" class="updated">Loading…</span
+          ><button id="snooze-open" class="button" type="button">
+            Snooze all alerts</button
           ><button id="refresh" class="button button-quiet" type="button">
             Refresh
           </button>
@@ -43,6 +45,12 @@
         >
       </section>
 
+      <section id="snooze-banner" class="snooze-banner" role="status" hidden>
+        <span id="snooze-summary"></span
+        ><button id="snooze-end" class="button button-small" type="button">
+          End snooze now</button
+        ><span id="snooze-cleanup"></span>
+      </section>
       <nav class="view-tabs" role="tablist" aria-label="Alert center views">
         <button
           id="alerts-tab"
@@ -305,8 +313,8 @@
               <h3 id="service-tests-title">Test notification services</h3>
               <p id="service-tests-help">
                 Uses each service's currently saved settings. Manual tests run
-                immediately, including during quiet periods, and never create
-                Alert center history or delivery records.
+                only when snooze permits them, and never create Alert center
+                history or delivery records.
               </p>
             </div>
             <a
@@ -328,6 +336,40 @@
       <a id="login" class="login button button-primary" href="/login" hidden
         >Sign in to Signal K</a
       >
+      <dialog id="snooze-dialog" aria-labelledby="snooze-title">
+        <form id="snooze-form">
+          <h2 id="snooze-title">Snooze all alerts</h2>
+          <p>
+            Stops all Alert Center sounds and notification services, including
+            emergencies. Alerts and history remain visible. Requests already
+            sent may finish.
+          </p>
+          <label for="snooze-duration">Duration</label>
+          <select id="snooze-duration">
+            <option value="900">15 minutes</option>
+            <option value="1800">30 minutes</option>
+            <option value="3600" selected>1 hour</option>
+            <option value="28800">8 hours</option>
+            <option value="custom">Custom</option>
+          </select>
+          <label id="snooze-custom-label" hidden
+            >Minutes (1–480)<input
+              id="snooze-custom"
+              type="number"
+              min="1"
+              max="480"
+              value="60"
+          /></label>
+          <p id="snooze-result" role="status"></p>
+          <div class="actions">
+            <button class="button button-primary" type="submit">
+              Snooze all alerts</button
+            ><button id="snooze-cancel" class="button" type="button">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </dialog>
     </main>
 
     <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
