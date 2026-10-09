@@ -9,6 +9,25 @@ const entry = (state: string, message = state, timestamp = 0) => ({
 });
 
 describe("BoundedIngestionQueue", () => {
+  it("preserves different receipt readings while coalescing identical readings", () => {
+    const queue = new BoundedIngestionQueue(3);
+    const notification = entry("alarm", "0 < value < 10");
+    const sample = (value: number, capturedAt: string) => ({
+      ...notification,
+      messageSample: {
+        message: notification.value.message,
+        value,
+        units: "m",
+        capturedAt,
+      },
+    });
+    expect(queue.enqueue(sample(1, "2026-10-09T00:00:00Z"))).toBe("queued");
+    expect(queue.enqueue(sample(2, "2026-10-09T00:00:01Z"))).toBe("queued");
+    expect(queue.enqueue(sample(2, "2026-10-09T00:00:02Z"))).toBe("coalesced");
+    expect(queue.take(3).map((item) => item.messageSample?.value)).toEqual([
+      1, 2,
+    ]);
+  });
   it("coalesces equivalent pending updates and retains the latest payload", () => {
     const queue = new BoundedIngestionQueue(3);
     expect(queue.enqueue(entry("alarm", "Flooding", 1))).toBe("queued");

@@ -34,10 +34,91 @@ describe("occurrence storage", () => {
     return result;
   };
 
-  it("creates the complete version-one schema directly", () => {
+  it("migrates receipt samples transactionally without inventing old values and survives restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "message-samples-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    let db = new AlertDatabase(filename);
+    const message = "273.15 < value < 300";
+    const before = db.ingest(active({ message }), ["ntfy"]);
+    for (const table of ["alert_occurrences", "alert_events", "deliveries"])
+      db.db.exec(`ALTER TABLE ${table} DROP COLUMN message_sample_json`);
+    db.db.exec("PRAGMA user_version=1");
+    db.close();
+    db = new AlertDatabase(filename);
+    expect(db.migrationApplied).toBe(true);
+    expect(db.getAlert(before!.id).messageSample).toBeUndefined();
+    const sample = {
+      message,
+      value: 280.15,
+      units: "K",
+      capturedAt: "2026-10-09T00:00:00Z",
+    };
+    db.ingest(
+      active({ message, messageSample: sample, sourcePayload: { message } }),
+      ["ntfy"],
+    );
+    expect(db.listDeliveries()[0].alertSnapshot?.messageSample).toBeUndefined();
+    expect(db.listAlertEvents().at(-1)?.messageSample).toEqual(sample);
+    // A startup replay has no new sample; it must preserve the durable reading.
+    db.ingest(active({ message }), ["ntfy"]);
+    expect(db.getAlert(before!.id).messageSample).toEqual(sample);
+    db.close();
+    db = new AlertDatabase(filename);
+    databases.push(db);
+    expect(db.migrationApplied).toBe(false);
+    expect(db.getAlert(before!.id).messageSample).toEqual(sample);
+    expect(db.db.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: 2,
+    });
+  });
+
+  it("keeps each receipt sample in history and delivery snapshots after subsequent updates and clear", () => {
+    const db = database();
+    const message = "273.15 < value < 300";
+    const first = {
+      message,
+      value: 280.15,
+      units: "K",
+      capturedAt: "2026-10-09T00:00:00Z",
+    };
+    const second = {
+      ...first,
+      value: 281.15,
+      capturedAt: "2026-10-09T00:01:00Z",
+    };
+    const occurrence = db.ingest(
+      active({ message, messageSample: first, sourcePayload: { message } }),
+      ["ntfy"],
+    );
+    db.ingest(
+      active({ message, messageSample: second, sourcePayload: { message } }),
+      ["ntfy"],
+    );
+    db.ingest(
+      active({
+        state: "cleared",
+        severity: "normal",
+        message: undefined,
+        sourcePayload: null,
+      }),
+      ["ntfy"],
+    );
+    expect(db.listDeliveries()[0].alertSnapshot?.messageSample).toEqual(first);
+    expect(
+      db.listAlertEvents(occurrence!.id).map((event) => event.messageSample),
+    ).toEqual([first, second, undefined]);
+    const raised = db
+      .queryAlertHistory()
+      .items.find((event) => event.eventType === "raised");
+    expect(raised?.messageSample).toEqual(first);
+    expect(raised?.payload).toEqual({ message });
+  });
+
+  it("creates the complete current schema directly", () => {
     const db = database();
 
-    expect(db.schemaVersion()).toBe(1);
+    expect(db.schemaVersion()).toBe(2);
     const occurrenceColumns = db.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all()
@@ -427,7 +508,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(1);
+    expect(db.schemaVersion()).toBe(2);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);

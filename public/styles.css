@@ -527,7 +527,6 @@ h2 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.status-summary,
 .delivery-summary {
   display: flex;
   gap: 6px;
@@ -536,7 +535,6 @@ h2 {
   overflow: hidden;
   white-space: nowrap;
 }
-.status-summary .muted,
 .delivery-summary .muted {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -571,31 +569,65 @@ h2 {
 }
 .alert-table th:nth-child(2),
 .alert-table td:nth-child(2) {
-  /* Fixed table layout does not reliably honor max() with mixed %/px widths.
-     Reserve space for EMERGENCY across system fonts; the title takes the rest. */
-  width: 8rem;
+  width: 5rem;
 }
 .alert-table th:nth-child(3),
 .alert-table td:nth-child(3) {
-  width: 18%;
+  width: 2.5rem;
 }
 .alert-table th:nth-child(4),
 .alert-table td:nth-child(4) {
-  width: 12%;
+  width: 6rem;
 }
 .alert-table th:nth-child(5),
 .alert-table td:nth-child(5) {
-  width: 22%;
+  width: 10rem;
 }
-.table-actions {
+.alert-table th,
+.alert-table td {
+  padding: 0;
+}
+.alert-table .table-actions {
   display: flex;
   justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 5px;
+  gap: 2px;
 }
-.table-actions .button {
-  padding: 5px 7px;
+.alert-table .table-actions .button {
+  padding: 2px 4px;
   font-size: 0.72rem;
+}
+.alert-table .alert-state-cell {
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.alert-state-cell.inactive {
+  background: #e8edef;
+  color: #53646b;
+}
+.alert-state-cell.normal {
+  background: #c8ddbc;
+  color: #213b15;
+}
+.alert-state-cell.alert {
+  background: #e3d66b;
+  color: #3c3507;
+}
+.alert-state-cell.warn {
+  background: #ffde69;
+  color: #4d3900;
+}
+.alert-state-cell.alarm {
+  background: #f4a26d;
+  color: #562500;
+}
+.alert-state-cell.emergency {
+  background: #c52b27;
+  color: #fff;
+}
+.live-value,
+.live-age {
+  font-variant-numeric: tabular-nums;
 }
 .alert-severity.inactive {
   color: #53646b;
@@ -1291,4 +1323,9 @@ dialog input[type="checkbox"] {
   .view-tabs {
     overflow-x: auto;
   }
+}
+
+.alert-table .alert-summary {
+  white-space: normal;
+  text-overflow: clip;
 }

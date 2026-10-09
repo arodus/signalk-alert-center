@@ -246,3 +246,24 @@ export function migrateWyomingPlaybackSchema(database: DatabaseSync): boolean {
     throw error;
   }
 }
+
+/** Version 2: receipt-time readings, distinct from live display values.
+ * Called inside the schema transaction; no historical readings are fabricated.
+ */
+export function migrateMessageSamples(database: DatabaseSync): boolean {
+  const version = Number(
+    (database.prepare("PRAGMA user_version").get() as Row).user_version,
+  );
+  if (version > 2)
+    throw new Error("Alert Center database was created by a newer version");
+  if (version === 2) return false;
+  let changed = false;
+  for (const table of ["alert_occurrences", "alert_events", "deliveries"]) {
+    if (!columns(database, table).has("message_sample_json")) {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN message_sample_json TEXT`);
+      changed = true;
+    }
+  }
+  database.exec("PRAGMA user_version = 2");
+  return changed;
+}

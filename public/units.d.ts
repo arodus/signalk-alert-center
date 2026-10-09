@@ -12,3 +12,10 @@ export function displayZone(
   zone: { lower?: number; upper?: number },
   metadata?: UnitMetadata,
 ): { zone: { lower?: number; upper?: number }; units?: string };
+
+export function isZoneMessage(message: unknown): boolean;
+export function convertAlertMessage(
+  message: string | undefined,
+  metadata?: UnitMetadata,
+  value?: number,
+): string | undefined;

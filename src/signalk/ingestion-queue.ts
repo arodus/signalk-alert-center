@@ -56,6 +56,8 @@ export class BoundedIngestionQueue {
       normalized.state,
       normalized.severity,
       normalized.message ?? null,
+      entry.messageSample?.value ?? null,
+      entry.messageSample?.units ?? null,
     ]);
     const pending = this.latestByKey.get(key);
     if (pending && !pending.consumed && pending.signature === signature) {

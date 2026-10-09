@@ -33,33 +33,17 @@ test("uses compact Signal K styling without overflowing the viewport", async ({
     ).toBe(true);
   }
   await page.locator("#alerts-tab").click();
-  await expect
-    .poll(() =>
-      page.locator(".status-summary").evaluateAll((items) =>
-        items.flatMap((item) => {
-          const badge = item.querySelector(".alert-severity");
-          if (!badge) return [];
-          const bounds = item.getBoundingClientRect();
-          const badgeBounds = badge.getBoundingClientRect();
-          const cellWidth = item.closest("td")!.getBoundingClientRect().width;
-          const minimum =
-            parseFloat(getComputedStyle(document.documentElement).fontSize) * 8;
-          return cellWidth >= minimum && badgeBounds.right <= bounds.right
-            ? []
-            : [
-                {
-                  label: badge.textContent,
-                  cellWidth,
-                  minimum,
-                  availableWidth: bounds.width,
-                  badgeWidth: badgeBounds.width,
-                  overflow: badgeBounds.right - bounds.right,
-                },
-              ];
-        }),
-      ),
-    )
-    .toEqual([]);
+  await expect(page.locator(".alert-state-cell.emergency").first()).toHaveCSS(
+    "background-color",
+    "rgb(197, 43, 39)",
+  );
+  await expect(page.locator(".alert-table th")).toHaveText([
+    "Alert",
+    "Value",
+    "Age",
+    "State",
+    "Actions",
+  ]);
   await page.screenshot({
     path: `test-results/native-ui-${test.info().project.name}.png`,
     fullPage: true,

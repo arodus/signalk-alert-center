@@ -1,3 +1,11 @@
+/** Reading captured at notification receipt; raw Signal K message stays intact. */
+export interface MessageSample {
+  message: string;
+  value?: number;
+  units?: string;
+  capturedAt: string;
+}
+
 export const severities = [
   "normal",
   "alert",
@@ -34,6 +42,7 @@ export interface AlertRecord {
   maxSeverity: Severity;
   message?: string;
   sourcePayload?: unknown;
+  messageSample?: MessageSample;
   notificationId?: string;
   acknowledgedAt?: Date;
   silencedAt?: Date;
@@ -61,6 +70,7 @@ export interface AlertEventRecord {
   eventType: string;
   occurredAt: Date;
   payload?: unknown;
+  messageSample?: MessageSample;
 }
 
 export interface AlertHistoryRecord extends AlertEventRecord {
@@ -168,6 +178,7 @@ export interface DeliveryRecord {
     state: AlertState;
     severity: Severity;
     message?: string;
+    messageSample?: MessageSample;
     at: Date;
   };
   nextAttemptAt?: Date;
@@ -185,6 +196,7 @@ export interface DeliveryRecord {
     name: string;
     path: string;
     message?: string;
+    messageSample?: MessageSample;
     severity: Severity;
     startedAt: Date;
   };
@@ -296,6 +308,7 @@ export interface NormalizedAlert {
   state: AlertState;
   message?: string;
   sourcePayload?: unknown;
+  messageSample?: MessageSample;
   notificationId?: string;
   acknowledged?: boolean;
   sourceTimestamp?: Date;
