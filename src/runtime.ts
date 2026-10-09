@@ -1,3 +1,4 @@
+import { QuietHoursClock } from "./suppression/quiet-hours";
 import { SuppressionStore, SuppressionReason } from "./suppression/store";
 import { publishSnooze, registerSnoozePuts } from "./signalk/snooze";
 import path from "node:path";
@@ -119,7 +120,8 @@ export class AlertCenterRuntime {
   private stopping = false;
   private suppression?: SuppressionStore;
   private suppressionTimer?: ReturnType<typeof setTimeout>;
-  private readonly manualAnnouncements = new Set<string>();
+  private readonly manualAnnouncements = new Map<string, string>();
+  private readonly quietHoursClock = new QuietHoursClock();
   private startCount = 0;
   private stopCount = 0;
   private lastQueueWarningAt = 0;
@@ -197,6 +199,10 @@ export class AlertCenterRuntime {
         name: notifier.name,
         type: notifier.type,
         enabled: notifier.enabled !== false,
+        quietHours: this.quietHoursClock.window(
+          notifier.name,
+          notifier.quietHours,
+        ),
         pendingCount: service?.pendingCount ?? 0,
         retryingFailureCount: service?.retryingFailureCount ?? 0,
         terminalFailureCount: service?.terminalFailureCount ?? 0,
@@ -413,7 +419,8 @@ export class AlertCenterRuntime {
   }
 
   private suppressionReason(
-    _delivery?: DeliveryRecord,
+    delivery?: DeliveryRecord,
+    manualService?: string,
   ): SuppressionReason | undefined {
     const snooze = this.suppression?.getSnooze();
     // Expiry is reconciled before removing the guard, including at startup.
@@ -423,7 +430,89 @@ export class AlertCenterRuntime {
         startedAt: snooze.startedAt!,
         endsAt: snooze.endsAt!,
       };
+    if (delivery) {
+      const alert = this.database?.getAlert(delivery.alertId);
+      return this.serviceQuietReason(
+        delivery.transportInstanceId,
+        alert?.currentState === "active"
+          ? alert.currentSeverity
+          : (delivery.alertSnapshot?.severity ??
+              alert?.currentSeverity ??
+              "normal"),
+        delivery.operation,
+      );
+    }
+    return manualService
+      ? this.serviceQuietReason(manualService, "normal", "notify")
+      : undefined;
+  }
+
+  private serviceQuietReason(
+    serviceId: string,
+    severity: Severity,
+    operation: DeliveryRecord["operation"],
+  ): SuppressionReason | undefined {
+    const service = this.config.notifiers?.find(
+      (item) => item.name === serviceId,
+    );
+    if (!service || service.enabled === false) return undefined;
+    // Keep already-open PagerDuty incidents in sync during quiet hours.
+    if (
+      service.type === "pagerduty" &&
+      (operation === "resolve" || operation === "acknowledge")
+    )
+      return undefined;
+    const window = this.quietHoursClock.window(serviceId, service.quietHours);
+    if (
+      window.active &&
+      severityRank(severity) < severityRank(window.minimumSeverity!)
+    )
+      return {
+        reason: "quiet_hours",
+        startedAt: window.startedAt!,
+        endsAt: window.endsAt!,
+      };
     return undefined;
+  }
+
+  private canWakeForAlert(id: string): boolean {
+    if (this.suppressionReason() || !this.database) return false;
+    const alert = this.database.getAlert(id);
+    if (alert.currentState !== "active") return false;
+    const targets = this.database.db
+      .prepare(
+        "SELECT transport_instance_id, minimum_severity FROM occurrence_notifier_thresholds WHERE alert_id=?",
+      )
+      .all(id);
+    return targets.some((target) => {
+      const service = this.config.notifiers?.find(
+        (item) => item.name === target.transport_instance_id,
+      );
+      return (
+        service &&
+        service.enabled !== false &&
+        service.type !== "wyoming" &&
+        severityRank(alert.currentSeverity) >=
+          severityRank(target.minimum_severity as Severity) &&
+        !this.serviceQuietReason(service.name, alert.currentSeverity, "notify")
+      );
+    });
+  }
+
+  private hasEligibleConnectivityWork(): boolean {
+    if (!this.suppression || this.suppressionReason()) return false;
+    return this.suppression
+      .pending()
+      .some(
+        (delivery) =>
+          !this.suppressionReason(delivery) &&
+          this.config.notifiers?.some(
+            (service) =>
+              service.name === delivery.transportInstanceId &&
+              service.enabled !== false &&
+              service.type !== "wyoming",
+          ),
+      );
   }
 
   private maySend(delivery: DeliveryRecord): boolean {
@@ -439,11 +528,12 @@ export class AlertCenterRuntime {
   private cancelAnnouncement(
     snapshot: WyomingAnnouncementSnapshot,
     deliveryId?: string,
+    manualService?: string,
   ): void {
     const delivery = deliveryId
       ? this.database?.getDelivery(deliveryId)
       : undefined;
-    const reason = this.suppressionReason(delivery);
+    const reason = this.suppressionReason(delivery, manualService);
     if (!reason || !["queued", "playing", "partial"].includes(snapshot.state))
       return;
     try {
@@ -487,20 +577,41 @@ export class AlertCenterRuntime {
       );
       if (snapshot) this.cancelAnnouncement(snapshot, playback.deliveryId);
     }
-    for (const id of this.manualAnnouncements) {
+    for (const [id, service] of this.manualAnnouncements) {
       const snapshot = this.wyomingApi?.getAnnouncement?.(id);
-      if (snapshot) this.cancelAnnouncement(snapshot);
+      if (snapshot) this.cancelAnnouncement(snapshot, undefined, service);
       if (!snapshot || !["queued", "playing"].includes(snapshot.state))
         this.manualAnnouncements.delete(id);
     }
     if (this.suppressionTimer) clearTimeout(this.suppressionTimer);
     const snooze = this.suppression.getSnooze();
-    if (snooze.active)
+    const boundaries: number[] = snooze.active
+      ? [Date.parse(snooze.endsAt!)]
+      : [];
+    for (const service of this.config.notifiers ?? []) {
+      if (service.enabled === false) continue;
+      const window = this.quietHoursClock.window(
+        service.name,
+        service.quietHours,
+      );
+      this.suppression.recordQuietWindow(service.name, window);
+      if (window.nextChangeAt) boundaries.push(Date.parse(window.nextChangeAt));
+    }
+    if (boundaries.length)
       this.suppressionTimer = setTimeout(
         () => {
-          if (!this.reconcilingStartup) this.setSnooze(0, "expiry");
+          if (this.stopping || this.reconcilingStartup) return;
+          const current = this.suppression?.getSnooze();
+          if (current?.active && Date.parse(current.endsAt!) <= Date.now())
+            this.setSnooze(0, "expiry");
+          else {
+            this.reconcileSuppression();
+            this.scheduleNextWake();
+            this.requestDeliveryRun();
+            this.emitChange("quiet_hours");
+          }
         },
-        Math.max(0, Date.parse(snooze.endsAt!) - Date.now()),
+        Math.max(0, Math.min(...boundaries) - Date.now()),
       );
   }
 
@@ -534,7 +645,7 @@ export class AlertCenterRuntime {
         this.app.error(`[alert-center] ${message}`);
       else this.debug(message);
     }
-    if (this.connectivity && this.database?.pendingDeliveryCount() === 0)
+    if (this.connectivity && !this.hasEligibleConnectivityWork())
       this.connectivity.beginCooldown();
     this.scheduleNextDelivery();
     if (summary?.processed || repeatsCreated) this.emitChange("deliveries");
@@ -588,7 +699,9 @@ export class AlertCenterRuntime {
     if (this.stopping) return;
     const nextWake = this.suppressionReason()
       ? undefined
-      : this.database?.listWakeRequests()[0];
+      : this.database
+          ?.listWakeRequests()
+          .find((request) => this.canWakeForAlert(request.alertId));
     this.connectivity?.cancelScheduledWake();
     if (nextWake) this.connectivity?.scheduleWakeAt(nextWake.dueAt);
   }
@@ -1531,18 +1644,25 @@ export class AlertCenterRuntime {
         (options.connectivity.bootTimeoutSeconds ?? 240) * 1000,
         (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
         () => ({
-          pendingDelivery:
-            !this.suppressionReason() &&
-            (this.database?.pendingDeliveryCount() ?? 0) > 0,
-          activeWakeAlert:
-            !this.suppressionReason() &&
-            (this.database?.hasActiveConnectivityAlert() ?? false),
-          scheduledWake:
-            !this.suppressionReason() &&
-            (this.database?.hasWakeRequests() ?? false),
+          pendingDelivery: this.hasEligibleConnectivityWork(),
+          activeWakeAlert: Boolean(
+            this.database
+              ?.listWakeRequests()
+              .some((request) => this.canWakeForAlert(request.alertId)),
+          ),
+          scheduledWake: Boolean(
+            this.database
+              ?.listWakeRequests()
+              .some((request) => this.canWakeForAlert(request.alertId)),
+          ),
           sendInFlight: this.scheduler?.isRunning ?? false,
         }),
-        () => !this.suppressionReason(),
+        () =>
+          Boolean(
+            this.database
+              ?.listWakeRequests()
+              .some((request) => this.canWakeForAlert(request.alertId)),
+          ),
       );
 
     this.reconcileSuppression();
@@ -1661,6 +1781,10 @@ export class AlertCenterRuntime {
             name: notifier.name,
             type: notifier.type,
             enabled: true,
+            quietHours: this.quietHoursClock.window(
+              notifier.name,
+              notifier.quietHours,
+            ),
             minimumSeverity: notifier.minSeverity ?? "normal",
             repeatIntervalSeconds: notifier.repeatIntervalSeconds ?? 0,
           })),
@@ -1687,7 +1811,7 @@ export class AlertCenterRuntime {
     if (notifier.enabled === false) return "disabled";
     if (operation === "resolve" && notifier.type !== "pagerduty")
       return "unsupported";
-    if (this.suppressionReason()) return "snoozed";
+    if (this.suppressionReason(undefined, id)) return "snoozed";
     if (this.notifierTests.has(id)) return "in_progress";
     this.notifierTests.add(id);
     const startedAt = Date.now();
@@ -1731,10 +1855,10 @@ export class AlertCenterRuntime {
     timeout.unref?.();
     const transport = new WyomingTransport({
       api: () => this.wyomingApi,
-      canAnnounce: () => !this.suppressionReason(),
+      canAnnounce: () => !this.suppressionReason(undefined, notifier.name),
       onAccepted: (snapshot) => {
-        this.manualAnnouncements.add(snapshot.id);
-        this.cancelAnnouncement(snapshot);
+        this.manualAnnouncements.set(snapshot.id, notifier.name);
+        this.cancelAnnouncement(snapshot, undefined, notifier.name);
       },
       targets: notifier.targets,
       voice: notifier.voice,
@@ -1798,6 +1922,7 @@ export class AlertCenterRuntime {
     this.database = undefined;
     this.suppression = undefined;
     this.manualAnnouncements.clear();
+    this.quietHoursClock.clear();
     this.changeListeners.clear();
     this.scheduler = undefined;
     this.deliveryRun = undefined;

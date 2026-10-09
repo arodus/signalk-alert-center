@@ -192,7 +192,7 @@ function renderDiagnostics(status) {
     ],
     ...services.map((service) => [
       `Service: ${service.name}`,
-      `${service.enabled ? "Enabled" : "Disabled"} · ${service.pendingCount} pending · last success ${formatDate(service.lastSuccessAt)} · last failure ${formatDate(service.lastFailureAt)}${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
+      `${service.enabled ? "Enabled" : "Disabled"}${service.quietHours?.enabled ? ` · Quiet hours ${service.quietHours.active ? `active: ${service.quietHours.minimumSeverity} and above` : "scheduled"} (${service.quietHours.timeZone}) · next change ${formatDate(service.quietHours.nextChangeAt)}` : ""} · ${service.pendingCount} pending · last success ${formatDate(service.lastSuccessAt)} · last failure ${formatDate(service.lastFailureAt)}${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
     ]),
   ];
   if (reasons.length) items.unshift(["Health reason", reasons.join(" · ")]);
@@ -214,7 +214,12 @@ function renderNotifierTests(services) {
       const id = String(service.id ?? service.name);
       const inFlight = state.notifierTestsInFlight.has(id);
       const result = state.notifierTestResults.get(id);
-      const disabled = service.enabled === false || inFlight;
+      const disabled =
+        service.enabled === false ||
+        inFlight ||
+        state.lastStatus?.snooze?.active ||
+        (service.quietHours?.active &&
+          service.quietHours.minimumSeverity !== "normal");
       const buttons =
         service.type === "pagerduty"
           ? `<button class="button button-primary button-small" type="button" data-test-notifier="${escapeHtml(id)}" data-test-operation="send" ${disabled ? "disabled" : ""}>${inFlight ? "Testing…" : "Test alert"}</button><button class="button button-quiet button-small" type="button" data-test-notifier="${escapeHtml(id)}" data-test-operation="resolve" ${disabled ? "disabled" : ""}>Test resolve</button>`
@@ -222,7 +227,10 @@ function renderNotifierTests(services) {
       const outcome = result
         ? `<p class="service-test-result ${escapeHtml(result.status)}" role="status">${escapeHtml(result.message)}${result.technicalDetail ? ` <small>${escapeHtml(result.technicalDetail)}</small>` : ""}</p>`
         : `<p class="service-test-result" role="status">${service.enabled === false ? "Enable and save this service before testing it." : "Not tested in this session."}</p>`;
-      return `<article class="service-test-card"><div><strong>${escapeHtml(service.name ?? id)}</strong><span>${escapeHtml(service.type ?? "unknown")} · ${service.enabled === false ? "disabled" : "enabled"}</span></div><div class="service-test-actions">${buttons}</div>${outcome}</article>`;
+      const quiet = service.quietHours?.enabled
+        ? `<p class="service-quiet-hours">Quiet hours ${service.quietHours.active ? `active · ${escapeHtml(service.quietHours.minimumSeverity)} and above` : "scheduled"} · ${escapeHtml(service.quietHours.timeZone)} · next change ${escapeHtml(formatDate(service.quietHours.nextChangeAt))}</p>`
+        : "";
+      return `<article class="service-test-card"><div><strong>${escapeHtml(service.name ?? id)}</strong><span>${escapeHtml(service.type ?? "unknown")} · ${service.enabled === false ? "disabled" : "enabled"}</span></div><div class="service-test-actions">${buttons}</div>${quiet}${outcome}</article>`;
     })
     .join("");
 }

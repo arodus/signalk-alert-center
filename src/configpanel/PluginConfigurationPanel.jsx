@@ -627,6 +627,7 @@ function NotificationServices({ config, update }) {
                     name: service.name,
                     enabled: service.enabled,
                     minSeverity: service.minSeverity,
+                    quietHours: service.quietHours,
                     repeatIntervalSeconds: service.repeatIntervalSeconds,
                     failureNotifierIds: service.failureNotifierIds ?? [],
                     type,
@@ -708,6 +709,104 @@ function NotificationServices({ config, update }) {
                 ))}
               </select>
             </Field>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <p style={styles.hint}>
+                Apply a higher severity threshold on a daily schedule. Global
+                snooze still blocks every severity.
+              </p>
+              <label style={styles.checkLabel}>
+                <input
+                  type="checkbox"
+                  checked={service.quietHours?.enabled ?? false}
+                  onChange={(event) =>
+                    change(index, {
+                      quietHours: {
+                        start: "22:00",
+                        end: "07:00",
+                        timeZone:
+                          Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        minimumSeverity: "alarm",
+                        ...service.quietHours,
+                        enabled: event.target.checked,
+                      },
+                    })
+                  }
+                />{" "}
+                Enable quiet hours
+              </label>
+            </div>
+            {service.quietHours?.enabled && (
+              <>
+                <Field label="Quiet hours start">
+                  <input
+                    style={styles.input}
+                    type="time"
+                    value={service.quietHours.start}
+                    onChange={(event) =>
+                      change(index, {
+                        quietHours: {
+                          ...service.quietHours,
+                          start: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Quiet hours end">
+                  <input
+                    style={styles.input}
+                    type="time"
+                    value={service.quietHours.end}
+                    onChange={(event) =>
+                      change(index, {
+                        quietHours: {
+                          ...service.quietHours,
+                          end: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </Field>
+                <Field
+                  label="Quiet hours timezone"
+                  hint="IANA timezone, for example America/Curacao or Europe/Berlin."
+                >
+                  <input
+                    style={styles.input}
+                    aria-label="Quiet hours timezone"
+                    value={service.quietHours.timeZone}
+                    onChange={(event) =>
+                      change(index, {
+                        quietHours: {
+                          ...service.quietHours,
+                          timeZone: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Lowest severity during quiet hours">
+                  <select
+                    style={styles.input}
+                    value={service.quietHours.minimumSeverity}
+                    onChange={(event) =>
+                      change(index, {
+                        quietHours: {
+                          ...service.quietHours,
+                          minimumSeverity: event.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {severityOptions.map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </>
+            )}
             <NumberField
               label="Repeat while the alert remains active (seconds)"
               hint="After a successful delivery, send through this service again after this many seconds. Leave empty or use 0 to send once."

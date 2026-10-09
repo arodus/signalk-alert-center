@@ -593,6 +593,21 @@ test("saves a Telegram service and selects it as a default", async ({
     .getByLabel("Repeat while the alert remains active (seconds)")
     .fill("300");
   await service.getByLabel("Send Telegram messages silently").check();
+  await service
+    .getByRole("checkbox", { name: "Enable quiet hours", exact: true })
+    .check();
+  await service.getByLabel("Quiet hours start", { exact: true }).fill("22:00");
+  await service.getByLabel("Quiet hours end", { exact: true }).fill("07:00");
+  await service
+    .getByLabel("Quiet hours timezone", { exact: true })
+    .fill("America/Curacao");
+  await service
+    .getByRole("combobox", {
+      name: "Lowest severity during quiet hours",
+      exact: true,
+    })
+    .selectOption("alarm");
+
   await page.getByRole("button", { name: "Add notification service" }).click();
   const backup = page.getByTestId("notification-service").nth(1);
   await backup.getByLabel("Service name").fill("Backup");
@@ -620,6 +635,15 @@ test("saves a Telegram service and selects it as a default", async ({
   const saved = await savedRequest;
   expect(saved.ok()).toBe(true);
   const savedConfig = saved.request().postDataJSON().configuration;
+  expect(
+    savedConfig.notifiers.find((item) => item.name === "Bridge").quietHours,
+  ).toEqual({
+    enabled: true,
+    start: "22:00",
+    end: "07:00",
+    timeZone: "America/Curacao",
+    minimumSeverity: "alarm",
+  });
   expect(
     savedConfig.notifiers.find((item) => item.name === "Bridge")
       .failureNotifierIds,

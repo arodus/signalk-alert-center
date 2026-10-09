@@ -22,6 +22,32 @@ const serviceMinimumSeverity = {
   enum: [...severities],
   default: "normal",
 };
+const serviceQuietHours = {
+  type: "object",
+  title: "Quiet hours",
+  properties: {
+    enabled: { type: "boolean", title: "Enable quiet hours", default: false },
+    start: {
+      type: "string",
+      title: "Start (HH:mm)",
+      default: "22:00",
+      pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+    },
+    end: {
+      type: "string",
+      title: "End (HH:mm)",
+      default: "07:00",
+      pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+    },
+    timeZone: { type: "string", title: "Timezone (IANA)", default: "UTC" },
+    minimumSeverity: {
+      type: "string",
+      title: "Lowest severity during quiet hours",
+      enum: [...severities],
+      default: "alarm",
+    },
+  },
+};
 const serviceRepeatInterval = {
   type: "integer",
   minimum: 0,
@@ -349,6 +375,7 @@ export const pluginConfigSchema = {
           type: serviceType,
           enabled: serviceEnabled,
           minSeverity: serviceMinimumSeverity,
+          quietHours: serviceQuietHours,
           repeatIntervalSeconds: serviceRepeatInterval,
           failureNotifierIds: serviceFailureNotifiers,
         },
