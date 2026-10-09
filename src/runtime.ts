@@ -36,6 +36,7 @@ import { createInternetProbe } from "./connectivity/internet";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { DeliveryScheduler } from "./delivery/scheduler";
 import { ServerDisplayUnits } from "./signalk/display-units";
+import { captureMessageSample } from "./signalk/message-sample";
 import {
   extractNotificationEntries,
   iterateSnapshotNotificationEntries,
@@ -491,8 +492,13 @@ export class AlertCenterRuntime {
 
   private enqueueNotifications(entries: SignalKNotificationInput[]): void {
     let rejected = 0;
-    for (const entry of entries)
-      if (this.ingestionQueue.enqueue(entry) === "rejected") rejected += 1;
+    for (const entry of entries) {
+      const sampled = {
+        ...entry,
+        messageSample: captureMessageSample(this.app, entry),
+      };
+      if (this.ingestionQueue.enqueue(sampled) === "rejected") rejected += 1;
+    }
     if (
       rejected > 0 &&
       Date.now() - this.lastQueueWarningAt >= QUEUE_WARNING_INTERVAL_MS
@@ -611,6 +617,7 @@ export class AlertCenterRuntime {
       entry.source,
       entry.sourceTimestamp,
     );
+    normalized.messageSample = entry.messageSample;
     const serviceHealth = isServiceHealthPath(normalized.path);
     const serviceHealthSource = serviceHealth
       ? (this.config.notifiers ?? []).find(
@@ -1108,6 +1115,7 @@ export class AlertCenterRuntime {
             eventType: event.eventType,
             occurredAt: event.occurredAt,
             payload: event.payload,
+            messageSample: event.messageSample,
           }));
         if (query.eventType)
           items = items.filter((event) => event.eventType === query.eventType);

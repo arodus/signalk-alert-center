@@ -92,6 +92,22 @@ Signal K severities are ordered from lowest to highest as `normal`, `alert`,
 `warn`, `alarm`, and `emergency`. Signal K's special `nominal` state is treated
 as `normal`.
 
+The compact Alerts overview shows the live sensor **Value** and its **Age**
+(time since the sensor timestamp), including zone definitions that have never
+fired and learned alerts that have cleared. State cells are coloured by severity, with Acknowledge/Silence buttons
+in each active row. Notification-service details are available in the alert drawer.
+Sensor updates use Signal K stream subscriptions without creating alert history
+or delivery work; missing values and disconnected streams display a dash.
+
+Generated zone descriptions replace `value` with the live reading in the overview,
+for example `0 °C ≤ 7 °C < 10 °C`. Details, history, and outgoing notifications use
+the reading captured when the notification was received. Each delivery cycle
+retains its own sample across retries and restarts. Original Signal K messages and
+payloads remain unchanged. Custom prose is not rewritten to insert readings.
+Old records and startup snapshots have no inferred historical reading; `value`
+remains a placeholder when no sample exists. Schema version 2 adds receipt samples
+transactionally without discarding history or pending deliveries.
+
 Zone bounds in alert details use Signal K's preferred display units from path
 metadata. Kelvin defaults to °C when no preference is available. Unsupported
 conversion formulas retain the original values and unit; stored thresholds are

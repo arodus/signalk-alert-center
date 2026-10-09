@@ -1,5 +1,5 @@
 /** Initial Signal K Alert Center schema. */
-export const currentSchemaVersion = 1;
+export const currentSchemaVersion = 2;
 
 export const schema = `
 CREATE TABLE IF NOT EXISTS alert_definitions (
@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS alert_occurrences (
   max_severity TEXT NOT NULL,
   message TEXT,
   source_payload_json TEXT,
+  message_sample_json TEXT,
   notification_id TEXT,
   acknowledged_at TEXT,
   silenced_at TEXT,
@@ -90,7 +91,8 @@ CREATE TABLE IF NOT EXISTS alert_events (
   alert_id TEXT NOT NULL REFERENCES alert_occurrences(id) ON DELETE CASCADE,
   event_type TEXT NOT NULL,
   occurred_at TEXT NOT NULL,
-  payload_json TEXT
+  payload_json TEXT,
+  message_sample_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS alert_events_history_idx
@@ -127,6 +129,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   snapshot_state TEXT,
   snapshot_severity TEXT,
   snapshot_message TEXT,
+  message_sample_json TEXT,
   snapshot_at TEXT,
   state TEXT NOT NULL,
   attempt_count INTEGER NOT NULL DEFAULT 0,

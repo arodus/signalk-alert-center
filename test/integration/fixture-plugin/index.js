@@ -217,6 +217,12 @@ module.exports = function fixturePlugin(app) {
           ),
         );
       });
+      writes.post("/reading", (request, response) => {
+        const body = request.body ?? {};
+        response.json(
+          publish(body.path ?? ZONE_PATH, body.value, "fixture.sensor"),
+        );
+      });
       writes.post("/unit-metadata", (request, response) => {
         app.handleMessage("signalk-test-fixture", {
           context: "vessels.self",

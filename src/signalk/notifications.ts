@@ -1,8 +1,11 @@
+import { MessageSample } from "../alerts/types";
+
 export interface SignalKNotificationInput {
   path: string;
   value: unknown;
   source?: string;
   sourceTimestamp?: Date;
+  messageSample?: MessageSample;
 }
 
 type UnknownRecord = Record<string, unknown>;

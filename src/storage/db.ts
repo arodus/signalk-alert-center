@@ -24,6 +24,7 @@ import {
 import { currentSchemaVersion, schema } from "./schema";
 import {
   migrateLegacyRepeatSchema,
+  migrateMessageSamples,
   migrateWyomingPlaybackSchema,
 } from "./migrations";
 
@@ -118,6 +119,9 @@ const deliveryRecord = (row: Row): DeliveryRecord => ({
             ? String(row.snapshot_message)
             : undefined,
           at: new Date(String(row.snapshot_at)),
+          messageSample: json(
+            row.message_sample_json,
+          ) as AlertRecord["messageSample"],
         },
       }
     : {}),
@@ -146,6 +150,9 @@ const deliveryRecord = (row: Row): DeliveryRecord => ({
           name: String(row.definition_name ?? row.alert_path),
           path: String(row.alert_path),
           message: row.alert_message ? String(row.alert_message) : undefined,
+          messageSample: json(
+            row.message_sample_json,
+          ) as AlertRecord["messageSample"],
           severity: row.alert_severity as AlertRecord["maxSeverity"],
           startedAt: new Date(String(row.alert_started_at)),
         },
@@ -253,6 +260,9 @@ const alertHistoryRecord = (row: Row): AlertHistoryRecord => {
     eventType: String(row.event_type),
     occurredAt: new Date(String(row.occurred_at)),
     payload,
+    messageSample: json(
+      row.message_sample_json,
+    ) as AlertRecord["messageSample"],
   };
 };
 
@@ -288,10 +298,12 @@ export class AlertDatabase {
         ensureColumn(this.db, table, column, definition),
       );
       const soundMigrationApplied = soundMigrationResults.some(Boolean);
+      const samplesMigrationApplied = migrateMessageSamples(this.db);
       this.db.exec("COMMIT");
       this.migrationApplied =
         repeatMigrationApplied ||
         playbackMigrationApplied ||
+        samplesMigrationApplied ||
         soundMigrationApplied;
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -943,6 +955,7 @@ export class AlertDatabase {
             `UPDATE alert_occurrences SET
               source_timestamp=COALESCE(?, source_timestamp), last_seen_at=?,
               cleared_at=?, current_state=?, current_severity=?, max_severity=?,
+              message_sample_json=CASE WHEN message IS ? THEN COALESCE(?, message_sample_json) ELSE ? END,
               message=?, source_payload_json=?, notification_id=COALESCE(?, notification_id),
               activation_state=CASE WHEN ? THEN 'suppressed' ELSE activation_state END,
               activation_due_at=CASE WHEN ? THEN NULL ELSE activation_due_at END,
@@ -955,6 +968,9 @@ export class AlertDatabase {
             alert.state,
             alert.severity,
             maxSeverity,
+            alert.message ?? null,
+            alert.messageSample ? JSON.stringify(alert.messageSample) : null,
+            alert.messageSample ? JSON.stringify(alert.messageSample) : null,
             alert.message ?? null,
             payload,
             alert.notificationId ?? null,
@@ -1136,6 +1152,12 @@ export class AlertDatabase {
             timestamp,
             timestamp,
           );
+        if (alert.messageSample)
+          this.db
+            .prepare(
+              "UPDATE alert_occurrences SET message_sample_json=? WHERE id=?",
+            )
+            .run(JSON.stringify(alert.messageSample), id);
         this.addEvent(
           id,
           activeState ? "raised" : "cleared",
@@ -1219,9 +1241,9 @@ export class AlertDatabase {
         .prepare(
           `INSERT OR IGNORE INTO deliveries
             (id, alert_id, transport_instance_id, operation, cycle,
-             snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
+             snapshot_state, snapshot_severity, snapshot_message, snapshot_at, message_sample_json, state,
              attempt_count, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
         )
         .run(
           randomUUID(),
@@ -1233,6 +1255,7 @@ export class AlertDatabase {
           alert.currentSeverity,
           alert.message ?? null,
           timestamp,
+          alert.messageSample ? JSON.stringify(alert.messageSample) : null,
           timestamp,
           timestamp,
         );
@@ -1259,9 +1282,9 @@ export class AlertDatabase {
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO deliveries
         (id, alert_id, transport_instance_id, operation, cycle,
-         snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
+         snapshot_state, snapshot_severity, snapshot_message, snapshot_at, message_sample_json, state,
          attempt_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
     );
     for (const row of rows)
       insert.run(
@@ -1274,6 +1297,7 @@ export class AlertDatabase {
         alert.currentSeverity,
         alert.message ?? null,
         timestamp,
+        alert.messageSample ? JSON.stringify(alert.messageSample) : null,
         timestamp,
         timestamp,
       );
@@ -1337,9 +1361,9 @@ export class AlertDatabase {
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO deliveries
         (id, alert_id, transport_instance_id, operation, cycle,
-         snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
+         snapshot_state, snapshot_severity, snapshot_message, snapshot_at, message_sample_json, state,
          attempt_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
     );
     for (const row of rows)
       insert.run(
@@ -1352,6 +1376,7 @@ export class AlertDatabase {
         alert.currentSeverity,
         alert.message ?? null,
         timestamp,
+        alert.messageSample ? JSON.stringify(alert.messageSample) : null,
         timestamp,
         timestamp,
       );
@@ -1416,13 +1441,14 @@ export class AlertDatabase {
   ): void {
     this.db
       .prepare(
-        "INSERT INTO alert_events(alert_id,event_type,occurred_at,payload_json) VALUES (?,?,?,?)",
+        "INSERT INTO alert_events(alert_id,event_type,occurred_at,payload_json,message_sample_json) VALUES (?,?,?,?,(SELECT message_sample_json FROM alert_occurrences WHERE id=?))",
       )
       .run(
         alertId,
         eventType,
         now.toISOString(),
         payload === undefined ? null : JSON.stringify(payload),
+        alertId,
       );
   }
 
@@ -1444,6 +1470,9 @@ export class AlertDatabase {
       eventType: String(row.event_type),
       occurredAt: new Date(String(row.occurred_at)),
       payload: json(row.payload_json),
+      messageSample: json(
+        row.message_sample_json,
+      ) as AlertRecord["messageSample"],
     }));
   }
 
@@ -1616,6 +1645,9 @@ export class AlertDatabase {
       maxSeverity: row.max_severity as AlertRecord["maxSeverity"],
       message: row.message ? String(row.message) : undefined,
       sourcePayload: json(row.source_payload_json),
+      messageSample: json(
+        row.message_sample_json,
+      ) as AlertRecord["messageSample"],
       notificationId: row.notification_id
         ? String(row.notification_id)
         : undefined,
@@ -1737,7 +1769,7 @@ export class AlertDatabase {
       const rows = this.db
         .prepare(
           `SELECT n.alert_id, n.transport_instance_id, n.supports_resolution,
-                  o.current_state, o.current_severity, o.message
+                  o.current_state, o.current_severity, o.message, o.message_sample_json
            FROM occurrence_notifiers n
            JOIN alert_occurrences o ON o.id=n.alert_id
            WHERE n.next_repeat_at IS NOT NULL
@@ -1759,9 +1791,9 @@ export class AlertDatabase {
       const insert = this.db.prepare(
         `INSERT INTO deliveries
           (id, alert_id, transport_instance_id, operation, cycle,
-           snapshot_state, snapshot_severity, snapshot_message, snapshot_at, state,
+           snapshot_state, snapshot_severity, snapshot_message, snapshot_at, message_sample_json, state,
            attempt_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
       );
       let created = 0;
       for (const row of rows) {
@@ -1779,6 +1811,7 @@ export class AlertDatabase {
           String(row.current_severity),
           row.message ? String(row.message) : null,
           timestamp,
+          row.message_sample_json ?? null,
           timestamp,
           timestamp,
         );

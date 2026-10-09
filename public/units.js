@@ -73,6 +73,61 @@ function displayZone(zone, metadata = {}) {
   }
 }
 
+const zoneNumber = "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?";
+function isZoneMessage(message) {
+  return (
+    typeof message === "string" &&
+    new RegExp(
+      `^(undefined|${zoneNumber}) < value < (undefined|${zoneNumber})$`,
+    ).test(message)
+  );
+}
+
+function convertAlertMessage(message, metadata = {}, value) {
+  if (!message) return message;
+  const format = (number) => String(Number(number.toFixed(3)));
+  const quantity = (number, units) =>
+    `${format(number)}${units ? ` ${units}` : ""}`;
+  if (isZoneMessage(message)) {
+    const [low, , , , high] = message.split(" ");
+    const lower = low === "undefined" ? undefined : Number(low);
+    const upper = high === "undefined" ? undefined : Number(high);
+    const converted = displayZone({ lower, upper }, metadata);
+    const reading = Number.isFinite(value)
+      ? displayZone({ lower: value }, metadata)
+      : undefined;
+    return [
+      converted.zone.lower === undefined
+        ? undefined
+        : `${quantity(converted.zone.lower, converted.units)} ≤`,
+      reading ? quantity(reading.zone.lower, reading.units) : "value",
+      converted.zone.upper === undefined
+        ? undefined
+        : `< ${quantity(converted.zone.upper, converted.units)}`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (!metadata.units) return message;
+  const unit = metadata.units.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return message.replace(
+    new RegExp(`(^|[^\\w.])(${zoneNumber})\\s*${unit}(?![\\w/])`, "g"),
+    (match, prefix, raw) => {
+      const converted = displayZone({ lower: Number(raw) }, metadata);
+      return converted.units &&
+        converted.units !== metadata.units &&
+        converted.zone.lower !== undefined
+        ? `${prefix}${quantity(converted.zone.lower, converted.units)}`
+        : match;
+    },
+  );
+}
+
 // The server and browser share exactly the same conversion implementation.
 if (typeof module !== "undefined" && module.exports)
-  module.exports = { convertDisplayValue, displayZone };
+  module.exports = {
+    convertDisplayValue,
+    displayZone,
+    convertAlertMessage,
+    isZoneMessage,
+  };

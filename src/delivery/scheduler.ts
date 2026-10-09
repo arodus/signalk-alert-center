@@ -169,6 +169,7 @@ export class DeliveryScheduler {
           currentSeverity: delivery.alertSnapshot.severity,
           maxSeverity: delivery.alertSnapshot.severity,
           message: delivery.alertSnapshot.message,
+          messageSample: delivery.alertSnapshot.messageSample,
           lastSeenAt: delivery.alertSnapshot.at,
           clearedAt:
             delivery.alertSnapshot.state === "cleared"
@@ -201,13 +202,27 @@ export class DeliveryScheduler {
     try {
       const sending = (async () => {
         // Presentation-only copy: durable snapshots and original payload stay intact.
-        let messageAlert = deliveryAlert;
+        let messageAlert = {
+          ...deliveryAlert,
+          message: convertAlertMessage(
+            deliveryAlert.message,
+            { units: deliveryAlert.messageSample?.units },
+            deliveryAlert.messageSample?.value,
+          ),
+        };
         try {
           const metadata = await this.options.unitMetadata?.(alert.path);
-          if (metadata)
+          if (metadata || deliveryAlert.messageSample)
             messageAlert = {
               ...deliveryAlert,
-              message: convertAlertMessage(deliveryAlert.message, metadata),
+              message: convertAlertMessage(
+                deliveryAlert.message,
+                {
+                  ...metadata,
+                  units: deliveryAlert.messageSample?.units ?? metadata?.units,
+                },
+                deliveryAlert.messageSample?.value,
+              ),
             };
         } catch {
           // Missing/malformed metadata must never block notification delivery.

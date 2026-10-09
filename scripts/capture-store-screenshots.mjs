@@ -136,6 +136,11 @@ try {
       },
     ],
   });
+  await json("/plugins/signalk-test-fixture/reading", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ value: 282.95 }),
+  });
   await json("/plugins/signalk-test-fixture/seed", { method: "POST" });
   await eventually(
     () => json("/plugins/signalk-alert-center/definitions?limit=100"),
@@ -153,6 +158,11 @@ try {
   const desktop = await preparePage(browser, { width: 1280, height: 1000 });
   await desktop.goto(`${baseUrl}/signalk-alert-center/`);
   await desktop.locator("#definition-list tr.clickable-row").first().waitFor();
+  await desktop
+    .locator(".live-value")
+    .filter({ hasText: "9.8 °C" })
+    .first()
+    .waitFor();
   await capture(desktop, "alert-center-overview.png");
 
   const detailRow = desktop
@@ -176,6 +186,11 @@ try {
   const tablet = await preparePage(browser, { width: 820, height: 1000 });
   await tablet.goto(`${baseUrl}/signalk-alert-center/`);
   await tablet.locator("#definition-list tr.clickable-row").first().waitFor();
+  await tablet
+    .locator(".live-value")
+    .filter({ hasText: "9.8 °C" })
+    .first()
+    .waitFor();
   await capture(tablet, "alert-center-tablet.png");
   await tablet.close();
 

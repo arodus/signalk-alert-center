@@ -79,10 +79,6 @@ const formatDate = (value) =>
         timeStyle: "short",
       }).format(new Date(value))
     : "—";
-const latestTimestamp = (...values) =>
-  values.filter(Boolean).reduce((latest, value) => {
-    return !latest || new Date(value) > new Date(latest) ? value : latest;
-  }, undefined);
 const pageItems = (value) =>
   Array.isArray(value) ? value : (value?.items ?? []);
 const mergeById = (...collections) => [
@@ -306,8 +302,101 @@ function zoneBadges(definition) {
     .join("");
 }
 
+const displayMetadata = new Map();
+const liveValues = new AlertLiveValues(
+  () => renderLiveValues(),
+  () => {
+    elements.login.hidden = false;
+  },
+);
+window.addEventListener("pagehide", () => liveValues.close());
+function displayedMessage(item, live = false, message = item?.message) {
+  if (!item) return message;
+  const definition = state.definitions.find(
+    (entry) =>
+      entry.id === item.definitionId || entry.pathPattern === item.path,
+  );
+  const metadata =
+    displayMetadata.get(definition?.pathPattern)?.metadata ??
+    definition?.metadata ??
+    {};
+  const sample = item.messageSample;
+  const path = (item.path ?? definition?.pathPattern ?? "").replace(
+    /^notifications\./,
+    "",
+  );
+  const value = live ? liveValues.values.get(path)?.value : sample?.value;
+  const units = live ? metadata.units : (sample?.units ?? metadata.units);
+  const formatted = convertAlertMessage(message, { ...metadata, units }, value);
+  return live && isZoneMessage(message)
+    ? `${formatted} · ${Number.isFinite(value) ? "Live" : "Live value unavailable"}`
+    : formatted;
+}
+
+function liveValueText(definition) {
+  const path = definition.pathPattern.replace(/^notifications\./, "");
+  const reading = liveValues.values.get(path);
+  if (!reading) return "—";
+  const metadata =
+    displayMetadata.get(definition.pathPattern)?.metadata ??
+    definition.metadata;
+  const displayed = displayZone({ lower: reading.value }, metadata);
+  return `${formatZoneNumber(displayed.zone.lower)}${displayed.units ? ` ${displayed.units}` : ""}`;
+}
+function liveAgeText(definition) {
+  const reading = liveValues.values.get(
+    definition.pathPattern.replace(/^notifications\./, ""),
+  );
+  const at = Date.parse(reading?.timestamp);
+  if (!Number.isFinite(at)) return "—";
+  const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
+  return seconds < 60
+    ? `${seconds}s`
+    : seconds < 3600
+      ? `${Math.floor(seconds / 60)}m`
+      : seconds < 86400
+        ? `${Math.floor(seconds / 3600)}h`
+        : `${Math.floor(seconds / 86400)}d`;
+}
+function renderLiveValues() {
+  for (const row of elements.definitions.querySelectorAll(
+    "tr[data-definition-id]",
+  )) {
+    const definition = state.definitions.find(
+      (item) => item.id === row.dataset.definitionId,
+    );
+    if (!definition) continue;
+    row.querySelector(".live-value").textContent = liveValueText(definition);
+    row.querySelector(".live-age").textContent = liveAgeText(definition);
+    const summary = row.querySelector(".alert-summary");
+    const occurrence = state.occurrences.find(
+      (item) => item.id === summary.dataset.liveOccurrence,
+    );
+    if (occurrence && isZoneMessage(occurrence.message)) {
+      summary.textContent = [
+        displayedMessage(occurrence, true),
+        definitionZones(definition).length
+          ? `Configured zone · ${definitionZones(definition).length} thresholds`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      summary.title = summary.textContent;
+    }
+  }
+}
+const liveAgeTimer = setInterval(() => {
+  if (!document.hidden) renderLiveValues();
+}, 1000);
+window.addEventListener("pagehide", () => clearInterval(liveAgeTimer));
+
 async function loadDisplayUnits(definition) {
-  if (!definition || !definitionZones(definition).length) return;
+  if (!definition) return;
+  const cached = displayMetadata.get(definition.pathPattern);
+  if (cached && Date.now() - cached.at < 60_000) {
+    definition.metadata = { ...definition.metadata, ...cached.metadata };
+    return;
+  }
   const path = definition.pathPattern.replace(/^notifications\./, "");
   try {
     const response = await fetch(
@@ -329,10 +418,36 @@ async function loadDisplayUnits(definition) {
       units: metadata.units ?? definition.metadata?.units,
       displayUnits: metadata.displayUnits,
     };
+    displayMetadata.set(definition.pathPattern, {
+      metadata: definition.metadata,
+      at: Date.now(),
+    });
   } catch {
     // Keep the detail usable when live metadata is unavailable.
   }
 }
+function occurrenceActions(occurrence) {
+  if (occurrence.state !== "active") return "";
+  return [
+    ["acknowledge", "Acknowledge", "Acknowledged", occurrence.acknowledgedAt],
+    ["silence", "Silence", "Silenced", occurrence.silencedAt],
+  ]
+    .map(
+      ([action, label, done, at]) =>
+        `<button class="button button-quiet occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="${action}" type="button" ${at ? "disabled" : ""}>${at ? done : label}</button>`,
+    )
+    .join("");
+}
+function bindOccurrenceActions(root = elements.drawerBody) {
+  root.querySelectorAll(".occurrence-action").forEach((button) =>
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      await mutateOccurrence(button.dataset.id, button.dataset.action);
+      if (button.isConnected) button.disabled = false;
+    }),
+  );
+}
+
 function renderDefinitions() {
   const showActive = $("#state-filter").value === "active";
   const severity = $("#severity-filter").value;
@@ -398,30 +513,31 @@ function renderDefinitions() {
     `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
-            <thead><tr><th>Alert</th><th>Status</th><th>Last activity</th><th>Notify via</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+            <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>${visible
           .map((definition) => {
             const { definition: item, occurrence, active, latest } = definition;
-            const policy = item.policy ?? {};
-            const notifierCount = (policy.notifierIds ?? []).length;
             const hasHistory = Boolean(latest || item.fireCount);
             const alertSummary = [
-              latest?.message,
+              displayedMessage(latest, active),
               definitionZones(item).length
                 ? `Configured zone · ${definitionZones(item).length} thresholds`
                 : "",
             ]
               .filter(Boolean)
               .join(" · ");
-            const status = active
-              ? `<span class="status-summary"><span class="alert-severity ${escapeHtml(latest.currentSeverity)}">${escapeHtml(latest.currentSeverity)}</span></span>`
-              : `<span class="alert-severity inactive" title="${hasHistory ? "No active alert" : "No alert has been recorded for this definition"}">Inactive</span>`;
+            const status = active ? latest.currentSeverity : "inactive";
+            const statusTitle = active
+              ? latest.currentSeverity
+              : hasHistory
+                ? "No active alert has been recorded"
+                : "No alert has been recorded for this definition";
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
-            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
-            <td data-label="Status">${status}</td>
-            <td data-label="Last activity">${formatDate(latestTimestamp(latest?.silencedAt, latest?.acknowledgedAt, latest?.clearedAt, latest?.lastSeenAt, latest?.startedAt, item.lastActivityAt, item.lastFiredAt))}</td>
-            <td data-label="Notify via"><span class="cell-title">${(policy.enabled === false ? "" : policy.notifierIds?.join(", ")) || '<span class="muted">No delivery selected</span>'}</span><span class="cell-detail">${policy.enabled === false ? "Remote off" : notifierCount ? `${escapeHtml(policy.minimumSeverity ?? "normal")}+ remote` : ""}</span></td>
-            <td class="action-cell">${active ? `<div class="table-actions"><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="acknowledge" type="button" ${latest.acknowledgedAt ? "disabled" : ""}>${latest.acknowledgedAt ? "Acknowledged" : "Acknowledge"}</button><button class="button button-quiet button-small occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="silence" type="button" ${latest.silencedAt ? "disabled" : ""}>${latest.silencedAt ? "Silenced" : "Silence"}</button></div>` : ""}</td>
+            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-live-occurrence="${active ? escapeHtml(latest.id) : ""}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
+            <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
+            <td data-label="Age" class="live-age" title="Time since the sensor reading">${escapeHtml(liveAgeText(item))}</td>
+            <td data-label="State" class="alert-state-cell ${escapeHtml(status)}" title="${escapeHtml(statusTitle)}">${escapeHtml(status)}</td>
+            <td data-label="Actions" class="action-cell"><div class="table-actions">${active ? occurrenceActions(occurrence) : ""}</div></td>
           </tr>`;
           })
           .join("")}</tbody></table>`
@@ -442,13 +558,7 @@ function renderDefinitions() {
       }
     });
   });
-  document.querySelectorAll(".occurrence-action").forEach((button) =>
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      await mutateOccurrence(button.dataset.id, button.dataset.action);
-      if (button.isConnected) button.disabled = false;
-    }),
-  );
+  bindOccurrenceActions(elements.definitions);
 }
 
 function audioWasSkipped(item) {
@@ -557,8 +667,12 @@ function renderAlertHistory() {
               event.eventType === "severity_changed" && event.payload
                 ? `${event.payload.from ?? "unknown"} → ${event.payload.to ?? event.severity}`
                 : event.eventType === "message_changed" && event.payload
-                  ? `${event.payload.from ?? "No message"} → ${event.payload.to ?? event.message ?? "No message"}`
-                  : event.message;
+                  ? `${displayedMessage({ ...event, messageSample: undefined }, false, event.payload.from) ?? "No message"} → ${displayedMessage(event, false, event.payload.to ?? event.message) ?? "No message"}`
+                  : displayedMessage(
+                      event,
+                      false,
+                      event.messageSample?.message ?? event.message,
+                    );
             return `<tr class="clickable-row alert-history-row" data-history-occurrence-id="${escapeHtml(event.alertId)}" tabindex="0" aria-label="Open occurrence ${event.occurrenceNumber} of ${escapeHtml(title)}">
               <td data-label="Alert"><strong class="cell-title">${escapeHtml(title)}</strong><span class="cell-detail compact-detail">Occurrence ${event.occurrenceNumber} · ${escapeHtml(event.path)}</span></td>
               <td data-label="Update"><strong class="cell-title history-event-type">${escapeHtml(eventLabel(event.eventType))}</strong>${message ? `<span class="cell-detail compact-detail">${escapeHtml(message)}</span>` : ""}</td>
@@ -710,6 +824,18 @@ async function load(preserveLoadedHistory = false) {
       api(`/alert-history?${alertHistoryParams()}`),
     ]);
     state.definitions = definitions;
+    for (let index = 0; index < definitions.length; index += 4)
+      await Promise.all(
+        definitions.slice(index, index + 4).map(loadDisplayUnits),
+      );
+    for (const path of displayMetadata.keys())
+      if (!definitions.some((item) => item.pathPattern === path))
+        displayMetadata.delete(path);
+    liveValues.setPaths(
+      definitions.map((item) =>
+        item.pathPattern.replace(/^notifications\./, ""),
+      ),
+    );
     state.activeDefinitionIds = new Set(
       activeOccurrences.map((item) => item.definitionId),
     );
@@ -828,7 +954,7 @@ function renderDeliveryDetail(delivery) {
     delivery.state,
   );
   elements.deliveryDialogTitle.textContent = alertTitle;
-  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(alert.message ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd>${renderDeliveryStatus(delivery)}</dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>${audioWasSkipped(delivery) ? "Skipped" : service.type === "wyoming" ? "Accepted" : "Delivered"}</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(audioWasSkipped(delivery) ? "—" : (delivery.remoteId ?? "—"))}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}${renderPlaybackDetails(delivery.playback)}`;
+  elements.deliveryDialogBody.innerHTML = `<p>${escapeHtml(displayedMessage(alert) ?? alert.path ?? "The related alert is no longer available.")}</p><p class="cell-detail">${escapeHtml(alert.path ?? "Unknown alert path")}${alert.occurrenceNumber ? ` · occurrence ${alert.occurrenceNumber}` : ""}</p><dl class="detail-grid"><div><dt>Notification service</dt><dd>${escapeHtml(service.name ?? delivery.transportInstanceId)} · ${escapeHtml(service.type ?? "unknown")}</dd></div><div><dt>Operation</dt><dd>${escapeHtml(delivery.operation ?? "notify")}</dd></div><div><dt>Delivery cycle</dt><dd>${delivery.cycle ?? 1}${delivery.cycle > 1 ? ` (repeat ${delivery.cycle - 1})` : " (initial)"}</dd></div><div><dt>Status</dt><dd>${renderDeliveryStatus(delivery)}</dd></div><div><dt>Attempts</dt><dd>${delivery.attemptCount ?? 0}</dd></div><div><dt>Last attempt</dt><dd>${formatDate(delivery.lastAttemptAt)}</dd></div><div><dt>Next retry</dt><dd>${formatDate(delivery.nextAttemptAt)}</dd></div><div><dt>${audioWasSkipped(delivery) ? "Skipped" : service.type === "wyoming" ? "Accepted" : "Delivered"}</dt><dd>${formatDate(delivery.deliveredAt)}</dd></div><div><dt>Queued</dt><dd>${formatDate(delivery.createdAt)}</dd></div><div><dt>Remote delivery ID</dt><dd>${escapeHtml(audioWasSkipped(delivery) ? "—" : (delivery.remoteId ?? "—"))}</dd></div></dl>${delivery.lastErrorCode || delivery.lastErrorMessage ? `<section class="delivery-error"><h3>Latest error</h3><p><strong>${escapeHtml(delivery.lastErrorCode ?? "Delivery failed")}</strong>${delivery.lastErrorMessage ? ` · ${escapeHtml(delivery.lastErrorMessage)}` : ""}</p></section>` : ""}${renderPlaybackDetails(delivery.playback)}`;
   elements.deliveryRetry.hidden = !retryable;
   elements.deliveryRetry.dataset.id = delivery.id;
   elements.deliveryDelete.hidden = !retryable;
@@ -951,9 +1077,10 @@ async function openOccurrence(id) {
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(occurrence.message ?? occurrence.path)}</p><p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions">${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
+    bindOccurrenceActions();
     elements.drawerBody
       .querySelector(".drawer-settings")
       ?.addEventListener("click", () => openPolicy(definition.id));
@@ -978,7 +1105,7 @@ async function loadEvents(append) {
     const html = pageItems(page)
       .map(
         (event) =>
-          `<article class="event-row"><span class="event-dot"></span><div><strong>${escapeHtml(String(event.eventType).replaceAll("_", " "))}</strong><time>${formatDate(event.occurredAt)}</time>${(event.message ?? event.payload?.message) ? `<p>${escapeHtml(event.message ?? event.payload.message)}</p>` : ""}</div></article>`,
+          `<article class="event-row"><span class="event-dot"></span><div><strong>${escapeHtml(String(event.eventType).replaceAll("_", " "))}</strong><time>${formatDate(event.occurredAt)}</time>${(event.messageSample?.message ?? event.message ?? event.payload?.message) ? `<p>${escapeHtml(displayedMessage({ ...event, definitionId: state.selectedDefinition }, false, event.messageSample?.message ?? event.message ?? event.payload.message))}</p>` : ""}</div></article>`,
       )
       .join("");
     elements.events.innerHTML = append

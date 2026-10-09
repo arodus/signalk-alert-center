@@ -677,6 +677,19 @@ export function getAlertCenterOpenApi() {
             policy: { $ref: "#/components/schemas/Policy" },
           },
         },
+        MessageSample: {
+          type: "object",
+          description:
+            "Reading captured at notification receipt. The original Signal K message and payload are unchanged. Absent for historical records without a captured reading.",
+          required: ["message", "capturedAt"],
+          properties: {
+            message: { type: "string" },
+            value: { type: "number" },
+            units: { type: "string" },
+            capturedAt: { type: "string", format: "date-time" },
+          },
+          additionalProperties: false,
+        },
         Occurrence: {
           type: "object",
           required: [
@@ -689,6 +702,7 @@ export function getAlertCenterOpenApi() {
             "startedAt",
           ],
           properties: {
+            messageSample: { $ref: "#/components/schemas/MessageSample" },
             id: { type: "string" },
             definitionId: { type: "string" },
             path: { type: "string" },
@@ -756,6 +770,17 @@ export function getAlertCenterOpenApi() {
             },
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
+            alertSnapshot: {
+              type: "object",
+              required: ["state", "severity", "at"],
+              properties: {
+                state: { type: "string", enum: ["active", "cleared"] },
+                severity: { $ref: "#/components/schemas/Severity" },
+                message: { type: "string" },
+                at: { type: "string", format: "date-time" },
+                messageSample: { $ref: "#/components/schemas/MessageSample" },
+              },
+            },
             alert: { type: "object", additionalProperties: true },
             service: { type: "object", additionalProperties: true },
           },
@@ -836,6 +861,7 @@ export function getAlertCenterOpenApi() {
           type: "object",
           required: ["id", "occurrenceId", "eventType", "occurredAt"],
           properties: {
+            messageSample: { $ref: "#/components/schemas/MessageSample" },
             id: { type: "string" },
             occurrenceId: { type: "string" },
             eventType: { type: "string" },
@@ -860,6 +886,7 @@ export function getAlertCenterOpenApi() {
             "startedAt",
           ],
           properties: {
+            messageSample: { $ref: "#/components/schemas/MessageSample" },
             id: { type: "integer" },
             alertId: { type: "string" },
             definitionId: { type: "string" },
