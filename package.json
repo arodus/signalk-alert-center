@@ -1,6 +1,6 @@
 {
   "name": "signalk-alert-center",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Signal K alerts and history with offline delivery to ntfy, PagerDuty, Discord, Telegram, and optional Wyoming sound and speech",
   "author": "Sebastian Karasek",
   "repository": {

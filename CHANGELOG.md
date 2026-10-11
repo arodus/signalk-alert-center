@@ -7,6 +7,11 @@ Versioning while it remains pre-1.0.
 
 Future changes intended for the next release belong here.
 
+## [0.1.1] - 2026-10-11
+
+Maintenance release to publish through the GitHub Actions trusted-publishing
+workflow. No runtime, configuration, or database changes from 0.1.0.
+
 ## [0.1.0] - 2026-10-11
 
 First public release of Signal K Alert Center.
