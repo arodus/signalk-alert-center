@@ -5,8 +5,27 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+Future changes intended for the next release belong here.
+
+## [0.2.0] - 2026-10-11
+
+### Pushover notifications
+
 - Add Pushover notification services with user/group delivery, optional devices
   and sounds, manual tests, and durable retry support.
+- Configure Pushover in the existing notification-service settings using an
+  application API token and user or group key. Select it globally or per alert.
+- Reuse Alert Center's per-service repeats, quiet hours, global snooze, and
+  delivery-failure notifications. Alarm and emergency alerts use Pushover high
+  priority; other levels and recovery messages use normal priority. Pushover's
+  independent emergency-repeat and acknowledgement loop is not enabled.
+- Update setup documentation, privacy information, and Signal K Store metadata.
+
+### Upgrading
+
+- No database schema or existing configuration changes from 0.1.1. Existing
+  alerts, policies, history, and pending deliveries are preserved.
+- Pushover is optional. Existing notification services continue unchanged.
 
 ## [0.1.1] - 2026-10-11
 
