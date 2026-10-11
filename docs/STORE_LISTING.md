@@ -3,6 +3,10 @@
 This file is the submission source for Signal K Alert Center. Keep it aligned with
 `package.json`, `README.md`, and the screenshots whenever the product changes.
 
+The README's service table uses locally packaged brand logos for ntfy, PagerDuty,
+Discord, and Telegram. Sources and attribution are in [docs/icons](./icons/README.md).
+Signal K Wyoming is listed by name without an invented logo.
+
 ## Listing metadata
 
 - **Name:** Signal K Alert Center

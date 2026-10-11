@@ -6,13 +6,13 @@ notifications while offline for delivery when connectivity returns.
 
 ## Supported notification services
 
-| Service                 | Use it for                                                                        |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| 📱 **ntfy**             | Push notifications through your own ntfy server or a hosted service.              |
-| 🚨 **PagerDuty**        | Incidents with trigger, acknowledgement, and resolution events.                   |
-| 💬 **Discord**          | Alert and recovery messages through webhooks.                                     |
-| ✈️ **Telegram**         | Bot messages to chats and forum topics, with optional silent delivery.            |
-| 🔊 **Signal K Wyoming** | Onboard notification sounds and spoken alerts through optional `signalk-wyoming`. |
+| Service                                                                                          | Use it for                                                                        |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| <img src="./docs/icons/ntfy.svg" width="24" height="24" alt="ntfy logo"> **ntfy**                | Push notifications through your own ntfy server or a hosted service.              |
+| <img src="./docs/icons/pagerduty.svg" width="24" height="24" alt="PagerDuty logo"> **PagerDuty** | Incidents with trigger, acknowledgement, and resolution events.                   |
+| <img src="./docs/icons/discord.svg" width="24" height="24" alt="Discord logo"> **Discord**       | Alert and recovery messages through webhooks.                                     |
+| <img src="./docs/icons/telegram.svg" width="24" height="24" alt="Telegram logo"> **Telegram**    | Bot messages to chats and forum topics, with optional silent delivery.            |
+| **Signal K Wyoming**                                                                             | Onboard notification sounds and spoken alerts through optional `signalk-wyoming`. |
 
 Use several services together, with independent delivery tracking and retries.
 **No audio plugin is required.** Wyoming audio needs `signalk-wyoming` 0.3.0 or
