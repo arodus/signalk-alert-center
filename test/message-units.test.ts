@@ -5,6 +5,7 @@ import { DeliveryScheduler } from "../src/delivery/scheduler";
 import { NtfyTransport } from "../src/transports/ntfy";
 import { DiscordTransport } from "../src/transports/discord";
 import { TelegramTransport } from "../src/transports/telegram";
+import { PushoverTransport } from "../src/transports/pushover";
 import { PagerDutyTransport } from "../src/transports/pagerduty";
 import { WyomingTransport } from "../src/transports/wyoming";
 import { NotificationTransport } from "../src/transports/transport";
@@ -78,7 +79,7 @@ describe("outgoing message units", () => {
       "fetch",
       vi.fn(async (_url, options) => {
         bodies.push(String(options.body));
-        return new Response('{"ok":true}', { status: 200 });
+        return new Response('{"ok":true,"status":1}', { status: 200 });
       }),
     );
     const announce = vi.fn(async () => ({
@@ -93,6 +94,10 @@ describe("outgoing message units", () => {
       ],
       ["discord", new DiscordTransport("https://example.invalid")],
       ["telegram", new TelegramTransport({ botToken: "test", chatId: "test" })],
+      [
+        "pushover",
+        new PushoverTransport({ applicationToken: "test", userKey: "test" }),
+      ],
       ["pagerduty", new PagerDutyTransport("test")],
       [
         "wyoming",
@@ -140,7 +145,7 @@ describe("outgoing message units", () => {
         unitMetadata: () => ({ units: "K" }),
       });
       await scheduler.runOnce(now);
-      expect(bodies).toHaveLength(4);
+      expect(bodies).toHaveLength(5);
       for (const body of bodies) {
         expect(body).toContain("0 °C ≤ 10 °C < 100 °C");
         expect(body).not.toContain("283.15");

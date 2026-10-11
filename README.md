@@ -12,6 +12,7 @@ notifications while offline for delivery when connectivity returns.
 | <img src="./docs/icons/pagerduty.svg" width="24" height="24" alt="PagerDuty logo"> **PagerDuty** | Incidents with trigger, acknowledgement, and resolution events.                   |
 | <img src="./docs/icons/discord.svg" width="24" height="24" alt="Discord logo"> **Discord**       | Alert and recovery messages through webhooks.                                     |
 | <img src="./docs/icons/telegram.svg" width="24" height="24" alt="Telegram logo"> **Telegram**    | Bot messages to chats and forum topics, with optional silent delivery.            |
+| **Pushover**                                                                                     | Push notifications to users or groups, with optional devices and sounds.          |
 | **Signal K Wyoming**                                                                             | Onboard notification sounds and spoken alerts through optional `signalk-wyoming`. |
 
 Use several services together, with independent delivery tracking and retries.
@@ -43,7 +44,7 @@ current value changes:
   sending. Each service retries independently, so one failure does not resend a
   notification that another service already accepted.
 - **Use the services that fit your boat.** Alert Center supports ntfy,
-  PagerDuty, Discord, Telegram, and optional Signal K Wyoming sounds and spoken
+  PagerDuty, Discord, Telegram, Pushover, and optional Signal K Wyoming sounds and spoken
   announcements.
 - **Understand every delivery.** The delivery view shows the destination,
   status, timing, retry attempts, and error details.
@@ -114,6 +115,26 @@ other configured services that receive its retry alert, terminal-failure warning
 and recovery. The affected service cannot select itself, and these internal
 alerts never use normal alert defaults or repeat delivery.
 
+### Pushover
+
+Choose **Pushover** as the service type. Enter your application API token from
+[Pushover applications](https://pushover.net/apps) and your user or delivery-group
+key. Optionally enter comma-separated device names and a Pushover sound name;
+leave them blank for all recipient devices and the default sound. Save, then use
+the service's **Test notification** button and select it in alert defaults or
+individual alert settings.
+
+Alarm and emergency alerts use Pushover high priority, which bypasses Pushover's
+own quiet hours. Other levels and recovery messages use normal priority. Alert
+Center's quiet hours, snooze, and per-service repeat policy still apply before
+sending. Pushover emergency priority with its separate repeat/acknowledgement loop
+is not used. API acceptance is recorded as delivered, not proof that someone read
+the message. Invalid credentials/configuration fail without automatic retries;
+network errors, rate limits, and server failures remain in the durable retry queue.
+Messages are limited to 1,024 characters and titles to 250, as required by the
+[Pushover API](https://pushover.net/api). A recovery is a new message, not a removal
+of the original notification. Pushover acknowledgements are not synced to Signal K.
+
 ### Live readings, severity, and display units
 
 Signal K severities are ordered from lowest to highest as `normal`, `alert`,
@@ -157,7 +178,7 @@ methods produce neither notification sounds nor speech, even when audio is enabl
 in Alert Center settings. The latest stored notification value is checked before
 each audio delivery, including retries and clear announcements; a null clear has
 no sound method. Alerts remain in history, and ntfy, PagerDuty, Discord, and
-Telegram delivery continue to follow their configured policies regardless of
+Telegram and Pushover delivery continue to follow their configured policies regardless of
 `method`.
 
 Wyoming is not required to use Alert Center. Enabling a Wyoming notification
@@ -245,6 +266,7 @@ select a notification service for an alert:
 - ntfy receives the destination topic plus alert text and severity;
 - PagerDuty receives incident event data and the configured integration key;
 - Discord receives alert text at the configured webhook URL;
+- Pushover receives alert text, the application token, recipient key, and optional device and sound;
 - Telegram receives alert text, chat identifiers, and the configured bot token;
 - `signalk-wyoming` receives a sound ID and/or rendered speech text through its
   in-process Signal K API. Wyoming then sends audio to the selected satellites.
@@ -318,7 +340,7 @@ service that should be quieter overnight. Choose a daily start/end time,
 **Server local time** or a **Specific timezone** (for example `America/Curacao`),
 and the lowest severity allowed during
 that period. Quiet hours is off by default and works for Wyoming, ntfy,
-PagerDuty, Discord and Telegram independently.
+PagerDuty, Discord, Telegram and Pushover independently.
 
 ![Per-service quiet hours settings](docs/screenshots/service-quiet-hours.jpg)
 

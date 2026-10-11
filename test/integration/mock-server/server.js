@@ -78,12 +78,21 @@ http
       json,
       receivedAt: new Date().toISOString(),
     });
-    const outcome = outcomes.shift() ?? {
-      status: 204,
-      delayMs: 0,
-      body: "",
-      headers: {},
-    };
+    const outcome =
+      outcomes.shift() ??
+      (request.url === "/pushover"
+        ? {
+            status: 200,
+            body: { status: 1, request: "fixture-request" },
+            headers: {},
+            delayMs: 0,
+          }
+        : {
+            status: 204,
+            delayMs: 0,
+            body: "",
+            headers: {},
+          });
     if (outcome.delayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, outcome.delayMs));
     }

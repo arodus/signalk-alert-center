@@ -5,7 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-Future changes intended for the next release belong here.
+- Add Pushover notification services with user/group delivery, optional devices
+  and sounds, manual tests, and durable retry support.
 
 ## [0.1.1] - 2026-10-11
 

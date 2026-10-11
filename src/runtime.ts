@@ -57,6 +57,7 @@ import { DiscordTransport } from "./transports/discord";
 import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
 import { TelegramTransport } from "./transports/telegram";
+import { PushoverTransport } from "./transports/pushover";
 import { NotificationTransport } from "./transports/transport";
 import {
   WyomingAnnouncementApi,
@@ -1552,6 +1553,8 @@ export class AlertCenterRuntime {
           notifier.name,
           new DiscordTransport(String(notifier.webhookUrl)),
         );
+      if (notifier.type === "pushover")
+        this.transports.set(notifier.name, new PushoverTransport(notifier));
       if (notifier.type === "telegram")
         this.transports.set(
           notifier.name,
