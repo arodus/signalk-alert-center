@@ -467,6 +467,19 @@ export function getAlertCenterOpenApi() {
     },
     components: {
       schemas: {
+        QuietHoursStatus: {
+          type: "object",
+          required: ["enabled", "active"],
+          properties: {
+            enabled: { type: "boolean" },
+            active: { type: "boolean" },
+            timeZone: { type: "string" },
+            minimumSeverity: { $ref: "#/components/schemas/Severity" },
+            startedAt: { type: "string", format: "date-time" },
+            endsAt: { type: "string", format: "date-time" },
+            nextChangeAt: { type: "string", format: "date-time" },
+          },
+        },
         Snooze: {
           type: "object",
           required: ["active", "startedAt", "endsAt"],
@@ -539,6 +552,7 @@ export function getAlertCenterOpenApi() {
                   name: { type: "string" },
                   type: { type: "string" },
                   enabled: { type: "boolean" },
+                  quietHours: { $ref: "#/components/schemas/QuietHoursStatus" },
                   pendingCount: { type: "integer", minimum: 0 },
                   retryingFailureCount: { type: "integer", minimum: 0 },
                   terminalFailureCount: { type: "integer", minimum: 0 },
@@ -987,6 +1001,7 @@ export function getAlertCenterOpenApi() {
             },
             type: { type: "string" },
             enabled: { type: "boolean" },
+            quietHours: { $ref: "#/components/schemas/QuietHoursStatus" },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             repeatIntervalSeconds: {
               type: "integer",

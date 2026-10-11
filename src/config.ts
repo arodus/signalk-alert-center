@@ -1,3 +1,4 @@
+import { QuietHours, validateQuietHours } from "./suppression/quiet-hours";
 import { ConnectivityMode, Severity, severities } from "./alerts/types";
 
 interface NotifierBaseConfig {
@@ -5,6 +6,7 @@ interface NotifierBaseConfig {
   name: string;
   enabled?: boolean;
   minSeverity?: Severity;
+  quietHours?: QuietHours;
   /** Seconds after a successful delivery before this service sends again. */
   repeatIntervalSeconds?: number;
   /** Other configured services that receive this service's health alerts. */
@@ -143,6 +145,7 @@ export function validateConfig(config: PluginConfig): void {
       throw new Error(
         `Notification service name must be unique: ${notifier.name}`,
       );
+    validateQuietHours(notifier.quietHours);
     notifierNames.add(notifier.name);
     normalizedNotifierNames.add(normalizedName);
     if (
