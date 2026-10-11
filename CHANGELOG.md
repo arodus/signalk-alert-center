@@ -5,6 +5,41 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+Future changes intended for the next release belong here.
+
+## [0.1.0] - 2026-10-11
+
+First public release of Signal K Alert Center.
+
+### Release highlights
+
+- Persistent alert history and independently tracked offline delivery through
+  ntfy, PagerDuty, Discord, Telegram, and optional Signal K Wyoming audio.
+- Live sensor readings and reading age alongside configured zones, with
+  receipt-time samples retained separately in history and delivery snapshots.
+- Durable global snooze and per-service quiet hours with severity thresholds.
+  Quiet hours support server-local time or a fixed IANA timezone, including DST;
+  existing schedules retain their saved timezone.
+- Refreshed Signal K Store listing, README service logos, and current screenshots
+  covering the dashboard, history, settings, snooze, and quiet hours.
+
+### Compatibility and upgrades
+
+- Requires Node.js 22.5 or newer. Tested with Signal K 2.31.1 and the current
+  server image in CI. Wyoming is optional; audio integration requires
+  `signalk-wyoming` 0.3.0 or newer, and speech needs a TTS service such as Piper.
+- Supported preceding Alert Center databases are migrated in place to schema 3,
+  preserving alert history, policies, and pending deliveries. The discarded
+  `signalk-persistent-notifier` prototype database is not imported.
+- Before upgrading a pre-release installation, stop Signal K and back up the
+  database. Rollback to an older build should restore that build and the matching
+  pre-upgrade database backup; do not assume it can read the upgraded schema.
+- Reported Wyoming playback completion comes from the satellite process; it
+  cannot prove physical audibility. Already-sent remote requests cannot be
+  recalled by snooze, and older Wyoming versions may lack audio cancellation.
+
+### Included changes
+
 - Show skipped deliveries with a neutral grey badge and the reason below it,
   keeping delivery status separate from explanatory text in lists and details.
 - Align the dashboard and plugin settings with Signal K administration styling:
@@ -59,11 +94,8 @@ Versioning while it remains pre-1.0.
   tag-based npm and GitHub release automation.
 - Renamed the package, Signal K plugin, dashboard, and API to Signal K Alert
   Center as a clean version-one installation.
-- Removed all pre-release database and package-name migrations. Signal K Alert
-  Center now initializes one complete schema in `alert-center.sqlite`.
+- Initialize new installations in `alert-center.sqlite`; upgrade supported
+  preceding Alert Center schemas transactionally without requiring a reset.
 - Added a modern, sectioned Signal K settings panel with service-type controls,
   a configured-service default picker, unsaved-change handling, and a confirmed
   database-reset action.
-
-Future changes intended for the next release belong here until a release pull
-request moves them into a dated version section.
