@@ -3,12 +3,16 @@
 This file is the submission source for Signal K Alert Center. Keep it aligned with
 `package.json`, `README.md`, and the screenshots whenever the product changes.
 
+The README's service table uses locally packaged brand logos for ntfy, PagerDuty,
+Discord, and Telegram. Sources and attribution are in [docs/icons](./icons/README.md).
+Signal K Wyoming is listed by name without an invented logo.
+
 ## Listing metadata
 
 - **Name:** Signal K Alert Center
 - **npm package:** `signalk-alert-center`
-- **Short description:** Persistent Signal K alert history with reliable offline
-  delivery and optional Wyoming audio.
+- **Short description:** Signal K alerts and history with offline delivery to
+  ntfy, PagerDuty, Discord, Telegram, and optional Wyoming sound and speech
 - **Categories:** Notifications; Utility
 - **License:** MIT
 - **Repository:** https://github.com/arodus/signalk-alert-center
@@ -16,18 +20,28 @@ This file is the submission source for Signal K Alert Center. Keep it aligned wi
 
 ## Long description
 
-Signal K Alert Center keeps a durable history of Signal K alarms and
-notifications, shows current alerts alongside discovered paths and defined
-zones, and forwards eligible alerts through independently tracked notification
-services. Delivery work is saved before sending and recovered after restarts, so
-temporary loss of internet access does not silently lose an alert.
+Send your boat's alerts to **ntfy, PagerDuty, Discord, and Telegram**, or play
+notification sounds and spoken alerts through optional **Signal K Wyoming**.
+Use multiple services together; each has its own delivery tracking and retries.
+Wyoming is optional, and speech also needs a TTS service such as `signalk-piper`.
+The alert list and history work without any notification service.
 
-Operators configure connection details and defaults globally, then choose
-services, severity thresholds, activation delays, connectivity behavior, and
-repeat intervals for each alert. Supported services are ntfy, PagerDuty,
-Discord, Telegram, and optional notification sounds and spoken announcements
-through signalk-wyoming. The dashboard separates alert history from delivery
-attempts and exposes useful diagnostics without requiring database access.
+See live readings and configured Signal K zones in one compact alert list, with
+active alerts first. Open an alert for recent occurrences, event history, and
+per-alert settings. Alert history and notification delivery attempts have
+separate tabs so you can see both what happened and what was sent.
+
+Delivery work is saved before sending and recovered after restarts. Configure
+services and defaults globally, then override services, severity thresholds,
+activation delays, connectivity behavior, and repeat intervals for each alert.
+Optional connectivity control can wake a Signal K switch when a delivery needs
+internet access, while respecting manually enabled connectivity.
+
+Temporarily snooze all services, including emergency notifications, without
+losing incoming alert history. Or set quiet hours independently for each service,
+allowing only a chosen severity and above. Schedules support server-local time
+or a specific timezone, including daylight-saving changes. Diagnostics show
+service health and delivery failures; backup services can report those failures.
 
 ## Installation summary
 
@@ -40,15 +54,19 @@ and manual-install instructions.
 
 The plugin adds no analytics or telemetry. Alert history and delivery state remain
 in the local Signal K data directory. Alert content leaves Signal K only through
-services explicitly configured and selected by the operator: ntfy, PagerDuty,
+services explicitly configured and selected by the user: ntfy, PagerDuty,
 Discord, Telegram, or the in-process signalk-wyoming API. The complete disclosure
 is in the [README](../README.md#privacy-and-network-access).
 
 ## Screenshot inventory
 
-1. `alert-center-overview.png` — active alerts, inactive definitions, and a
-   Signal K zone in the main desktop table.
-2. `alert-details.png` — current occurrence, five-occurrence summary, and alert
+The six `package.json` gallery entries are the overview, alert details, alert
+settings, deliveries, service settings, and tablet view. The README adds global
+defaults, alert history, snooze, and quiet hours.
+
+1. `alert-center-overview.png` — live values, reading age, coloured severity
+   cells, row actions, and configured zones in the desktop alert table.
+2. `alert-details.png` — current occurrence, recent-occurrence summary, and alert
    event history.
 3. `alert-settings.png` — per-alert services, repeat timing, connectivity, sound,
    and speech settings.
@@ -58,11 +76,26 @@ is in the [README](../README.md#privacy-and-network-access).
 6. `plugin-settings.png` — configured service cards; all values are synthetic
    and secrets are visibly redacted.
 7. `alert-center-tablet.png` — responsive alert list at tablet width.
+8. `alert-history.png` — chronological alert changes, separate from deliveries.
+9. `global-snooze.jpg` — active snooze banner with its end-now control.
+10. `service-quiet-hours.jpg` — per-service quiet hours, server-local timezone
+    choice, and severity threshold.
 
 Screenshots are generated by `npm run screenshots:store`. They contain only
-deterministic fixture data and no browser chrome, personal vessel information,
-credentials, tokens, passwords, or private host names.
+synthetic fixture data and capture-time timestamps, with no browser chrome,
+personal vessel information, credentials, tokens, passwords, or private host names.
 
-The images reflect the Signal K-style dashboard and settings introduced in PR #69.
-Settings captures show the complete plugin panel without the surrounding admin
-navigation so the actual controls remain readable.
+The images reflect the current UI, including live readings, global snooze,
+per-service quiet hours, and the server-local timezone option. Settings captures
+show the plugin panel (or a single service for quiet hours) without surrounding
+admin navigation. All screenshots are regenerated by the same isolated script.
+
+## Publication checklist
+
+- Keep the package description, service names, optional plugin recommendations,
+  and this text consistent with the README.
+- Run `npm run screenshots:store`, inspect every image, and run
+  `npm run package:check`. Gallery assets must be packaged, at stable relative
+  paths, and below 500 KB each; retain no more than six gallery entries.
+- Publish through the existing release workflow when a release is authorised.
+  Updating GitHub alone does not update the npm-backed Signal K App Store.
