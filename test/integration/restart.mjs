@@ -164,6 +164,18 @@ try {
     events.items.some((event) => event.eventType === "raised"),
     true,
   );
+  const snooze = await json(`${api}/snooze`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ durationSeconds: 900 }),
+  });
+  run(["restart", "signalk"]);
+  await eventually(
+    () => json(`${api}/snooze`),
+    (state) => state.active && state.endsAt === snooze.endsAt,
+    "snooze retained after server restart",
+  );
+  await json(`${api}/snooze`, { method: "DELETE" });
   console.log("Docker restart persistence test passed");
 } finally {
   spawnSync("docker", [...compose, "down", "-v", "--remove-orphans"], {

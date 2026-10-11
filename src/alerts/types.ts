@@ -159,7 +159,9 @@ export type DeliveryState =
   | "sending"
   | "delivered"
   | "failed_retryable"
-  | "failed_terminal";
+  | "failed_terminal"
+  | "paused"
+  | "suppressed";
 
 export type DeliveryOperation =
   "notify" | "trigger" | "acknowledge" | "resolve";

@@ -513,3 +513,47 @@ describe("alert-center routes", () => {
     }
   });
 });
+
+it("registers snooze mutations with readwrite access and validates requests", async () => {
+  const routes = new Map<string, { handler: Handler; access: string }>();
+  const router = {
+    access: (access: string) =>
+      Object.fromEntries(
+        ["get", "post", "patch", "delete"].map((method) => [
+          method,
+          (path: string, handler: Handler) =>
+            routes.set(`${method} ${path}`, { handler, access }),
+        ]),
+      ),
+  } as unknown as RouterLike;
+  let state = {
+    active: false,
+    startedAt: null as string | null,
+    endsAt: null as string | null,
+  };
+  registerAlertCenterRoutes(router, {
+    repository: () => undefined,
+    snooze: () => state,
+    setSnooze: (seconds) =>
+      (state = {
+        active: seconds > 0,
+        startedAt: seconds ? new Date().toISOString() : null,
+        endsAt: seconds
+          ? new Date(Date.now() + seconds * 1000).toISOString()
+          : null,
+      }),
+  });
+  expect(routes.get("get /snooze")?.access).toBe("readonly");
+  expect(routes.get("post /snooze")?.access).toBe("readwrite");
+  expect(routes.get("delete /snooze")?.access).toBe("readwrite");
+  const invalid = new FakeResponse();
+  routes
+    .get("post /snooze")!
+    .handler({ body: { durationSeconds: 28801 } }, invalid);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(invalid.statusCode).toBe(400);
+  const valid = new FakeResponse();
+  routes.get("post /snooze")!.handler({ body: { durationSeconds: 60 } }, valid);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(valid.body).toMatchObject({ active: true });
+});

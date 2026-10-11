@@ -68,6 +68,7 @@ export interface WyomingAnnouncementApi {
     targets?: string[];
     priority?: "normal" | "urgent";
   }): Promise<WyomingAnnouncementSnapshot>;
+  cancelAnnouncement?(id: string): WyomingAnnouncementSnapshot | undefined;
   getAnnouncement?(id: string): WyomingAnnouncementSnapshot | undefined;
   onAnnouncementEvent?(
     listener: (event: WyomingAnnouncementEvent) => void,
@@ -75,6 +76,11 @@ export interface WyomingAnnouncementApi {
 }
 
 export interface WyomingTransportOptions {
+  canAnnounce?: (deliveryId?: string) => boolean;
+  onAccepted?: (
+    snapshot: WyomingAnnouncementSnapshot,
+    deliveryId?: string,
+  ) => void;
   api: () => WyomingAnnouncementApi | undefined;
   targets?: string[];
   voice?: string;
@@ -140,7 +146,10 @@ export class WyomingTransport implements NotificationTransport {
       kind: WyomingAnnouncementContent["kind"];
     },
   ): Promise<TransportResult> {
-    if (signal.aborted)
+    if (
+      signal.aborted ||
+      this.options.canAnnounce?.(tracking?.deliveryId) === false
+    )
       return {
         kind: "retryable",
         code: "DELIVERY_ABORTED",
@@ -168,15 +177,23 @@ export class WyomingTransport implements NotificationTransport {
           ? { targets: [...new Set(this.options.targets)] }
           : {}),
       });
-      const snapshot = await Promise.race([request, aborted]).finally(() => {
-        if (rejectOnAbort) signal.removeEventListener("abort", rejectOnAbort);
+      // Track late acceptance too: a timeout does not cancel Wyoming's queue.
+      const trackedRequest = request.then((snapshot) => {
+        if (tracking)
+          this.options.onAnnouncement?.(
+            tracking.deliveryId,
+            tracking.kind,
+            snapshot,
+          );
+        this.options.onAccepted?.(snapshot, tracking?.deliveryId);
+        return snapshot;
       });
-      if (tracking)
-        this.options.onAnnouncement?.(
-          tracking.deliveryId,
-          tracking.kind,
-          snapshot,
-        );
+      const snapshot = await Promise.race([trackedRequest, aborted]).finally(
+        () => {
+          if (rejectOnAbort) signal.removeEventListener("abort", rejectOnAbort);
+        },
+      );
+
       if (acceptedStates.has(snapshot.state))
         return { kind: "success", remoteId: snapshot.id };
       const errors = Object.entries(snapshot.targets ?? {})

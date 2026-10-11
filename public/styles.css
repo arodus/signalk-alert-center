@@ -1337,3 +1337,26 @@ dialog input[type="checkbox"] {
   white-space: normal;
   text-overflow: clip;
 }
+
+.snooze-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  margin: 12px 0;
+  border: 1px solid #ad7700;
+  background: #fff1c2;
+  color: #372b00;
+}
+.snooze-banner[hidden] {
+  display: none;
+}
+#snooze-dialog {
+  max-width: min(32rem, 90vw);
+}
+#snooze-dialog select,
+#snooze-dialog input {
+  display: block;
+  margin: 8px 0;
+}

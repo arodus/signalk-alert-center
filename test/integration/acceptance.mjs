@@ -170,7 +170,7 @@ assert.equal(
   true,
 );
 assert.equal(status.database.healthy, true);
-assert.equal(status.database.schemaVersion, 2);
+assert.equal(status.database.schemaVersion, 3);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);
@@ -398,6 +398,57 @@ await eventually(
     ),
   (item) => item.policy.activationDelaySeconds === 0,
   "database reset did not restore the default alert policy",
+);
+
+// Exercise real Signal K PUT registration and plugin restart persistence.
+const snoozeApi = `${signalkUrl}/plugins/signalk-alert-center/snooze`;
+const putSnooze = (name, value) =>
+  json(
+    `${signalkUrl}/signalk/v1/api/vessels/self/digital/alertCenter/snooze/${name}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value }),
+    },
+  );
+await putSnooze("duration", 900);
+const snoozeBefore = await json(snoozeApi);
+assert.equal(snoozeBefore.active, true);
+await putSnooze("active", true);
+assert.equal((await json(snoozeApi)).endsAt, snoozeBefore.endsAt);
+const snoozePlugins = await json(`${signalkUrl}/skServer/plugins`);
+await json(`${signalkUrl}/skServer/plugins/signalk-alert-center/config`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(
+    snoozePlugins.find((item) => item.id === "signalk-alert-center").data,
+  ),
+});
+await eventually(
+  () => json(snoozeApi),
+  (value) => value.active && value.endsAt === snoozeBefore.endsAt,
+  "snooze persisted across plugin restart",
+);
+const snoozedTest = await fetch(
+  `${signalkUrl}/plugins/signalk-alert-center/notifiers/${encodeURIComponent("Acceptance ntfy")}/test`,
+  {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ operation: "send" }),
+  },
+);
+assert.equal(snoozedTest.status, 409);
+await putSnooze("active", false);
+assert.equal((await json(snoozeApi)).active, false);
+await json(snoozeApi, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ durationSeconds: 1 }),
+});
+await eventually(
+  () => json(snoozeApi),
+  (value) => !value.active,
+  "automatic snooze expiry",
 );
 
 console.log("Docker acceptance smoke test passed");

@@ -1,3 +1,4 @@
+import { SnoozeState, snoozeSeconds } from "../suppression/store";
 import { AlertPolicyField, alertPolicyFields, Severity } from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
 import {
@@ -144,6 +145,8 @@ export interface AlertCenterChange {
   occurredAt: string;
 }
 export interface AlertCenterDependencies {
+  snooze?: () => SnoozeState | undefined;
+  setSnooze?: (seconds: number) => SnoozeState;
   repository: () => AlertCenterRepository | undefined;
   listNotifiers?: () => MaybePromise<unknown[]>;
   testNotifier?: (
@@ -155,6 +158,7 @@ export interface AlertCenterDependencies {
     | "disabled"
     | "in_progress"
     | "unsupported"
+    | "snoozed"
   >;
   subscribeChanges?: (
     listener: (change: AlertCenterChange) => void,
@@ -189,22 +193,24 @@ const wrap =
     ) => MaybePromise<void>,
   ): Handler =>
   (request, response) =>
-    void Promise.resolve(handler(request, response)).catch((error: unknown) => {
-      if (error instanceof ApiError)
-        return fail(
+    void Promise.resolve()
+      .then(() => handler(request, response))
+      .catch((error: unknown) => {
+        if (error instanceof ApiError)
+          return fail(
+            response,
+            error.statusCode,
+            error.code,
+            error.message,
+            error.details,
+          );
+        fail(
           response,
-          error.statusCode,
-          error.code,
-          error.message,
-          error.details,
+          500,
+          "INTERNAL_ERROR",
+          "The request could not be completed",
         );
-      fail(
-        response,
-        500,
-        "INTERNAL_ERROR",
-        "The request could not be completed",
-      );
-    });
+      });
 
 function addRoute(
   router: RouterLike,
@@ -546,6 +552,51 @@ export function registerAlertCenterRoutes(
   dependencies: AlertCenterDependencies,
 ): void {
   const repo = () => repository(dependencies.repository);
+  if (dependencies.snooze && dependencies.setSnooze) {
+    addRoute(
+      router,
+      "get",
+      "/snooze",
+      "readonly",
+      wrap((_req, res) => {
+        const state = dependencies.snooze!();
+        if (!state)
+          throw new ApiError(503, "NOT_STARTED", "Plugin is not started");
+        res.json(state);
+      }),
+    );
+    for (const method of ["post", "delete"] as const)
+      addRoute(
+        router,
+        method,
+        "/snooze",
+        "readwrite",
+        wrap((req, res) => {
+          if (!dependencies.snooze!())
+            throw new ApiError(503, "NOT_STARTED", "Plugin is not started");
+          let seconds = 0;
+          if (method === "post") {
+            const body = req.body as { durationSeconds?: unknown } | undefined;
+            try {
+              seconds = snoozeSeconds(body?.durationSeconds);
+            } catch (error) {
+              throw new ApiError(
+                400,
+                "INVALID_DURATION",
+                (error as Error).message,
+              );
+            }
+            if (!seconds)
+              throw new ApiError(
+                400,
+                "INVALID_DURATION",
+                "Use DELETE to end snooze",
+              );
+          }
+          res.json(dependencies.setSnooze!(seconds));
+        }),
+      );
+  }
   const subscribeChanges = dependencies.subscribeChanges;
   if (subscribeChanges)
     addRoute(router, "get", "/events", "readonly", (req, res) => {
@@ -678,6 +729,12 @@ export function registerAlertCenterRoutes(
             409,
             "TEST_IN_PROGRESS",
             "A test is already running for this notification service",
+          );
+        if (result === "snoozed")
+          throw new ApiError(
+            409,
+            "SNOOZED",
+            "Notification tests are blocked while snoozed",
           );
         if (result === "unsupported")
           throw new ApiError(

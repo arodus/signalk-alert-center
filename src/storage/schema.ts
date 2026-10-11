@@ -1,7 +1,11 @@
 /** Initial Signal K Alert Center schema. */
-export const currentSchemaVersion = 2;
+export const currentSchemaVersion = 3;
 
 export const schema = `
+CREATE TABLE IF NOT EXISTS notification_controls (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS suppression_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL, at TEXT NOT NULL, details TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS delivery_holds (delivery_id TEXT PRIMARY KEY REFERENCES deliveries(id) ON DELETE CASCADE, previous_state TEXT NOT NULL, reason TEXT NOT NULL, started_at TEXT NOT NULL, ends_at TEXT NOT NULL, replay INTEGER NOT NULL DEFAULT 0);
+
 CREATE TABLE IF NOT EXISTS alert_definitions (
   id TEXT PRIMARY KEY,
   source_type TEXT NOT NULL,

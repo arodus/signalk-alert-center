@@ -53,6 +53,7 @@ export class ConnectivityManager {
     private readonly bootTimeoutMs = 240_000,
     private readonly checkIntervalMs = 5_000,
     private readonly safetyCheck: ConnectivitySafetyCheck = safeToRelease,
+    private readonly mayWake: () => boolean = () => true,
   ) {}
 
   get scheduledWakeAt(): Date | undefined {
@@ -67,7 +68,7 @@ export class ConnectivityManager {
   }
 
   async requestWake(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || !this.mayWake()) return;
     if (this.activeWake) return this.activeWake;
     const running = this.performWake();
     this.activeWake = running;
@@ -91,6 +92,7 @@ export class ConnectivityManager {
       return;
     }
     const observed = await this.adapter.getState();
+    if (this.stopped || !this.mayWake()) return;
     this.switchOn = observed;
     if (observed === true) {
       this.ownedByPlugin = false;

@@ -254,9 +254,9 @@ export function migrateMessageSamples(database: DatabaseSync): boolean {
   const version = Number(
     (database.prepare("PRAGMA user_version").get() as Row).user_version,
   );
-  if (version > 2)
+  if (version > 3)
     throw new Error("Alert Center database was created by a newer version");
-  if (version === 2) return false;
+  if (version >= 2) return false;
   let changed = false;
   for (const table of ["alert_occurrences", "alert_events", "deliveries"]) {
     if (!columns(database, table).has("message_sample_json")) {
@@ -266,4 +266,14 @@ export function migrateMessageSamples(database: DatabaseSync): boolean {
   }
   database.exec("PRAGMA user_version = 2");
   return changed;
+}
+
+/** Version 3 tables are created in the surrounding schema transaction. */
+export function migrateSuppression(database: DatabaseSync): boolean {
+  const version = Number(
+    (database.prepare("PRAGMA user_version").get() as Row).user_version,
+  );
+  if (version >= 3) return false;
+  database.exec("PRAGMA user_version = 3");
+  return true;
 }
