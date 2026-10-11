@@ -307,8 +307,9 @@ Authenticated controls share the same persisted state:
 ### Quiet hours per notification service
 
 In **Plugin settings → Notification services**, enable **Quiet hours** on each
-service that should be quieter overnight. Choose a daily start/end time, an IANA
-timezone (for example `America/Curacao`), and the lowest severity allowed during
+service that should be quieter overnight. Choose a daily start/end time,
+**Server local time** or a **Specific timezone** (for example `America/Curacao`),
+and the lowest severity allowed during
 that period. Quiet hours is off by default and works for Wyoming, ntfy,
 PagerDuty, Discord and Telegram independently.
 
@@ -323,7 +324,14 @@ acknowledgements and resolutions. Global snooze takes precedence over both.
 The schedule follows the configured local wall clock, including overnight spans
 and daylight-saving changes. A skipped clock interval is skipped; a repeated
 interval follows the local clock again. Changing the boat's location does not
-change the configured timezone automatically. The service's status and next
+change the configured timezone automatically. New schedules default to server
+local time (`timeZone: "local"`); existing saved timezones stay unchanged.
+Server local time uses the timezone of the Signal K process, not your browser.
+Set the Pi/server timezone when travelling (or the container timezone when using
+Docker). The plugin rechecks the process timezone once per minute; restart Signal K
+after changing the operating system timezone if the process still reports the old
+zone. A specific timezone remains fixed. The service's status shows the resolved
+timezone and its next
 transition appear under System diagnostics.
 
 Below-threshold Wyoming audio is cancelled through the same owned-announcement

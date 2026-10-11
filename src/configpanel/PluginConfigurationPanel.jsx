@@ -723,8 +723,7 @@ function NotificationServices({ config, update }) {
                       quietHours: {
                         start: "22:00",
                         end: "07:00",
-                        timeZone:
-                          Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        timeZone: "local",
                         minimumSeverity: "alarm",
                         ...service.quietHours,
                         enabled: event.target.checked,
@@ -767,24 +766,56 @@ function NotificationServices({ config, update }) {
                     }
                   />
                 </Field>
-                <Field
-                  label="Quiet hours timezone"
-                  hint="IANA timezone, for example America/Curacao or Europe/Berlin."
-                >
-                  <input
+                <Field label="Quiet hours time basis">
+                  <select
                     style={styles.input}
-                    aria-label="Quiet hours timezone"
-                    value={service.quietHours.timeZone}
+                    aria-label="Quiet hours time basis"
+                    value={
+                      service.quietHours.timeZone === "local"
+                        ? "local"
+                        : "specific"
+                    }
                     onChange={(event) =>
                       change(index, {
                         quietHours: {
                           ...service.quietHours,
-                          timeZone: event.target.value,
+                          timeZone:
+                            event.target.value === "local"
+                              ? "local"
+                              : Intl.DateTimeFormat().resolvedOptions()
+                                  .timeZone,
                         },
                       })
                     }
-                  />
+                  >
+                    <option value="local">Server local time</option>
+                    <option value="specific">Specific timezone</option>
+                  </select>
+                  <p style={styles.hint}>
+                    Server local time follows the Signal K server, not your
+                    phone or browser. Set the server timezone when travelling.
+                  </p>
                 </Field>
+                {service.quietHours.timeZone !== "local" && (
+                  <Field
+                    label="Quiet hours timezone"
+                    hint="IANA timezone, for example America/Curacao or Europe/Berlin."
+                  >
+                    <input
+                      style={styles.input}
+                      aria-label="Quiet hours timezone"
+                      value={service.quietHours.timeZone}
+                      onChange={(event) =>
+                        change(index, {
+                          quietHours: {
+                            ...service.quietHours,
+                            timeZone: event.target.value,
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                )}
                 <Field label="Lowest severity during quiet hours">
                   <select
                     style={styles.input}
