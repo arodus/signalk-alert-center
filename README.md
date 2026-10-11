@@ -1,9 +1,28 @@
 # Signal K Alert Center
 
-Signal K Alert Center gives your boat one durable place for alarms and
-notifications. It keeps alert history across restarts, shows configured Signal K
-zones before they fire, and reliably forwards alerts even when the boat is
-temporarily offline.
+One place for your boat's alerts, history, and notification delivery. See live
+readings and configured Signal K zones, keep history across restarts, and queue
+notifications while offline for delivery when connectivity returns.
+
+## Supported notification services
+
+| Service                 | Use it for                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| 📱 **ntfy**             | Push notifications through your own ntfy server or a hosted service.              |
+| 🚨 **PagerDuty**        | Incidents with trigger, acknowledgement, and resolution events.                   |
+| 💬 **Discord**          | Alert and recovery messages through webhooks.                                     |
+| ✈️ **Telegram**         | Bot messages to chats and forum topics, with optional silent delivery.            |
+| 🔊 **Signal K Wyoming** | Onboard notification sounds and spoken alerts through optional `signalk-wyoming`. |
+
+Use several services together, with independent delivery tracking and retries.
+**No audio plugin is required.** Wyoming audio needs `signalk-wyoming` 0.3.0 or
+newer; speech also needs a TTS service such as `signalk-piper`. You can use the
+alert list and history without configuring any notification service.
+
+[Get started](#installation-and-first-run) ·
+[Service setup](#notification-service-settings) ·
+[Snooze](#snooze-all-alerts) ·
+[Quiet hours](#quiet-hours-per-notification-service)
 
 ![Alert Center showing active alerts and defined zones](./docs/screenshots/alert-center-overview.png)
 
@@ -28,6 +47,9 @@ current value changes:
   announcements.
 - **Understand every delivery.** The delivery view shows the destination,
   status, timing, retry attempts, and error details.
+- **Choose when to be notified.** Snooze all services temporarily, or set quiet
+  hours and a severity threshold for each service using server-local time or a
+  specific timezone.
 - **See service failures as Signal K notifications.** Each enabled notification
   service publishes its own health notification: `normal` when no delivery
   failure remains, `alert` while failed deliveries await retry, and `warn` when
@@ -73,13 +95,17 @@ You can configure:
 
 **Alert history** is a chronological record of Signal K alert changes. It is
 separate from **Deliveries**, which tracks attempts to send those alerts to
-notification services. Failed deliveries can be deleted individually or in
+notification services.
+
+![Chronological Signal K alert changes, separate from delivery attempts](./docs/screenshots/alert-history.png)
+
+Failed deliveries can be deleted individually or in
 bulk when they should no longer be retried; this keeps the alert occurrence and
 its alert history while removing the delivery and its attempt history.
 
 ![Notification delivery history and retry status](./docs/screenshots/delivery-history.png)
 
-## Supported notification services
+## Notification service settings
 
 Notification services are created globally in **Server → Plugin Config → Signal
 K Alert Center**. Individual alerts then select from those named services.
@@ -87,6 +113,8 @@ For each service, **Send delivery failure alerts through** optionally selects
 other configured services that receive its retry alert, terminal-failure warning,
 and recovery. The affected service cannot select itself, and these internal
 alerts never use normal alert defaults or repeat delivery.
+
+### Live readings, severity, and display units
 
 Signal K severities are ordered from lowest to highest as `normal`, `alert`,
 `warn`, `alarm`, and `emergency`. Signal K's special `nominal` state is treated
@@ -121,13 +149,7 @@ global unit preset and path overrides; a browser user's personal preset may diff
 If the server's unit-settings endpoints are unavailable, explicit metadata conversions
 are used, with °C as the Kelvin fallback and other units unchanged.
 
-| Service                | What is sent                                    | Notes                                                                                                                              |
-| ---------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| ntfy                   | Alert title, severity, message, and state       | Supports self-hosted or hosted ntfy servers.                                                                                       |
-| PagerDuty              | Trigger, acknowledgement, and resolution events | Uses one stable deduplication key for an occurrence.                                                                               |
-| Discord                | Alert messages through a webhook                | Each configured webhook is an independent service.                                                                                 |
-| Telegram               | Alert messages through a bot                    | Supports chats, forum topics, and silent Telegram delivery.                                                                        |
-| Signal K Wyoming audio | Severity sound and optional spoken alert        | Optional; requires `signalk-wyoming` 0.3.0 or newer when enabled. Speech additionally needs a TTS service such as `signalk-piper`. |
+### Optional onboard audio
 
 Wyoming audio requires `"sound"` in the Signal K notification’s `method` array.
 Visual-only alerts (`method: ["visual"]`), empty or missing methods, and invalid
@@ -254,22 +276,7 @@ service selected for that alert.
   It shows database health, queue depth, scheduler state, connectivity state, and
   per-service results.
 
-## Help and support
-
-- [Report a problem or request a feature](https://github.com/arodus/signalk-alert-center/issues)
-- [View the source code](https://github.com/arodus/signalk-alert-center)
-- [Read the changelog](./CHANGELOG.md)
-- [Developer and local-testing guide](./DEVELOPERS.md)
-
-When reporting a problem, include the Alert Center version, Signal K version,
-relevant plugin logs, and the diagnostics shown in the webapp. Remove notification
-service secrets and personal vessel information first.
-
-## License
-
-[MIT](./LICENSE)
-
-### Snooze all alerts
+## Snooze all alerts
 
 ![Global snooze banner](./docs/screenshots/global-snooze.jpg)
 
@@ -304,7 +311,7 @@ Authenticated controls share the same persisted state:
   timestamps or `null`. These are plugin-specific paths. Ordinary deltas never
   invoke commands. Manual service tests are blocked during snooze.
 
-### Quiet hours per notification service
+## Quiet hours per notification service
 
 In **Plugin settings → Notification services**, enable **Quiet hours** on each
 service that should be quieter overnight. Choose a daily start/end time,
@@ -330,8 +337,7 @@ Server local time uses the timezone of the Signal K process, not your browser.
 Set the Pi/server timezone when travelling (or the container timezone when using
 Docker). The plugin rechecks the process timezone once per minute; restart Signal K
 after changing the operating system timezone if the process still reports the old
-zone. A specific timezone remains fixed. The service's status shows the resolved
-timezone and its next
+zone. A specific timezone remains fixed. The resolved timezone and next schedule
 transition appear under System diagnostics.
 
 Below-threshold Wyoming audio is cancelled through the same owned-announcement
@@ -339,3 +345,18 @@ API as global snooze. Held work remains durable; cleared alerts do not produce a
 morning flood, active alerts resume once eligible, and missed repeats are not
 replayed. Manual test notifications are treated as normal severity. Quiet work
 does not wake connectivity. Configuration changes take effect when saved.
+
+## Help and support
+
+- [Report a problem or request a feature](https://github.com/arodus/signalk-alert-center/issues)
+- [View the source code](https://github.com/arodus/signalk-alert-center)
+- [Read the changelog](./CHANGELOG.md)
+- [Developer and local-testing guide](./DEVELOPERS.md)
+
+When reporting a problem, include the Alert Center version, Signal K version,
+relevant plugin logs, and the diagnostics shown in the webapp. Remove notification
+service secrets and personal vessel information first.
+
+## License
+
+[MIT](./LICENSE)

@@ -175,13 +175,33 @@ try {
 
   await desktop.getByRole("button", { name: "Alert settings" }).click();
   await desktop.locator("#policy-dialog").waitFor();
-  await capture(desktop, "alert-settings.png");
+  // Use a tall viewport to show every control in the real dialog without clipping.
+  await desktop.setViewportSize({ width: 1280, height: 2800 });
+  await capture(desktop.locator("#policy-dialog"), "alert-settings.png");
   await desktop.getByRole("button", { name: "Cancel" }).click();
   await desktop.locator("#drawer-close").click();
+  await desktop.setViewportSize({ width: 1280, height: 1000 });
 
   await desktop.getByRole("tab", { name: /Deliveries/ }).click();
   await desktop.locator("#delivery-list tr.delivery-row").first().waitFor();
-  await capture(desktop, "delivery-history.png");
+  await capture(desktop, "delivery-history.png", { fullPage: true });
+
+  await desktop
+    .getByRole("tab", { name: "Alert history", exact: true })
+    .click();
+  await desktop.locator("#alert-history-list tbody tr").first().waitFor();
+  await capture(desktop, "alert-history.png", { fullPage: true });
+
+  await desktop.getByRole("tab", { name: "Alerts", exact: true }).click();
+  await desktop.locator("#snooze-open").click();
+  await desktop
+    .locator("#snooze-dialog")
+    .getByRole("button", { name: "Snooze all alerts", exact: true })
+    .click();
+  await desktop.locator("#snooze-banner").waitFor();
+  await capture(desktop, "global-snooze.jpg", { quality: 85 });
+  await desktop.locator("#snooze-end").click();
+  await desktop.locator("#snooze-banner").waitFor({ state: "hidden" });
 
   const tablet = await preparePage(browser, { width: 820, height: 1000 });
   await tablet.goto(`${baseUrl}/signalk-alert-center/`);
@@ -260,6 +280,17 @@ try {
     .click();
   await desktop.getByTestId("notification-service").first().waitFor();
   await capture(settingsPanel, "plugin-settings.png", settingsCapture);
+  const service = desktop.getByTestId("notification-service").first();
+  await service
+    .getByRole("checkbox", { name: "Enable quiet hours", exact: true })
+    .check();
+  await service
+    .getByLabel("Quiet hours time basis", { exact: true })
+    .selectOption("local");
+  await capture(service, "service-quiet-hours.jpg", {
+    ...settingsCapture,
+    quality: 85,
+  });
   await desktop.close();
 } finally {
   await browser?.close();
