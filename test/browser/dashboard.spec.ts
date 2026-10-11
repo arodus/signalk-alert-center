@@ -596,6 +596,12 @@ test("saves a Telegram service and selects it as a default", async ({
   await service
     .getByRole("checkbox", { name: "Enable quiet hours", exact: true })
     .check();
+  await service
+    .getByLabel("Quiet hours time basis", { exact: true })
+    .selectOption("specific");
+  await service
+    .getByRole("checkbox", { name: "Enable quiet hours", exact: true })
+    .check();
   await service.getByLabel("Quiet hours start", { exact: true }).fill("22:00");
   await service.getByLabel("Quiet hours end", { exact: true }).fill("07:00");
   await service
