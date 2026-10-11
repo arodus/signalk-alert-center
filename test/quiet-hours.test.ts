@@ -19,6 +19,51 @@ const schedule: QuietHours = {
 };
 afterEach(() => vi.useRealTimers());
 describe("quiet hours clock", () => {
+  it("follows server-local time and invalidates cached boundaries when it changes", () => {
+    const zone = vi.fn().mockReturnValue("Europe/Berlin");
+    const clock = new QuietHoursClock(zone);
+    const local = { ...schedule, timeZone: "local" };
+    expect(() => validateQuietHours(local)).not.toThrow();
+    expect(
+      clock.window("cabin", local, new Date("2026-01-01T21:00:00Z")),
+    ).toMatchObject({
+      active: true,
+      timeZone: "Europe/Berlin",
+      endsAt: "2026-01-02T06:00:00.000Z",
+    });
+    zone.mockReturnValue("America/Curacao");
+    clock.window("cabin", local, new Date("2026-01-01T21:00:30Z"));
+    expect(zone).toHaveBeenCalledTimes(1);
+    expect(
+      clock.window("cabin", local, new Date("2026-01-01T21:01:00Z")),
+    ).toMatchObject({
+      active: false,
+      timeZone: "America/Curacao",
+      nextChangeAt: "2026-01-02T02:00:00.000Z",
+    });
+    expect(
+      clock.window("fixed", schedule, new Date("2026-01-01T21:01:00Z")),
+    ).toMatchObject({
+      active: true,
+      timeZone: "Europe/Berlin",
+    });
+  });
+  it("uses the actual process timezone by default and preserves local DST behavior", () => {
+    expect(
+      new QuietHoursClock().window("cabin", { ...schedule, timeZone: "local" })
+        .timeZone,
+    ).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const clock = new QuietHoursClock(() => "Europe/Berlin");
+    expect(
+      clock.window(
+        "cabin",
+        { ...schedule, timeZone: "local" },
+        new Date("2026-03-28T23:00:00Z"),
+      ),
+    ).toMatchObject({
+      endsAt: "2026-03-29T05:00:00.000Z",
+    });
+  });
   it("crosses midnight with exact inclusive start and exclusive end", () => {
     const clock = new QuietHoursClock();
     expect(

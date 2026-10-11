@@ -36,7 +36,8 @@ export function validateQuietHours(value: QuietHours | undefined): void {
   if (!value.timeZone || typeof value.timeZone !== "string")
     throw new Error("Quiet hours need a timezone");
   try {
-    new Intl.DateTimeFormat("en", { timeZone: value.timeZone }).format();
+    if (value.timeZone !== "local")
+      new Intl.DateTimeFormat("en", { timeZone: value.timeZone }).format();
   } catch {
     throw new Error("Quiet hours timezone is invalid");
   }
@@ -46,6 +47,11 @@ export function validateQuietHours(value: QuietHours | undefined): void {
  * Results are cached until the next boundary, not recomputed per alert.
  */
 export class QuietHoursClock {
+  private localZone?: { name: string; checkedAt: number };
+  constructor(
+    private readonly serverTimeZone = () =>
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+  ) {}
   private readonly cache = new Map<
     string,
     { key: string; at: number; until: number; value: QuietHoursWindow }
@@ -59,8 +65,17 @@ export class QuietHoursClock {
       this.cache.delete(service);
       return { enabled: false, active: false };
     }
-    const key = JSON.stringify(config);
     const timestamp = now.getTime();
+    if (
+      config.timeZone === "local" &&
+      (!this.localZone ||
+        timestamp < this.localZone.checkedAt ||
+        timestamp - this.localZone.checkedAt >= 60_000)
+    )
+      this.localZone = { name: this.serverTimeZone(), checkedAt: timestamp };
+    const timeZone =
+      config.timeZone === "local" ? this.localZone!.name : config.timeZone;
+    const key = JSON.stringify([config, timeZone]);
     const cached = this.cache.get(service);
     if (
       cached?.key === key &&
@@ -70,7 +85,7 @@ export class QuietHoursClock {
       return cached.value;
     validateQuietHours(config);
     const formatter = new Intl.DateTimeFormat("en-GB", {
-      timeZone: config.timeZone,
+      timeZone,
       hour: "2-digit",
       minute: "2-digit",
       hourCycle: "h23",
@@ -102,7 +117,7 @@ export class QuietHoursClock {
     const value: QuietHoursWindow = {
       enabled: true,
       active,
-      timeZone: config.timeZone,
+      timeZone,
       minimumSeverity: config.minimumSeverity,
       nextChangeAt: new Date(next).toISOString(),
       ...(active
@@ -117,5 +132,6 @@ export class QuietHoursClock {
   }
   clear(): void {
     this.cache.clear();
+    this.localZone = undefined;
   }
 }

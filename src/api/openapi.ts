@@ -473,7 +473,11 @@ export function getAlertCenterOpenApi() {
           properties: {
             enabled: { type: "boolean" },
             active: { type: "boolean" },
-            timeZone: { type: "string" },
+            timeZone: {
+              type: "string",
+              description:
+                "Resolved IANA timezone, including when the service uses server-local time.",
+            },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             startedAt: { type: "string", format: "date-time" },
             endsAt: { type: "string", format: "date-time" },

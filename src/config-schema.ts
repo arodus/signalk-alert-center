@@ -39,7 +39,13 @@ const serviceQuietHours = {
       default: "07:00",
       pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$",
     },
-    timeZone: { type: "string", title: "Timezone (IANA)", default: "UTC" },
+    timeZone: {
+      type: "string",
+      title: "Quiet hours timezone",
+      description:
+        'Use "local" for the Signal K server timezone, or an IANA timezone such as Europe/Berlin.',
+      default: "local",
+    },
     minimumSeverity: {
       type: "string",
       title: "Lowest severity during quiet hours",
