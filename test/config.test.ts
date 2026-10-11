@@ -37,12 +37,13 @@ describe("validateConfig", () => {
     const notifierItems = pluginConfigSchema.properties.notifiers.items;
     const variants = notifierItems.dependencies.type.oneOf;
     expect(pluginConfigSchema.properties.notifiers.type).toBe("array");
-    expect(variants).toHaveLength(5);
+    expect(variants).toHaveLength(6);
     expect(notifierItems.properties.type.enum).toEqual([
       "ntfy",
       "pagerduty",
       "discord",
       "telegram",
+      "pushover",
       "wyoming",
     ]);
     expect(notifierItems.properties.type.default).toBe("ntfy");
@@ -61,6 +62,7 @@ describe("validateConfig", () => {
       "pagerduty",
       "discord",
       "telegram",
+      "pushover",
       "wyoming",
     ]);
   });

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NotifierConfig } from "../config";
+import { pushoverEndpoint, pushoverMessage, pushoverResult } from "./pushover";
 
 export type NotificationTestCategory =
   | "success"
@@ -108,6 +109,17 @@ function requestFor(
     throw new Error(
       "Wyoming tests use the in-process signalk-wyoming announcement API",
     );
+  if (notifier.type === "pushover")
+    return {
+      url: pushoverEndpoint,
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pushoverMessage(notifier, testTitle, testBody)),
+        signal,
+      },
+      successMessage: "Pushover accepted the manual test notification.",
+    };
   if (notifier.type === "telegram")
     return {
       url: `${telegramApiBase.replace(/\/$/, "")}/bot${notifier.botToken}/sendMessage`,
@@ -195,6 +207,16 @@ export async function testNotificationService(
     );
     const response = await (options.fetch ?? fetch)(request.url, request.init);
     if (!response.ok) return finish(classifyFailure(response.status));
+    if (notifier.type === "pushover") {
+      const result = await pushoverResult(response);
+      if (result.kind !== "success")
+        return finish({
+          status: "error",
+          category: result.kind === "terminal" ? "validation" : "remote",
+          message: result.message,
+          technicalDetail: result.code,
+        });
+    }
     return finish({
       status: "success",
       category: "success",

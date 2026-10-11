@@ -79,12 +79,13 @@ const serviceType = {
   title: "Service type",
   description:
     "Choose where this service sends notifications. The matching connection fields appear below.",
-  enum: ["ntfy", "pagerduty", "discord", "telegram", "wyoming"],
+  enum: ["ntfy", "pagerduty", "discord", "telegram", "pushover", "wyoming"],
   enumNames: [
     "ntfy",
     "PagerDuty",
     "Discord",
     "Telegram",
+    "Pushover",
     "Signal K Wyoming audio",
   ],
   default: "ntfy",
@@ -473,6 +474,40 @@ export const pluginConfigSchema = {
                   },
                 },
                 required: ["botToken", "chatId"],
+              },
+              {
+                properties: {
+                  type: { enum: ["pushover"] },
+                  applicationToken: {
+                    type: "string",
+                    title: "Pushover application API token",
+                    description:
+                      "Create an application at pushover.net/apps and copy its 30-character API token.",
+                    format: "password",
+                    pattern: "^[A-Za-z0-9]{30}$",
+                  },
+                  userKey: {
+                    type: "string",
+                    title: "Pushover user or group key",
+                    description:
+                      "30-character recipient key from your Pushover dashboard or delivery group.",
+                    format: "password",
+                    pattern: "^[A-Za-z0-9]{30}$",
+                  },
+                  device: {
+                    type: "string",
+                    title: "Pushover devices",
+                    description:
+                      "Optional comma-separated device names. Leave empty for all recipient devices.",
+                  },
+                  sound: {
+                    type: "string",
+                    title: "Pushover sound",
+                    description:
+                      "Optional Pushover sound name. Leave empty for the recipient's default.",
+                  },
+                },
+                required: ["applicationToken", "userKey"],
               },
               {
                 properties: {

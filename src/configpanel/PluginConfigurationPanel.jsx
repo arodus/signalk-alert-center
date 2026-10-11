@@ -13,6 +13,7 @@ const notifierTypes = [
   { value: "pagerduty", label: "PagerDuty" },
   { value: "discord", label: "Discord" },
   { value: "telegram", label: "Telegram" },
+  { value: "pushover", label: "Pushover" },
   { value: "wyoming", label: "Signal K Wyoming audio" },
 ];
 const tabs = [
@@ -660,6 +661,18 @@ function NotificationServices({ config, update }) {
                       },
                       true,
                     );
+                  if (type === "pushover")
+                    change(
+                      index,
+                      {
+                        ...shared,
+                        applicationToken: "",
+                        userKey: "",
+                        device: "",
+                        sound: "",
+                      },
+                      true,
+                    );
                   if (type === "telegram")
                     change(
                       index,
@@ -935,6 +948,66 @@ function NotificationServices({ config, update }) {
                   }
                 />
               </Field>
+            )}
+            {service.type === "pushover" && (
+              <>
+                <Field
+                  label="Pushover application API token"
+                  hint="Create an application at pushover.net/apps and copy its 30-character API token."
+                >
+                  <input
+                    style={styles.input}
+                    type="password"
+                    value={service.applicationToken ?? ""}
+                    onChange={(event) =>
+                      change(index, { applicationToken: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field
+                  label="Pushover user or group key"
+                  hint="Recipient key from your Pushover dashboard or delivery group."
+                >
+                  <input
+                    style={styles.input}
+                    type="password"
+                    value={service.userKey ?? ""}
+                    onChange={(event) =>
+                      change(index, { userKey: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field
+                  label="Pushover devices"
+                  hint="Optional comma-separated device names. Leave empty for all recipient devices."
+                >
+                  <input
+                    style={styles.input}
+                    value={service.device ?? ""}
+                    onChange={(event) =>
+                      change(index, { device: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field
+                  label="Pushover sound"
+                  hint="Optional Pushover sound name, such as pushover or siren. Leave empty for the recipient's default."
+                >
+                  <input
+                    style={styles.input}
+                    value={service.sound ?? ""}
+                    onChange={(event) =>
+                      change(index, { sound: event.target.value })
+                    }
+                  />
+                </Field>
+                <p style={styles.hint}>
+                  Alarm and emergency alerts use high priority, which bypasses
+                  Pushover quiet hours. Other alerts and recovery messages use
+                  normal priority. Repeats are managed by Alert Center, not
+                  Pushover.
+                </p>
+              </>
             )}
             {service.type === "telegram" && (
               <>

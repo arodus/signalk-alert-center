@@ -4,6 +4,7 @@ import { DiscordTransport } from "../src/transports/discord";
 import { NtfyTransport } from "../src/transports/ntfy";
 import { PagerDutyTransport } from "../src/transports/pagerduty";
 import { TelegramTransport } from "../src/transports/telegram";
+import { PushoverTransport } from "../src/transports/pushover";
 import { AlertRecord, DeliveryRecord } from "../src/alerts/types";
 import { createInternetProbe } from "../src/connectivity/internet";
 
@@ -16,7 +17,7 @@ const dockerAvailable = (() => {
   }
 })();
 const enabled = process.env.RUN_DOCKER_INTEGRATION === "1" && dockerAvailable;
-const baseUrl = "http://127.0.0.1:18080";
+const baseUrl = `http://127.0.0.1:${process.env.NOTIFIER_MOCK_PORT ?? "18080"}`;
 const alert: AlertRecord = {
   id: "integration-alert",
   sourceKey: "notifications.integration.test",
@@ -74,7 +75,7 @@ describe.skipIf(!enabled)("Docker HTTP transport integration", () => {
     );
   });
 
-  it("delivers ntfy, PagerDuty, Discord, and Telegram payloads over HTTP", async () => {
+  it("delivers ntfy, PagerDuty, Discord, Telegram, and Pushover payloads over HTTP", async () => {
     await expect(
       createInternetProbe({ url: `${baseUrl}/health` })(),
     ).resolves.toBe(true);
@@ -87,18 +88,25 @@ describe.skipIf(!enabled)("Docker HTTP transport integration", () => {
         baseUrl,
       ),
     ];
+    transports.push(
+      new PushoverTransport(
+        { applicationToken: "test-token", userKey: "test-user" },
+        `${baseUrl}/pushover`,
+      ),
+    );
     for (const transport of transports) {
       expect((await transport.send(alert, delivery, context)).kind).toBe(
         "success",
       );
     }
     const requests = await (await fetch(`${baseUrl}/requests`)).json();
-    expect(requests).toHaveLength(4);
+    expect(requests).toHaveLength(5);
     expect(requests.map((request: { url: string }) => request.url)).toEqual([
       "/ntfy-topic",
       "/pagerduty",
       "/discord",
       "/bottest-token/sendMessage",
+      "/pushover",
     ]);
   });
 });

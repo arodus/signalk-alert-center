@@ -12,7 +12,7 @@ Signal K Wyoming is listed by name without an invented logo.
 - **Name:** Signal K Alert Center
 - **npm package:** `signalk-alert-center`
 - **Short description:** Signal K alerts and history with offline delivery to
-  ntfy, PagerDuty, Discord, Telegram, and optional Wyoming sound and speech
+  ntfy, PagerDuty, Discord, Telegram, Pushover, and optional Wyoming sound and speech
 - **Categories:** Notifications; Utility
 - **License:** MIT
 - **Repository:** https://github.com/arodus/signalk-alert-center
@@ -20,7 +20,7 @@ Signal K Wyoming is listed by name without an invented logo.
 
 ## Long description
 
-Send your boat's alerts to **ntfy, PagerDuty, Discord, and Telegram**, or play
+Send your boat's alerts to **ntfy, PagerDuty, Discord, Telegram, and Pushover**, or play
 notification sounds and spoken alerts through optional **Signal K Wyoming**.
 Use multiple services together; each has its own delivery tracking and retries.
 Wyoming is optional, and speech also needs a TTS service such as `signalk-piper`.
@@ -55,7 +55,7 @@ and manual-install instructions.
 The plugin adds no analytics or telemetry. Alert history and delivery state remain
 in the local Signal K data directory. Alert content leaves Signal K only through
 services explicitly configured and selected by the user: ntfy, PagerDuty,
-Discord, Telegram, or the in-process signalk-wyoming API. The complete disclosure
+Discord, Telegram, Pushover, or the in-process signalk-wyoming API. The complete disclosure
 is in the [README](../README.md#privacy-and-network-access).
 
 ## Screenshot inventory

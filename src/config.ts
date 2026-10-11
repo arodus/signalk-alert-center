@@ -14,6 +14,13 @@ interface NotifierBaseConfig {
 }
 export type NotifierConfig =
   | (NotifierBaseConfig & {
+      type: "pushover";
+      applicationToken: string;
+      userKey: string;
+      device?: string;
+      sound?: string;
+    })
+  | (NotifierBaseConfig & {
       type: "ntfy";
       server: string;
       topic: string;
@@ -150,9 +157,14 @@ export function validateConfig(config: PluginConfig): void {
     normalizedNotifierNames.add(normalizedName);
     if (
       !notifier.type ||
-      !["ntfy", "pagerduty", "discord", "telegram", "wyoming"].includes(
-        notifier.type,
-      )
+      ![
+        "ntfy",
+        "pagerduty",
+        "discord",
+        "telegram",
+        "pushover",
+        "wyoming",
+      ].includes(notifier.type)
     )
       throw new Error(`Invalid notification service type: ${notifier.name}`);
     if (
@@ -233,6 +245,37 @@ export function validateConfig(config: PluginConfig): void {
         notifier.webhookUrl,
         `Notification service ${notifier.name} has an invalid Discord webhook URL`,
       );
+    }
+    if (notifier.type === "pushover") {
+      for (const field of ["applicationToken", "userKey"] as const) {
+        if (
+          typeof notifier[field] !== "string" ||
+          !/^[A-Za-z0-9]{30}$/.test(notifier[field])
+        )
+          throw new Error(
+            `Notification service ${notifier.name} requires a valid Pushover ${field === "applicationToken" ? "application token" : "user/group key"} (30 letters or digits)`,
+          );
+      }
+      if (
+        notifier.device !== undefined &&
+        (typeof notifier.device !== "string" ||
+          (notifier.device !== "" &&
+            !/^[A-Za-z0-9_-]{1,25}(,[A-Za-z0-9_-]{1,25})*$/.test(
+              notifier.device,
+            )))
+      )
+        throw new Error(
+          `Notification service ${notifier.name} has invalid Pushover device names`,
+        );
+      if (
+        notifier.sound !== undefined &&
+        (typeof notifier.sound !== "string" ||
+          (notifier.sound !== "" &&
+            !/^[A-Za-z0-9_-]{1,100}$/.test(notifier.sound)))
+      )
+        throw new Error(
+          `Notification service ${notifier.name} has an invalid Pushover sound name`,
+        );
     }
     if (notifier.type === "telegram") {
       requireString(
