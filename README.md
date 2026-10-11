@@ -121,13 +121,13 @@ global unit preset and path overrides; a browser user's personal preset may diff
 If the server's unit-settings endpoints are unavailable, explicit metadata conversions
 are used, with °C as the Kelvin fallback and other units unchanged.
 
-| Service                | What is sent                                    | Notes                                                                                                  |
-| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| ntfy                   | Alert title, severity, message, and state       | Supports self-hosted or hosted ntfy servers.                                                           |
-| PagerDuty              | Trigger, acknowledgement, and resolution events | Uses one stable deduplication key for an occurrence.                                                   |
-| Discord                | Alert messages through a webhook                | Each configured webhook is an independent service.                                                     |
-| Telegram               | Alert messages through a bot                    | Supports chats, forum topics, and silent Telegram delivery.                                            |
-| Signal K Wyoming audio | Severity sound and optional spoken alert        | Optional; requires `signalk-wyoming`. Speech additionally needs a TTS service such as `signalk-piper`. |
+| Service                | What is sent                                    | Notes                                                                                                                              |
+| ---------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| ntfy                   | Alert title, severity, message, and state       | Supports self-hosted or hosted ntfy servers.                                                                                       |
+| PagerDuty              | Trigger, acknowledgement, and resolution events | Uses one stable deduplication key for an occurrence.                                                                               |
+| Discord                | Alert messages through a webhook                | Each configured webhook is an independent service.                                                                                 |
+| Telegram               | Alert messages through a bot                    | Supports chats, forum topics, and silent Telegram delivery.                                                                        |
+| Signal K Wyoming audio | Severity sound and optional spoken alert        | Optional; requires `signalk-wyoming` 0.3.0 or newer when enabled. Speech additionally needs a TTS service such as `signalk-piper`. |
 
 Wyoming audio requires `"sound"` in the Signal K notification’s `method` array.
 Visual-only alerts (`method: ["visual"]`), empty or missing methods, and invalid
@@ -138,13 +138,15 @@ no sound method. Alerts remain in history, and ntfy, PagerDuty, Discord, and
 Telegram delivery continue to follow their configured policies regardless of
 `method`.
 
-Wyoming is not required to use Alert Center. When both sound and speech are
-enabled, Alert Center queues the configured severity sound first and then the
-spoken text. Uploaded Wyoming sound IDs can be selected for individual alerts.
-Alert Center records announcement acceptance separately from the playback states
-reported by Wyoming, including aggregate and per-satellite outcomes. A reported
-`played` state confirms completion from the satellite process; it cannot prove
-that the physical speaker was audible.
+Wyoming is not required to use Alert Center. Enabling a Wyoming notification
+service requires `signalk-wyoming` 0.3.0 or newer, which provides the version 1
+delivery-aware announcement API. When both sound and speech are enabled, Alert
+Center queues the configured severity sound first and then the spoken text.
+Uploaded Wyoming sound IDs can be selected for individual alerts. Alert Center
+records announcement acceptance separately from the playback states reported by
+Wyoming, including aggregate and per-satellite outcomes. A reported `played`
+state confirms completion from the satellite process; it cannot prove that the
+physical speaker was audible.
 
 ![Notification service settings in the Signal K-style configuration panel](./docs/screenshots/plugin-settings.png)
 
