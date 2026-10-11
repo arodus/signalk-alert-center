@@ -22,8 +22,13 @@ const git = (...args) => {
   return result.stdout.trim();
 };
 
+// Actions checkout can replace its local annotated tag with the event's peeled
+// commit SHA. Restore the actual remote tag before checking its object type.
+git("fetch", "--no-tags", "origin", `+refs/tags/${tag}:refs/tags/${tag}`);
 if (git("cat-file", "-t", `refs/tags/${tag}`) !== "tag")
   throw new Error(`${tag} must be an annotated tag`);
+if (git("rev-parse", `refs/tags/${tag}^{commit}`) !== git("rev-parse", "HEAD"))
+  throw new Error(`${tag} does not point to the checked-out commit`);
 if (git("status", "--porcelain"))
   throw new Error("Release checkout contains uncommitted or untracked files");
 
