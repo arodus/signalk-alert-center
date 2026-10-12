@@ -34,7 +34,11 @@ operational history and delivery tracking needed when alerts matter after the
 current value changes:
 
 - **See what needs attention now.** Active alerts appear first in one compact
-  list alongside inactive discovered alerts and defined zones.
+  list, followed by configured zones with no active alert (shown as Normal),
+  then inactive discovered alerts. All definitions are loaded without a
+  history-based “Load more” button. Choose **Zones and active alerts** to hide
+  inactive discovered alerts. Normal means no active alert has been reported;
+  it does not certify sensor availability or freshness.
 - **Keep the full story.** Raises, meaningful updates, clears,
   acknowledgements, silences, and delivery results remain available after a
   restart.
