@@ -7,6 +7,45 @@ Versioning while it remains pre-1.0.
 
 Future changes intended for the next release belong here.
 
+## [0.3.0] - 2026-10-12
+
+### Alert overview
+
+- Show every alert definition without a history-based **Load more** button.
+  Active alerts are loaded independently of paginated history.
+- Sort active alerts by severity first, then configured zones without an active
+  alert, then inactive discovered alerts.
+- Show configured zones without an active alert as **Normal**, including zones
+  that have never fired. This means no active alert has been reported; it is not
+  a guarantee that the sensor is available or its reading is fresh.
+- Add a **Zones and active alerts** filter to hide inactive discovered alerts.
+- Keep source and history filters complete across multiple result pages and
+  include normal zones when filtering the overview by normal severity.
+
+### Fixes and maintenance
+
+- Render original notification-service icons correctly in the Signal K Store
+  README instead of displaying raw HTML image tags.
+- Respect `SIGNALK_NODE_CONFIG_DIR` in the Docker startup script and derive
+  default data and server paths from the container user's home directory.
+  Existing saved configuration and the default database location are preserved.
+- Add official Signal K plugin CI checks on Node 22 and 24 across Linux x64,
+  Linux ARM64, macOS, and Windows. Keep checkout line endings consistent and
+  require both compatibility and project-specific checks before publishing.
+- Require changelog entries for future user-visible changes in contributor
+  instructions.
+
+### Upgrading
+
+- No database schema, API, notification-delivery, or saved-settings changes from
+  0.2.0. Existing alerts, history, policies, and queued deliveries are preserved;
+  no reset or migration is required.
+- Node.js 22.5 or newer remains required. Optional notification-service
+  requirements are unchanged.
+- Rollback to 0.2.0 does not require restoring an older database schema. If you
+  use a custom Docker data directory, keep mounting the same data volume and
+  account for 0.2.0's hardcoded Docker paths before rolling back.
+
 ## [0.2.0] - 2026-10-11
 
 ### Pushover notifications
