@@ -8,7 +8,6 @@ const state = {
   deliveries: [],
   deliveryTotal: 0,
   alertHistory: [],
-  occurrenceCursor: undefined,
   deliveryCursor: undefined,
   alertHistoryCursor: undefined,
   eventCursor: undefined,
@@ -43,7 +42,6 @@ const elements = {
   updated: $("#updated"),
   error: $("#error"),
   login: $("#login"),
-  moreOccurrences: $("#history-more"),
   drawer: $("#detail-drawer"),
   backdrop: $("#drawer-backdrop"),
   drawerTitle: $("#drawer-title"),
@@ -121,11 +119,13 @@ async function api(path, options = {}) {
 }
 async function allPages(path) {
   const items = [];
+  const [pathname, query] = path.split("?");
+  const params = new URLSearchParams(query);
+  params.set("limit", "100");
   let cursor;
   do {
-    const page = await api(
-      `${path}${path.includes("?") ? "&" : "?"}limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-    );
+    if (cursor) params.set("cursor", cursor);
+    const page = await api(`${pathname}?${params}`);
     items.push(...pageItems(page));
     cursor = page.nextCursor;
   } while (cursor);
@@ -468,16 +468,10 @@ function bindOccurrenceActions(root = elements.drawerBody) {
 
 function renderDefinitions() {
   const showActive = $("#state-filter").value === "active";
+  const showZonesActive = $("#state-filter").value === "zones-active";
   const severity = $("#severity-filter").value;
   const search = $("#alert-search").value.trim().toLocaleLowerCase();
-  const historyFiltered = [
-    "state-filter",
-    "severity-filter",
-    "path-filter",
-    "source-filter",
-    "from-filter",
-    "to-filter",
-  ].some((id) => $(`#${id}`).value);
+  const historyFiltered = hasHistoryFilters();
   const visible = state.definitions
     .flatMap((definition) => {
       const occurrences = state.occurrences.filter(
@@ -504,7 +498,22 @@ function renderDefinitions() {
       ];
     })
     .filter((entry) => !showActive || entry.active)
-    .filter(({ latest }) => !severity || latest?.currentSeverity === severity)
+    .filter(
+      ({ definition, active }) =>
+        !showZonesActive || active || definitionZones(definition).length > 0,
+    )
+    .filter(
+      ({ definition }) =>
+        !$("#path-filter").value ||
+        definition.pathPattern === $("#path-filter").value,
+    )
+    .filter(
+      (entry) =>
+        !severity ||
+        (historyFiltered
+          ? entry.latest?.currentSeverity
+          : definitionStatus(entry)) === severity,
+    )
     .filter(({ definition, latest }) =>
       [
         definition.name,
@@ -523,12 +532,12 @@ function renderDefinitions() {
           ? severityOrder.indexOf(right.latest?.currentSeverity) -
             severityOrder.indexOf(left.latest?.currentSeverity)
           : 0) ||
-        String(left.definition.name).localeCompare(
-          String(right.definition.name),
-        ),
+        Number(definitionZones(right.definition).length > 0) -
+          Number(definitionZones(left.definition).length > 0) ||
+        alertName(left.definition).localeCompare(alertName(right.definition)),
     );
   $("#list-summary").textContent =
-    `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first`;
+    `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
             <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
@@ -544,12 +553,14 @@ function renderDefinitions() {
             ]
               .filter(Boolean)
               .join(" · ");
-            const status = active ? latest.currentSeverity : "inactive";
+            const status = definitionStatus(definition);
             const statusTitle = active
               ? latest.currentSeverity
-              : hasHistory
-                ? "No active alert has been recorded"
-                : "No alert has been recorded for this definition";
+              : definitionZones(item).length
+                ? "Configured zone with no active alert reported by Signal K"
+                : hasHistory
+                  ? "No active alert has been recorded"
+                  : "No alert has been recorded for this definition";
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-live-occurrence="${active ? escapeHtml(latest.id) : ""}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
@@ -577,6 +588,13 @@ function renderDefinitions() {
     });
   });
   bindOccurrenceActions(elements.definitions);
+}
+function definitionStatus({ definition, active, latest }) {
+  return active
+    ? latest.currentSeverity
+    : definitionZones(definition).length
+      ? "normal"
+      : "inactive";
 }
 
 function audioWasSkipped(item) {
@@ -717,6 +735,7 @@ function occurrenceParams(cursor) {
   if (cursor) params.set("cursor", cursor);
   for (const id of ["state", "severity", "path", "source"]) {
     const value = $(`#${id}-filter`).value.trim();
+    if (id === "state" && value === "zones-active") continue;
     if (value) params.set(id, value);
   }
   for (const id of ["from", "to"]) {
@@ -750,14 +769,12 @@ function alertHistoryParams(cursor) {
 }
 
 function hasHistoryFilters() {
-  return [
-    "state-filter",
-    "severity-filter",
-    "path-filter",
-    "source-filter",
-    "from-filter",
-    "to-filter",
-  ].some((id) => $(`#${id}`).value);
+  return (
+    $("#state-filter").value === "cleared" ||
+    ["source-filter", "from-filter", "to-filter"].some(
+      (id) => $(`#${id}`).value,
+    )
+  );
 }
 
 function renderPathOptions() {
@@ -781,17 +798,6 @@ function renderAlertHistoryDefinitionOptions() {
     select.value = selected;
 }
 
-async function loadOccurrences(append = false) {
-  const page = await api(
-    `/occurrences?${occurrenceParams(append ? state.occurrenceCursor : undefined)}`,
-  );
-  state.occurrences = append
-    ? mergeById(state.occurrences, pageItems(page))
-    : pageItems(page);
-  state.occurrenceCursor = page.nextCursor;
-  elements.moreOccurrences.hidden = !page.nextCursor;
-  renderDefinitions();
-}
 async function loadDeliveries(append = false) {
   const params = new URLSearchParams({ limit: "50" });
   if (append && state.deliveryCursor)
@@ -835,7 +841,9 @@ async function load(preserveLoadedHistory = false) {
     ] = await Promise.all([
       allPages("/definitions"),
       allPages("/occurrences?state=active"),
-      api(`/occurrences?${occurrenceParams()}`),
+      hasHistoryFilters()
+        ? allPages(`/occurrences?${occurrenceParams()}`)
+        : api("/occurrences?limit=100"),
       api("/notifiers"),
       api("/status").catch(() => ({})),
       api("/deliveries?limit=50"),
@@ -874,7 +882,6 @@ async function load(preserveLoadedHistory = false) {
       preserveLoadedHistory && previousHistoryCursor
         ? previousHistoryCursor
         : alertHistoryPage.nextCursor;
-    state.occurrenceCursor = occurrences.nextCursor;
     elements.activeCount.textContent = activeOccurrences.length;
     elements.definitionCount.textContent =
       status.alerts?.definitions ?? state.definitions.length;
@@ -892,7 +899,6 @@ async function load(preserveLoadedHistory = false) {
     renderDiagnostics(status);
     renderSnooze();
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    elements.moreOccurrences.hidden = !state.occurrenceCursor;
     renderDefinitions();
     renderAlertHistory();
     renderDeliveries(state.deliveries);
@@ -1472,9 +1478,6 @@ $("#filters-clear").addEventListener("click", () => {
   $("#history-filters").reset();
   void load();
 });
-elements.moreOccurrences.addEventListener("click", () =>
-  loadOccurrences(true).catch(showError),
-);
 elements.moreDeliveries.addEventListener("click", () =>
   loadDeliveries(true).catch(showError),
 );

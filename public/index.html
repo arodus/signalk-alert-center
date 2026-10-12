@@ -106,6 +106,7 @@
           <label for="state-filter">Show</label
           ><select id="state-filter" name="state">
             <option value="" selected>All alerts and zones</option>
+            <option value="zones-active">Zones and active alerts</option>
             <option value="active">Active alerts only</option>
             <option value="cleared">Cleared history only</option>
           </select>
@@ -159,14 +160,6 @@
         <p id="list-summary" class="field-help" role="status"></p>
         <p id="action-result" class="field-help" role="status"></p>
         <div id="definition-list" class="table-shell" aria-live="polite"></div>
-        <button
-          id="history-more"
-          class="button button-quiet load-more"
-          type="button"
-          hidden
-        >
-          Load more
-        </button>
       </section>
 
       <section
