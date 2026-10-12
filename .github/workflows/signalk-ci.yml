@@ -1,0 +1,26 @@
+name: SignalK Plugin CI
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signalk-plugin-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plugin:
+    uses: SignalK/signalk-server/.github/workflows/plugin-ci.yml@6ad2e98f1c68c89f9d5805425b551e87015b4e8c
+    with:
+      build-command: npm run build
+      test-command: npm run test
+      format-check-command: npm run format:check
+      node-versions: '["22", "24"]'
+      # Real-server, browser, and restart coverage remains in ci.yml.
+      enable-signalk-integration: false

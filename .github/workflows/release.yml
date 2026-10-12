@@ -16,8 +16,11 @@ jobs:
   validate:
     uses: ./.github/workflows/ci.yml
 
+  validate-plugin:
+    uses: ./.github/workflows/signalk-ci.yml
+
   publish:
-    needs: validate
+    needs: [validate, validate-plugin]
     runs-on: ubuntu-latest
     environment: release
     permissions:

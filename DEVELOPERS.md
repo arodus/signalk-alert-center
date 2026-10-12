@@ -114,6 +114,24 @@ npm run package:smoke    # clean packaged-plugin installation
 Browser and acceptance fixtures live under `test/integration/`. They publish
 deterministic Signal K zones and notification deltas and must remain test-only.
 
+### Signal K plugin compatibility checks
+
+`.github/workflows/signalk-ci.yml` calls the official Signal K reusable plugin
+workflow on pull requests, pushes to `main`, manual runs, and release validation. It builds the plugin
+and runs the unit suite on Node 22 and 24 across Linux x64, Linux arm64, macOS,
+and Windows, alongside the upstream packaging and lifecycle checks. The upstream
+workflow is pinned to a reviewed commit; review its changes before updating it.
+
+The existing `ci.yml` remains responsible for our Docker acceptance, browser,
+restart, and package-specific checks. Formatting and unit tests run only in the
+official workflow; our package build also performs strict TypeScript checking.
+Releases require both workflows to succeed before publishing. The publish job
+still builds and checks the package it will actually upload.
+After merging and obtaining a successful default-branch run, request a registry
+re-score through the [Signal K registry](https://github.com/SignalK/signalk-plugin-registry#requesting-a-re-score)
+to refresh its plugin CI badge. Adding this workflow alone does not confirm a
+new registry score.
+
 ## Store screenshots
 
 The Store assets in `docs/screenshots/` are generated from the isolated Compose
