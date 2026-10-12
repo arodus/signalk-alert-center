@@ -15,6 +15,26 @@ const requireValue = (condition, message) => {
   if (!condition) failures.push(message);
 };
 
+const readme = readFileSync("README.md", "utf8");
+requireValue(
+  !/<img\b/i.test(readme),
+  "README images must use Markdown syntax; the Signal K Store escapes HTML",
+);
+for (const match of readme.matchAll(
+  /!\[[^\]]*\]\(\.\/(docs\/icons\/[^)]+\.svg)\)/g,
+)) {
+  const icon = match[1];
+  requireValue(existsSync(icon), `README service icon is missing: ${icon}`);
+  if (existsSync(icon)) {
+    const svg = readFileSync(icon, "utf8");
+    requireValue(
+      /<svg\b[^>]*\bwidth="24"/.test(svg) &&
+        /<svg\b[^>]*\bheight="24"/.test(svg),
+      `README service icon must declare its 24px size: ${icon}`,
+    );
+  }
+}
+
 requireValue(
   packageJson.name === "signalk-alert-center",
   "unexpected package name",
