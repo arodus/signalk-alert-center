@@ -1,0 +1,2 @@
+# Keep Prettier and shell scripts consistent on Windows as well as Unix.
+* text=auto eol=lf
