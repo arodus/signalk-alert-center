@@ -19,9 +19,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run format:check
-      - run: npm run typecheck
-      - run: npm test
+      # Formatting and unit tests run in signalk-ci.yml. The build below
+      # also performs strict TypeScript checking and supplies package artifacts.
       - run: npm run test:integration
       - run: npm run build
       - run: npm run package:check
