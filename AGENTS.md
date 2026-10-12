@@ -918,6 +918,21 @@ Avoid:
 
 ## Documentation
 
+### Changelog updates
+
+- Every PR with a notable user-visible change must update `CHANGELOG.md` in
+  the same PR, including features, bug fixes, UI behavior, configuration,
+  compatibility, and upgrade or migration requirements.
+- Add concise, user-facing entries under `[Unreleased]`. Explain what changed
+  and any action users need to take; do not rely on the PR description or README
+  as a substitute.
+- Before declaring a change complete or merging it, check the diff for the
+  matching changelog entry. If none is needed because the change is strictly
+  internal or documentation-only, state that explicitly in the PR description.
+- Do not bump the package version or create a dated release section unless a
+  release was requested. During release preparation, move the relevant
+  `[Unreleased]` entries into the new version section.
+
 README must eventually explain:
 
 - architecture;
@@ -961,4 +976,6 @@ A feature is complete only when:
 - connectivity ownership implications are defined;
 - errors are observable;
 - automated tests cover the important failure paths;
-- user-facing configuration is documented.
+- user-facing configuration is documented;
+- notable user-visible changes are recorded in `CHANGELOG.md` under
+  `[Unreleased]`, or the PR explains why no changelog entry is needed.
