@@ -411,6 +411,15 @@ const putSnooze = (name, value) =>
       body: JSON.stringify({ value }),
     },
   );
+const putQuietHoursEnabled = (value) =>
+  json(
+    `${signalkUrl}/signalk/v1/api/vessels/self/digital/alertCenter/quietHours/enabled`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value }),
+    },
+  );
 await putSnooze("duration", 900);
 const snoozeBefore = await json(snoozeApi);
 assert.equal(snoozeBefore.active, true);
@@ -536,13 +545,14 @@ await eventually(
   (page) => page.items[0]?.state === "cleared",
   "quiet alert clear persisted",
 );
-await saveQuietConfig({
-  ...quietConfig,
-  notifiers: quietConfig.notifiers.map((service) => ({
-    ...service,
-    quietHours: { ...quietSettings, enabled: false },
-  })),
-});
+await putQuietHoursEnabled(false);
+await eventually(
+  () => json(`${quietApi}/status`),
+  (status) =>
+    status.quietHours?.enabled === false &&
+    status.services.some((service) => service.quietHours?.suspended),
+  "quiet-hours override status",
+);
 await eventually(
   () => json(`${mockUrl}/requests`),
   (requests) =>
@@ -565,5 +575,6 @@ assert.equal(
     .length,
   1,
 );
+await putQuietHoursEnabled(true);
 
 console.log("Docker acceptance smoke test passed");

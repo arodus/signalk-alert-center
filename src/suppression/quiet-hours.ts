@@ -10,6 +10,7 @@ export interface QuietHours {
 export interface QuietHoursWindow {
   enabled: boolean;
   active: boolean;
+  suspended?: boolean;
   startedAt?: string;
   endsAt?: string;
   nextChangeAt?: string;

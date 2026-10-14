@@ -473,6 +473,11 @@ export function getAlertCenterOpenApi() {
           properties: {
             enabled: { type: "boolean" },
             active: { type: "boolean" },
+            suspended: {
+              type: "boolean",
+              description:
+                "True when the saved schedule is bypassed by the global Signal K control.",
+            },
             timeZone: {
               type: "string",
               description:
@@ -494,10 +499,20 @@ export function getAlertCenterOpenApi() {
             cleanupError: { type: "string" },
           },
         },
+        QuietHoursControl: {
+          type: "object",
+          required: ["enabled"],
+          properties: {
+            enabled: { type: "boolean" },
+            updatedAt: { type: "string", format: "date-time" },
+            source: { type: "string" },
+          },
+        },
         OperationalStatus: {
           type: "object",
           required: [
             "health",
+            "quietHours",
             "runtime",
             "reconciliation",
             "scheduler",
@@ -508,6 +523,9 @@ export function getAlertCenterOpenApi() {
           ],
           properties: {
             snooze: { $ref: "#/components/schemas/Snooze" },
+            quietHours: {
+              $ref: "#/components/schemas/QuietHoursControl",
+            },
             suppressionEvents: {
               type: "array",
               maxItems: 100,

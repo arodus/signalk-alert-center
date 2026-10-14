@@ -372,6 +372,13 @@ morning flood, active alerts resume once eligible, and missed repeats are not
 replayed. Manual test notifications are treated as normal severity. Quiet work
 does not wake connectivity. Configuration changes take effect when saved.
 
+Signal K PUT `digital.alertCenter.quietHours.enabled` provides a global,
+persistent override. Set it to `false` to bypass every service's quiet-hours
+schedule without changing the saved service configuration; set it back to
+`true` to restore those schedules. The override survives plugin and server
+restarts. The dashboard shows a warning banner while schedules are bypassed and
+marks each configured quiet-hours schedule as overridden.
+
 ## Help and support
 
 - [Report a problem or request a feature](https://github.com/arodus/signalk-alert-center/issues)
