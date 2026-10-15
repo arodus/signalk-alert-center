@@ -5,14 +5,33 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-- Added the persistent Signal K control `digital.alertCenter.quietHours.enabled` to temporarily bypass all saved quiet-hours schedules. The dashboard clearly marks the override and each affected notifier; setting the path back to `true` restores the unchanged schedules.
-
 Future changes intended for the next release belong here.
+
+## [0.4.0] - 2026-10-15
 
 ### Alert overview
 
 - Restore the **Last triggered** column so each alert definition shows when its
   most recent occurrence started, or **Never** when it has not fired.
+
+### Quiet hours
+
+- Add the persistent Signal K PUT control
+  `digital.alertCenter.quietHours.enabled`. Set it to `false` to bypass every
+  saved per-service quiet-hours schedule and to `true` to restore them without
+  changing their configuration.
+- Clearly mark a disabled quiet-hours override in the dashboard banner,
+  diagnostics, and affected notification-service cards.
+
+### Upgrading
+
+- No configuration or database migration is required. Existing installations
+  continue with quiet hours enabled by default, and the override state survives
+  plugin and server restarts.
+- Version 0.3.0 can read the same database if a rollback is necessary, but it
+  does not understand the global override. After rollback, configured
+  per-service quiet-hours schedules apply normally even if the 0.4.0 override
+  had been disabled.
 
 ## [0.3.0] - 2026-10-12
 
