@@ -577,10 +577,14 @@ h2 {
 }
 .alert-table th:nth-child(4),
 .alert-table td:nth-child(4) {
-  width: 6rem;
+  width: 9rem;
 }
 .alert-table th:nth-child(5),
 .alert-table td:nth-child(5) {
+  width: 6rem;
+}
+.alert-table th:nth-child(6),
+.alert-table td:nth-child(6) {
   width: 10rem;
 }
 .alert-table th,
@@ -608,6 +612,10 @@ h2 {
   text-align: center;
   font-weight: 600;
   font-size: 0.85rem;
+}
+.alert-table .last-triggered-cell {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
 }
 .alert-state-cell.inactive {
   background: #e8edef;
