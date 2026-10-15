@@ -546,7 +546,7 @@ function renderDefinitions() {
     `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
-            <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+            <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>Last triggered</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>${visible
           .map((definition) => {
             const { definition: item, occurrence, active, latest } = definition;
@@ -571,6 +571,7 @@ function renderDefinitions() {
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-live-occurrence="${active ? escapeHtml(latest.id) : ""}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
             <td data-label="Age" class="live-age" title="Time since the sensor reading">${escapeHtml(liveAgeText(item))}</td>
+            <td data-label="Last triggered" class="last-triggered-cell">${item.lastFiredAt ? `<time datetime="${escapeHtml(item.lastFiredAt)}">${escapeHtml(formatDate(item.lastFiredAt))}</time>` : '<span class="muted">Never</span>'}</td>
             <td data-label="State" class="alert-state-cell ${escapeHtml(status)}" title="${escapeHtml(statusTitle)}">${escapeHtml(status)}</td>
             <td data-label="Actions" class="action-cell"><div class="table-actions">${active ? occurrenceActions(occurrence) : ""}</div></td>
           </tr>`;

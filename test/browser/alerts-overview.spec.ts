@@ -9,6 +9,9 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
     pathPattern: `notifications.test.overview${index}`,
     sourceType: "recognized",
     metadata: {},
+    ...(index === 0
+      ? { lastFiredAt: "2026-10-12T08:30:00.000Z", fireCount: 1 }
+      : {}),
   }));
   const zone = {
     id: "overview-zone",
@@ -74,7 +77,11 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
     "overview-zone",
   );
   await expect(rows.nth(1).locator(".alert-state-cell")).toHaveText("normal");
+  await expect(rows.nth(1).locator(".last-triggered-cell")).toHaveText("Never");
   await expect(rows.nth(2).locator(".alert-state-cell")).toHaveText("inactive");
+  await expect(
+    rows.nth(2).locator(".last-triggered-cell time"),
+  ).toHaveAttribute("datetime", "2026-10-12T08:30:00.000Z");
   await expect(page.locator("#history-more")).toHaveCount(0);
   await page.locator("#state-filter").selectOption("zones-active");
   await expect(rows).toHaveCount(2);

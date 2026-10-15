@@ -41,6 +41,7 @@ test("uses compact Signal K styling without overflowing the viewport", async ({
     "Alert",
     "Value",
     "Age",
+    "Last triggered",
     "State",
     "Actions",
   ]);

@@ -9,6 +9,11 @@ Versioning while it remains pre-1.0.
 
 Future changes intended for the next release belong here.
 
+### Alert overview
+
+- Restore the **Last triggered** column so each alert definition shows when its
+  most recent occurrence started, or **Never** when it has not fired.
+
 ## [0.3.0] - 2026-10-12
 
 ### Alert overview
