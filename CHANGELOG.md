@@ -5,7 +5,25 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-- Added the persistent Signal K control `digital.alertCenter.quietHours.enabled` to temporarily bypass all saved quiet-hours schedules. The dashboard clearly marks the override and each affected notifier; setting the path back to `true` restores the unchanged schedules.
+Future changes intended for the next release belong here.
+
+## [0.4.0] - 2026-10-15
+
+### Alert overview
+
+- Restore the **Last triggered** column so each alert definition shows when its
+  most recent occurrence started, or **Never** when it has not fired.
+- Add clear spacing between **Last triggered** and the coloured **State** column
+  on desktop and tablet layouts.
+
+### Quiet hours
+
+- Add the persistent Signal K PUT control
+  `digital.alertCenter.quietHours.enabled`. Set it to `false` to bypass every
+  saved per-service quiet-hours schedule and to `true` to restore them without
+  changing their configuration.
+- Clearly mark a disabled quiet-hours override in the dashboard banner,
+  diagnostics, and affected notification-service cards.
 
 ### Snooze safety
 
@@ -15,14 +33,15 @@ Versioning while it remains pre-1.0.
 - Clearly mark an active but bypassed snooze in the dashboard and diagnostics,
   and recommend Signal K Auto State as an optional state provider.
 
-Future changes intended for the next release belong here.
+### Upgrading
 
-### Alert overview
-
-- Restore the **Last triggered** column so each alert definition shows when its
-  most recent occurrence started, or **Never** when it has not fired.
-- Add clear spacing between **Last triggered** and the coloured **State** column
-  on desktop and tablet layouts.
+- No database migration or new dependency is required. Existing installations
+  keep their current behavior because the navigation-state snooze guard is
+  opt-in and quiet hours remain enabled by default.
+- Signal K Auto State is recommended only when the navigation-state guard is
+  enabled and no other source publishes `navigation.state`.
+- Version 0.3.0 can read the same database if a rollback is necessary, but it
+  does not understand the quiet-hours override or navigation-state snooze guard.
 
 ## [0.3.0] - 2026-10-12
 
