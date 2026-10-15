@@ -25,7 +25,7 @@ alert list and history without configuring any notification service.
 [Snooze](#snooze-all-alerts) ·
 [Quiet hours](#quiet-hours-per-notification-service)
 
-![Alert Center showing active alerts and defined zones](./docs/screenshots/alert-center-overview.png)
+![Alert Center showing active alerts, defined zones, and when each alert last triggered](./docs/screenshots/alert-center-overview.png)
 
 ## Why use it?
 
@@ -36,9 +36,10 @@ current value changes:
 - **See what needs attention now.** Active alerts appear first in one compact
   list, followed by configured zones with no active alert (shown as Normal),
   then inactive discovered alerts. All definitions are loaded without a
-  history-based “Load more” button. Choose **Zones and active alerts** to hide
-  inactive discovered alerts. Normal means no active alert has been reported;
-  it does not certify sensor availability or freshness.
+  history-based “Load more” button, and **Last triggered** shows the start of
+  each alert's most recent occurrence. Choose **Zones and active alerts** to
+  hide inactive discovered alerts. Normal means no active alert has been
+  reported; it does not certify sensor availability or freshness.
 - **Keep the full story.** Raises, meaningful updates, clears,
   acknowledgements, silences, and delivery results remain available after a
   restart.
@@ -223,7 +224,7 @@ npm ci
 npm run build
 npm pack
 cd ~/.signalk
-npm install /path/to/signalk-alert-center-0.1.0.tgz
+npm install /path/to/signalk-alert-center-0.4.0.tgz
 ```
 
 Restart Signal K after installation. Docker installations should run the final
