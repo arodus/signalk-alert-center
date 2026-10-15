@@ -617,6 +617,12 @@ h2 {
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
+@media (min-width: 768px) {
+  .alert-table th:nth-child(4),
+  .alert-table td:nth-child(4) {
+    padding-right: 8px;
+  }
+}
 .alert-state-cell.inactive {
   background: #e8edef;
   color: #53646b;

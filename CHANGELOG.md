@@ -21,6 +21,8 @@ Future changes intended for the next release belong here.
 
 - Restore the **Last triggered** column so each alert definition shows when its
   most recent occurrence started, or **Never** when it has not fired.
+- Add clear spacing between **Last triggered** and the coloured **State** column
+  on desktop and tablet layouts.
 
 ## [0.3.0] - 2026-10-12
 
