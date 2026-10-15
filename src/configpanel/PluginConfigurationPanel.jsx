@@ -25,6 +25,7 @@ const tabs = [
 
 const defaults = {
   storage: { path: "alert-center.sqlite" },
+  snooze: { onlyWhenAnchoredOrMoored: false },
   discovery: { zoneRefreshSeconds: 300 },
   ingestion: { queueLimit: 2000, batchSize: 100 },
   delivery: { batchSize: 50, concurrency: 4, requestTimeoutSeconds: 15 },
@@ -451,6 +452,31 @@ function AlertDefaults({ config, update }) {
             />
           )}
         </div>
+      </Card>
+      <Card
+        title="Global snooze safety"
+        help="Optionally prevent global snooze from hiding notifications while the vessel is underway."
+      >
+        <label style={styles.checkLabel}>
+          <input
+            style={styles.checkbox}
+            type="checkbox"
+            checked={config.snooze.onlyWhenAnchoredOrMoored === true}
+            onChange={(event) =>
+              update("snooze", {
+                ...config.snooze,
+                onlyWhenAnchoredOrMoored: event.target.checked,
+              })
+            }
+          />
+          Honor snooze only while anchored or moored
+        </label>
+        <p style={{ ...styles.hint, margin: "10px 0 0" }}>
+          Uses the standard <code>navigation.state</code> value. Any other,
+          missing, or invalid state bypasses snooze. Signal K Auto State is a
+          recommended optional provider; another source can publish the same
+          path.
+        </p>
       </Card>
       {config.notifiers.some((service) => service.type === "wyoming") && (
         <Card

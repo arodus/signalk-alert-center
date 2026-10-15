@@ -497,6 +497,32 @@ export function getAlertCenterOpenApi() {
             startedAt: { type: "string", format: "date-time", nullable: true },
             endsAt: { type: "string", format: "date-time", nullable: true },
             cleanupError: { type: "string" },
+            effective: {
+              type: "boolean",
+              description:
+                "Whether the active snooze is currently suppressing delivery.",
+            },
+            bypassed: {
+              type: "boolean",
+              description:
+                "Whether the active snooze is bypassed by the navigation-state safety setting.",
+            },
+            guardEnabled: { type: "boolean" },
+            bypassReason: {
+              type: "string",
+              enum: [
+                "navigation_state_not_anchored_or_moored",
+                "navigation_state_unavailable",
+              ],
+            },
+            navigationState: {
+              type: "object",
+              properties: {
+                value: { type: "string", nullable: true },
+                source: { type: "string" },
+                updatedAt: { type: "string", format: "date-time" },
+              },
+            },
           },
         },
         QuietHoursControl: {

@@ -1360,6 +1360,11 @@ dialog input[type="checkbox"] {
 .snooze-banner[hidden] {
   display: none;
 }
+.snooze-banner.is-bypassed {
+  border-color: #b42318;
+  background: #fff0ef;
+  color: #4a1714;
+}
 .quiet-hours-override-banner {
   display: flex;
   align-items: baseline;
@@ -1375,6 +1380,11 @@ dialog input[type="checkbox"] {
   display: none;
 }
 @media (prefers-color-scheme: dark) {
+  .snooze-banner.is-bypassed {
+    border-color: #ef8b83;
+    background: #3d1f1d;
+    color: #ffe2df;
+  }
   .quiet-hours-override-banner {
     border-color: #df955f;
     background: #3b2617;

@@ -429,14 +429,48 @@ const snoozePlugins = await json(`${signalkUrl}/skServer/plugins`);
 await json(`${signalkUrl}/skServer/plugins/signalk-alert-center/config`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify(
-    snoozePlugins.find((item) => item.id === "signalk-alert-center").data,
-  ),
+  body: JSON.stringify({
+    ...snoozePlugins.find((item) => item.id === "signalk-alert-center").data,
+    configuration: {
+      ...snoozePlugins.find((item) => item.id === "signalk-alert-center").data
+        .configuration,
+      snooze: { onlyWhenAnchoredOrMoored: true },
+    },
+  }),
 });
 await eventually(
   () => json(snoozeApi),
   (value) => value.active && value.endsAt === snoozeBefore.endsAt,
   "snooze persisted across plugin restart",
+);
+await eventually(
+  () => json(`${signalkUrl}/plugins/signalk-alert-center/status`),
+  (status) =>
+    status.snooze?.active &&
+    status.snooze?.bypassed &&
+    status.snooze?.bypassReason === "navigation_state_unavailable",
+  "missing navigation.state did not safely bypass snooze",
+);
+const bypassedTest = await fetch(
+  `${signalkUrl}/plugins/signalk-alert-center/notifiers/${encodeURIComponent("Acceptance ntfy")}/test`,
+  {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ operation: "send" }),
+  },
+);
+assert.equal(bypassedTest.status, 200);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/reading`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ path: "navigation.state", value: "anchored" }),
+});
+await eventually(
+  () => json(`${signalkUrl}/plugins/signalk-alert-center/status`),
+  (status) =>
+    status.snooze?.effective &&
+    status.snooze?.navigationState?.value === "anchored",
+  "anchored navigation.state did not make snooze effective",
 );
 const snoozedTest = await fetch(
   `${signalkUrl}/plugins/signalk-alert-center/notifiers/${encodeURIComponent("Acceptance ntfy")}/test`,
@@ -447,6 +481,18 @@ const snoozedTest = await fetch(
   },
 );
 assert.equal(snoozedTest.status, 409);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/reading`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ path: "navigation.state", value: "sailing" }),
+});
+await eventually(
+  () => json(`${signalkUrl}/plugins/signalk-alert-center/status`),
+  (status) =>
+    status.snooze?.bypassed &&
+    status.snooze?.navigationState?.value === "sailing",
+  "underway navigation.state did not bypass snooze",
+);
 await putSnooze("active", false);
 assert.equal((await json(snoozeApi)).active, false);
 await json(snoozeApi, {
