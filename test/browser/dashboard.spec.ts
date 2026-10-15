@@ -45,11 +45,23 @@ test("uses compact Signal K styling without overflowing the viewport", async ({
     "State",
     "Actions",
   ]);
+  await expect(page.locator(".alert-table th").nth(3)).toHaveCSS(
+    "padding-right",
+    "8px",
+  );
+  await expect(page.locator(".last-triggered-cell").first()).toHaveCSS(
+    "padding-right",
+    "8px",
+  );
   await page.screenshot({
     path: `test-results/native-ui-${test.info().project.name}.png`,
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".last-triggered-cell").first()).toHaveCSS(
+    "padding-right",
+    "0px",
+  );
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
