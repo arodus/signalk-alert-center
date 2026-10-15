@@ -74,6 +74,19 @@ describe("validateConfig", () => {
     ).toBe("https://www.gstatic.com/generate_204");
   });
 
+  it("keeps navigation-aware snooze opt-in and validates its setting", () => {
+    const snooze = pluginConfigSchema.properties.snooze;
+    expect(snooze.properties.onlyWhenAnchoredOrMoored.default).toBe(false);
+    expect(() =>
+      validateConfig({ snooze: { onlyWhenAnchoredOrMoored: true } }),
+    ).not.toThrow();
+    expect(() =>
+      validateConfig({
+        snooze: { onlyWhenAnchoredOrMoored: "yes" as never },
+      }),
+    ).toThrow("snooze.onlyWhenAnchoredOrMoored must be boolean");
+  });
+
   it("describes connectivity policy using user-facing actions", () => {
     const defaultConnectivity =
       pluginConfigSchema.properties.defaults.properties.connectivity;

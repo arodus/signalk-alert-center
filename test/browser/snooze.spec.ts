@@ -36,3 +36,48 @@ test("global snooze dialog, persistent banner, cancellation and expiry", async (
   await expect(page.locator("#snooze-banner")).toBeVisible();
   await expect(page.locator("#snooze-banner")).toBeHidden({ timeout: 10000 });
 });
+
+test("clearly marks snooze as bypassed while underway", async ({
+  page,
+  request,
+}) => {
+  await request.delete(`${api}/snooze`);
+  await request.post(`${api}/snooze`, { data: { durationSeconds: 900 } });
+  await page.route(`**${api}/status`, async (route) => {
+    const response = await route.fetch();
+    const status = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...status,
+        snooze: {
+          ...status.snooze,
+          effective: false,
+          bypassed: true,
+          guardEnabled: true,
+          bypassReason: "navigation_state_not_anchored_or_moored",
+          navigationState: { value: "sailing" },
+        },
+      },
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#snooze-banner")).toHaveClass(/is-bypassed/);
+  await expect(page.locator("#snooze-summary")).toContainText(
+    "Snooze active but bypassed",
+  );
+  await expect(page.locator("#snooze-summary")).toContainText(
+    "navigation.state is sailing",
+  );
+  await page.locator(".system-diagnostics summary").click();
+  await expect(page.locator("#diagnostics-list")).toContainText(
+    "Snooze navigation guard",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await request.delete(`${api}/snooze`);
+});

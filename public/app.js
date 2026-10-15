@@ -154,7 +154,13 @@ function renderDiagnostics(status) {
   const items = [
     [
       "Global snooze",
-      `${status.snooze?.active ? `Until ${formatDate(status.snooze.endsAt)}` : "Off"}${status.snooze?.cleanupError ? ` · ${status.snooze.cleanupError}` : ""}`,
+      `${status.snooze?.active ? `Until ${formatDate(status.snooze.endsAt)}${status.snooze.bypassed ? " · BYPASSED" : ""}` : "Off"}${status.snooze?.cleanupError ? ` · ${status.snooze.cleanupError}` : ""}`,
+    ],
+    [
+      "Snooze navigation guard",
+      status.snooze?.guardEnabled
+        ? `${status.snooze.navigationState?.value ?? "State unavailable"}${status.snooze.navigationState?.updatedAt ? ` · updated ${formatDate(status.snooze.navigationState.updatedAt)}` : ""}`
+        : "Disabled",
     ],
     [
       "Quiet hours schedules",
@@ -1625,8 +1631,11 @@ function renderSnooze() {
     0,
     Math.ceil((Date.parse(snooze.endsAt) - Date.now()) / 1000),
   );
-  $("#snooze-summary").textContent =
-    `All notifications snoozed until ${formatDate(snooze.endsAt)} · ${Math.floor(remaining / 60)}m ${remaining % 60}s remaining`;
+  const stateName = snooze.navigationState?.value;
+  $("#snooze-banner").classList.toggle("is-bypassed", snooze.bypassed === true);
+  $("#snooze-summary").textContent = snooze.bypassed
+    ? `Snooze active but bypassed: ${stateName ? `navigation.state is ${stateName}` : "navigation.state is unavailable"}. Notifications continue until the vessel is anchored or moored. Snooze ends ${formatDate(snooze.endsAt)}.`
+    : `All notifications snoozed until ${formatDate(snooze.endsAt)} · ${Math.floor(remaining / 60)}m ${remaining % 60}s remaining${snooze.guardEnabled ? ` · navigation.state is ${stateName}` : ""}`;
   $("#snooze-cleanup").textContent = snooze.cleanupError ?? "";
 }
 function renderQuietHoursOverride() {

@@ -312,6 +312,19 @@ readings remain visible and history continues. The deadline survives restarts;
 **End snooze now** resumes scheduling immediately. Snooze is separate from
 per-occurrence Acknowledge and Silence and does not change Signal K alert state.
 
+For underway safety, enable **Plugin settings → Alert defaults → Honor snooze
+only while anchored or moored**. The saved snooze deadline remains active, but
+Alert Center suppresses delivery only while the standard `navigation.state`
+value is `anchored` or `moored`. Any other, missing, or invalid value bypasses
+snooze and the dashboard clearly marks that notifications continue. Changing
+back to `anchored` or `moored` reapplies the remaining snooze time.
+
+[`signalk-autostate`](https://github.com/meri-imperiumi/signalk-autostate) is a
+recommended optional companion package that can publish `navigation.state`.
+It is not a dependency: a manual value or another Signal K source works as
+well. Check Auto State's detection settings against the vessel before relying
+on them; Alert Center deliberately fails open when the state is unavailable.
+
 Queued or playing Wyoming announcements belonging to Alert Center are cancelled
 through its announcement cancellation API. An older Wyoming version without that
 capability blocks new announcements but may finish audio already queued; the
@@ -335,7 +348,8 @@ Authenticated controls share the same persisted state:
   duration at the last state change, not a ticking countdown.
 - Read-only `digital.alertCenter.snooze.startedAt` and `.endsAt` publish ISO
   timestamps or `null`. These are plugin-specific paths. Ordinary deltas never
-  invoke commands. Manual service tests are blocked during snooze.
+  invoke commands. Manual service tests are blocked only while snooze is
+  effective; they remain available when the navigation-state guard bypasses it.
 
 ## Quiet hours per notification service
 

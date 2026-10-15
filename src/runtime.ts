@@ -43,6 +43,12 @@ import { createInternetProbe } from "./connectivity/internet";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { DeliveryScheduler } from "./delivery/scheduler";
 import { ServerDisplayUnits } from "./signalk/display-units";
+import {
+  extractNavigationState,
+  isAnchoredOrMoored,
+  NavigationStateObservation,
+  navigationStateSnapshot,
+} from "./signalk/navigation-state";
 import { captureMessageSample } from "./signalk/message-sample";
 import {
   extractNotificationEntries,
@@ -125,6 +131,8 @@ export class AlertCenterRuntime {
   private stopping = false;
   private suppression?: SuppressionStore;
   private suppressionTimer?: ReturnType<typeof setTimeout>;
+  private navigationState?: NavigationStateObservation;
+  private lastSnoozeEffectiveness?: string;
   private readonly manualAnnouncements = new Map<string, string>();
   private readonly quietHoursClock = new QuietHoursClock();
   private startCount = 0;
@@ -251,9 +259,10 @@ export class AlertCenterRuntime {
       : degradedReasons.length
         ? { state: "degraded" as const, reasons: degradedReasons }
         : { state: "healthy" as const, reasons: [] as string[] };
+    const snooze = this.snoozeStatus();
     return {
       health,
-      snooze: this.suppression?.getSnooze(),
+      snooze,
       quietHours: this.suppression?.getQuietHoursControl() ?? {
         enabled: true,
       },
@@ -427,9 +436,9 @@ export class AlertCenterRuntime {
     delivery?: DeliveryRecord,
     manualService?: string,
   ): SuppressionReason | undefined {
-    const snooze = this.suppression?.getSnooze();
+    const snooze = this.snoozeStatus();
     // Expiry is reconciled before removing the guard, including at startup.
-    if (snooze?.active)
+    if (snooze?.effective)
       return {
         reason: "snooze",
         startedAt: snooze.startedAt!,
@@ -480,6 +489,65 @@ export class AlertCenterRuntime {
         endsAt: window.endsAt!,
       };
     return undefined;
+  }
+
+  private snoozeStatus() {
+    const snooze = this.suppression?.getSnooze();
+    if (!snooze) return undefined;
+    const guardEnabled = this.config.snooze?.onlyWhenAnchoredOrMoored === true;
+    const permitted = !guardEnabled || isAnchoredOrMoored(this.navigationState);
+    const bypassReason = !guardEnabled
+      ? undefined
+      : this.navigationState?.value
+        ? "navigation_state_not_anchored_or_moored"
+        : "navigation_state_unavailable";
+    return {
+      ...snooze,
+      effective: snooze.active && permitted,
+      bypassed: snooze.active && !permitted,
+      guardEnabled,
+      ...(snooze.active && !permitted ? { bypassReason } : {}),
+      ...(guardEnabled
+        ? {
+            navigationState: this.navigationState ?? {
+              value: null,
+            },
+          }
+        : {}),
+    };
+  }
+
+  private recordSnoozeEffectiveness(): void {
+    const snooze = this.snoozeStatus();
+    if (!snooze?.active || !snooze.guardEnabled) {
+      this.lastSnoozeEffectiveness = undefined;
+      return;
+    }
+    const fingerprint = JSON.stringify({
+      effective: snooze.effective,
+      state: snooze.navigationState?.value,
+      reason: snooze.bypassReason,
+    });
+    if (fingerprint === this.lastSnoozeEffectiveness) return;
+    this.lastSnoozeEffectiveness = fingerprint;
+    this.suppression?.audit("snooze_effectiveness_changed", {
+      effective: snooze.effective,
+      navigationState: snooze.navigationState,
+      reason: snooze.bypassReason,
+    });
+  }
+
+  private updateNavigationState(observation: NavigationStateObservation): void {
+    const previous = this.navigationState;
+    this.navigationState = observation;
+    if (previous?.value === observation.value) return;
+    this.debug(
+      `Navigation state changed: ${previous?.value ?? "unavailable"} -> ${observation.value ?? "unavailable"}`,
+    );
+    this.reconcileSuppression();
+    this.scheduleNextWake();
+    this.requestDeliveryRun();
+    this.emitChange("snooze");
   }
 
   private effectiveQuietWindow(
@@ -589,6 +657,7 @@ export class AlertCenterRuntime {
 
   private reconcileSuppression(): void {
     if (!this.database || !this.suppression) return;
+    this.recordSnoozeEffectiveness();
     this.suppression.reconcile(
       (delivery) => this.suppressionReason(delivery),
       new Date(),
@@ -1503,6 +1572,14 @@ export class AlertCenterRuntime {
       `Starting: configuredServices=${options.notifiers?.length ?? 0}, deliveryBatchSize=${options.delivery?.batchSize ?? 50}, deliveryConcurrency=${options.delivery?.concurrency ?? 4}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
     );
     this.config = options;
+    this.navigationState = undefined;
+    this.lastSnoozeEffectiveness = undefined;
+    if (options.snooze?.onlyWhenAnchoredOrMoored) {
+      const snapshot = navigationStateSnapshot(
+        this.app.getSelfPath?.("navigation.state" as Path),
+      );
+      if (snapshot) this.navigationState = snapshot;
+    }
     this.serviceHealthFingerprints.clear();
     this.database = new AlertDatabase(this.databasePath(options));
     this.suppression = new SuppressionStore(this.database);
@@ -1732,15 +1809,23 @@ export class AlertCenterRuntime {
 
     const handler = (delta: unknown): void => {
       if (generation !== this.runtimeGeneration || this.stopping) return;
+      const navigationState = extractNavigationState(delta);
+      if (navigationState) this.updateNavigationState(navigationState);
       const entries = extractNotificationEntries(delta);
       this.enqueueNotifications(entries);
     };
+    const subscriptions = [
+      { path: "notifications.*" as Path, policy: "instant" as const },
+      ...(options.snooze?.onlyWhenAnchoredOrMoored
+        ? [{ path: "navigation.state" as Path, policy: "instant" as const }]
+        : []),
+    ];
     const unsubscribes: Array<() => void> = [];
     this.app.subscriptionmanager.subscribe(
       {
         context: "vessels.self" as Context,
         sourcePolicy: "all",
-        subscribe: [{ path: "notifications.*" as Path, policy: "instant" }],
+        subscribe: subscriptions,
       },
       unsubscribes,
       (error: unknown) =>
@@ -1971,6 +2056,8 @@ export class AlertCenterRuntime {
     this.database?.close();
     this.database = undefined;
     this.suppression = undefined;
+    this.navigationState = undefined;
+    this.lastSnoozeEffectiveness = undefined;
     this.manualAnnouncements.clear();
     this.quietHoursClock.clear();
     this.changeListeners.clear();

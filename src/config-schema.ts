@@ -123,6 +123,21 @@ export const pluginConfigSchema = {
         },
       },
     },
+    snooze: {
+      type: "object",
+      title: "Global snooze safety",
+      description:
+        "Optionally use the vessel's standard navigation.state value to prevent global snooze from hiding notifications while underway.",
+      properties: {
+        onlyWhenAnchoredOrMoored: {
+          type: "boolean",
+          title: "Honor snooze only while anchored or moored",
+          description:
+            "When enabled, an active snooze suppresses delivery only while navigation.state is anchored or moored. Any other, missing, or invalid state bypasses snooze. Install Signal K Auto State or provide navigation.state another way.",
+          default: false,
+        },
+      },
+    },
     discovery: {
       type: "object",
       title: "Definition discovery",

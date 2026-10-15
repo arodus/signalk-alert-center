@@ -55,6 +55,7 @@ export type NotifierConfig =
 export interface PluginConfig {
   storage?: { path?: string };
   maintenance?: { resetDatabase?: boolean };
+  snooze?: { onlyWhenAnchoredOrMoored?: boolean };
   discovery?: { zoneRefreshSeconds?: number };
   ingestion?: {
     queueLimit?: number;
@@ -135,6 +136,11 @@ export function migrateLegacyRepeatConfig(
 }
 
 export function validateConfig(config: PluginConfig): void {
+  if (
+    config.snooze?.onlyWhenAnchoredOrMoored !== undefined &&
+    typeof config.snooze.onlyWhenAnchoredOrMoored !== "boolean"
+  )
+    throw new Error("snooze.onlyWhenAnchoredOrMoored must be boolean");
   if (config.notifiers !== undefined && !Array.isArray(config.notifiers))
     throw new Error(
       "Notification services must be configured as a list; open the plugin settings and add each service by name",

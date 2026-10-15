@@ -7,6 +7,14 @@ Versioning while it remains pre-1.0.
 
 - Added the persistent Signal K control `digital.alertCenter.quietHours.enabled` to temporarily bypass all saved quiet-hours schedules. The dashboard clearly marks the override and each affected notifier; setting the path back to `true` restores the unchanged schedules.
 
+### Snooze safety
+
+- Add an opt-in setting that honors global snooze only while the standard
+  `navigation.state` value is `anchored` or `moored`. Underway, missing, and
+  invalid states bypass snooze without changing its saved deadline.
+- Clearly mark an active but bypassed snooze in the dashboard and diagnostics,
+  and recommend Signal K Auto State as an optional state provider.
+
 Future changes intended for the next release belong here.
 
 ### Alert overview

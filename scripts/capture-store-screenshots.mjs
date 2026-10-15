@@ -112,6 +112,7 @@ try {
   const baseConfiguration = plugin?.data?.configuration ?? {};
   await configure({
     ...baseConfiguration,
+    snooze: { onlyWhenAnchoredOrMoored: true },
     defaults: {
       enabled: true,
       minSeverity: "warn",
@@ -140,6 +141,11 @@ try {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ value: 282.95 }),
+  });
+  await json("/plugins/signalk-test-fixture/reading", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: "navigation.state", value: "sailing" }),
   });
   await json("/plugins/signalk-test-fixture/seed", { method: "POST" });
   await eventually(
@@ -216,6 +222,7 @@ try {
 
   await configure({
     ...baseConfiguration,
+    snooze: { onlyWhenAnchoredOrMoored: true },
     defaults: {
       enabled: true,
       minSeverity: "warn",
