@@ -255,6 +255,57 @@ it("never wakes connectivity for an alert whose remote services are all quiet", 
   await runtime.stop();
 });
 
+it("releases quiet work while the durable global override is disabled", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  vi.setSystemTime(new Date("2026-01-01T23:00:00Z"));
+  const db = new AlertDatabase();
+  const store = new SuppressionStore(db);
+  const app = {
+    handleMessage: vi.fn(),
+    setPluginStatus: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn(),
+  } as unknown as ServerAPI;
+  const runtime = new AlertCenterRuntime(app);
+  const internal = runtime as unknown as {
+    database: AlertDatabase;
+    suppression: SuppressionStore;
+    config: unknown;
+    reconcileSuppression(): void;
+  };
+  internal.database = db;
+  internal.suppression = store;
+  internal.config = {
+    notifiers: [{ name: "phone", type: "ntfy", quietHours: schedule }],
+  };
+  const alert = db.ingest(
+    {
+      sourceKey: "notifications.override",
+      path: "notifications.override",
+      severity: "warn",
+      state: "active",
+    },
+    ["phone"],
+    new Date(),
+  )!;
+  internal.reconcileSuppression();
+  expect(db.listDeliveriesForAlert(alert.id)[0].state).toBe("paused");
+  runtime.setQuietHoursEnabled(false);
+  expect(db.listDeliveriesForAlert(alert.id)[0].state).toBe("pending");
+  expect(runtime.status().quietHours).toMatchObject({ enabled: false });
+  expect(runtime.status().services[0].quietHours).toMatchObject({
+    active: false,
+    suspended: true,
+  });
+  runtime.setQuietHoursEnabled(true);
+  expect(db.listDeliveriesForAlert(alert.id)[0].state).toBe("paused");
+  expect(app.handleMessage).toHaveBeenCalledWith(
+    "signalk-alert-center",
+    expect.objectContaining({ updates: expect.any(Array) }),
+  );
+  await runtime.stop();
+});
+
 it("automatically releases active work at the scheduled boundary and audits once", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   vi.setSystemTime(new Date("2026-01-02T05:59:00Z"));

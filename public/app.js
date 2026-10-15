@@ -157,6 +157,12 @@ function renderDiagnostics(status) {
       `${status.snooze?.active ? `Until ${formatDate(status.snooze.endsAt)}` : "Off"}${status.snooze?.cleanupError ? ` · ${status.snooze.cleanupError}` : ""}`,
     ],
     [
+      "Quiet hours schedules",
+      status.quietHours?.enabled === false
+        ? "Disabled by Signal K control"
+        : "Enabled",
+    ],
+    [
       "Last suppression event",
       status.suppressionEvents?.[0]
         ? `${status.suppressionEvents[0].event} · ${formatDate(status.suppressionEvents[0].at)}`
@@ -192,7 +198,7 @@ function renderDiagnostics(status) {
     ],
     ...services.map((service) => [
       `Service: ${service.name}`,
-      `${service.enabled ? "Enabled" : "Disabled"}${service.quietHours?.enabled ? ` · Quiet hours ${service.quietHours.active ? `active: ${service.quietHours.minimumSeverity} and above` : "scheduled"} (${service.quietHours.timeZone}) · next change ${formatDate(service.quietHours.nextChangeAt)}` : ""} · ${service.pendingCount} pending · last success ${formatDate(service.lastSuccessAt)} · last failure ${formatDate(service.lastFailureAt)}${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
+      `${service.enabled ? "Enabled" : "Disabled"}${service.quietHours?.enabled ? ` · Quiet hours ${service.quietHours.suspended ? "overridden by Signal K control" : service.quietHours.active ? `active: ${service.quietHours.minimumSeverity} and above` : "scheduled"} (${service.quietHours.timeZone})${service.quietHours.suspended ? "" : ` · next change ${formatDate(service.quietHours.nextChangeAt)}`}` : ""} · ${service.pendingCount} pending · last success ${formatDate(service.lastSuccessAt)} · last failure ${formatDate(service.lastFailureAt)}${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
     ]),
   ];
   if (reasons.length) items.unshift(["Health reason", reasons.join(" · ")]);
@@ -228,7 +234,7 @@ function renderNotifierTests(services) {
         ? `<p class="service-test-result ${escapeHtml(result.status)}" role="status">${escapeHtml(result.message)}${result.technicalDetail ? ` <small>${escapeHtml(result.technicalDetail)}</small>` : ""}</p>`
         : `<p class="service-test-result" role="status">${service.enabled === false ? "Enable and save this service before testing it." : "Not tested in this session."}</p>`;
       const quiet = service.quietHours?.enabled
-        ? `<p class="service-quiet-hours">Quiet hours ${service.quietHours.active ? `active · ${escapeHtml(service.quietHours.minimumSeverity)} and above` : "scheduled"} · ${escapeHtml(service.quietHours.timeZone)} · next change ${escapeHtml(formatDate(service.quietHours.nextChangeAt))}</p>`
+        ? `<p class="service-quiet-hours">Quiet hours ${service.quietHours.suspended ? "overridden by Signal K control" : service.quietHours.active ? `active · ${escapeHtml(service.quietHours.minimumSeverity)} and above` : "scheduled"} · ${escapeHtml(service.quietHours.timeZone)}${service.quietHours.suspended ? "" : ` · next change ${escapeHtml(formatDate(service.quietHours.nextChangeAt))}`}</p>`
         : "";
       return `<article class="service-test-card"><div><strong>${escapeHtml(service.name ?? id)}</strong><span>${escapeHtml(service.type ?? "unknown")} · ${service.enabled === false ? "disabled" : "enabled"}</span></div><div class="service-test-actions">${buttons}</div>${quiet}${outcome}</article>`;
     })
@@ -899,6 +905,7 @@ async function load(preserveLoadedHistory = false) {
     state.lastStatus = status;
     renderDiagnostics(status);
     renderSnooze();
+    renderQuietHoursOverride();
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     renderDefinitions();
     renderAlertHistory();
@@ -1621,6 +1628,10 @@ function renderSnooze() {
   $("#snooze-summary").textContent =
     `All notifications snoozed until ${formatDate(snooze.endsAt)} · ${Math.floor(remaining / 60)}m ${remaining % 60}s remaining`;
   $("#snooze-cleanup").textContent = snooze.cleanupError ?? "";
+}
+function renderQuietHoursOverride() {
+  $("#quiet-hours-override-banner").hidden =
+    state.lastStatus?.quietHours?.enabled !== false;
 }
 setInterval(renderSnooze, 1000);
 $("#snooze-open").addEventListener("click", () => {

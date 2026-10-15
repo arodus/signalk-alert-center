@@ -1360,6 +1360,27 @@ dialog input[type="checkbox"] {
 .snooze-banner[hidden] {
   display: none;
 }
+.quiet-hours-override-banner {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  margin: 12px 0;
+  border: 1px solid #b65f1d;
+  background: #fff0df;
+  color: #402000;
+}
+.quiet-hours-override-banner[hidden] {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  .quiet-hours-override-banner {
+    border-color: #df955f;
+    background: #3b2617;
+    color: #ffe3cb;
+  }
+}
 #snooze-dialog {
   max-width: min(32rem, 90vw);
 }

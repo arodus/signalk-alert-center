@@ -1,6 +1,10 @@
 import { QuietHoursClock } from "./suppression/quiet-hours";
 import { SuppressionStore, SuppressionReason } from "./suppression/store";
 import { publishSnooze, registerSnoozePuts } from "./signalk/snooze";
+import {
+  publishQuietHoursControl,
+  registerQuietHoursPut,
+} from "./signalk/quiet-hours";
 import path from "node:path";
 import {
   Context,
@@ -200,10 +204,7 @@ export class AlertCenterRuntime {
         name: notifier.name,
         type: notifier.type,
         enabled: notifier.enabled !== false,
-        quietHours: this.quietHoursClock.window(
-          notifier.name,
-          notifier.quietHours,
-        ),
+        quietHours: this.effectiveQuietWindow(notifier),
         pendingCount: service?.pendingCount ?? 0,
         retryingFailureCount: service?.retryingFailureCount ?? 0,
         terminalFailureCount: service?.terminalFailureCount ?? 0,
@@ -253,6 +254,9 @@ export class AlertCenterRuntime {
     return {
       health,
       snooze: this.suppression?.getSnooze(),
+      quietHours: this.suppression?.getQuietHoursControl() ?? {
+        enabled: true,
+      },
       suppressionEvents: this.suppression?.events() ?? [],
       runtime: {
         generation: this.runtimeGeneration,
@@ -463,6 +467,8 @@ export class AlertCenterRuntime {
       (operation === "resolve" || operation === "acknowledge")
     )
       return undefined;
+    if (this.suppression?.getQuietHoursControl().enabled === false)
+      return undefined;
     const window = this.quietHoursClock.window(serviceId, service.quietHours);
     if (
       window.active &&
@@ -474,6 +480,27 @@ export class AlertCenterRuntime {
         endsAt: window.endsAt!,
       };
     return undefined;
+  }
+
+  private effectiveQuietWindow(
+    service: Pick<NotifierConfig, "name" | "quietHours">,
+  ) {
+    const window = this.quietHoursClock.window(
+      service.name,
+      service.quietHours,
+    );
+    if (
+      !window.enabled ||
+      this.suppression?.getQuietHoursControl().enabled !== false
+    )
+      return window;
+    return {
+      ...window,
+      active: false,
+      suspended: true,
+      startedAt: undefined,
+      endsAt: undefined,
+    };
   }
 
   private canWakeForAlert(id: string): boolean {
@@ -589,6 +616,7 @@ export class AlertCenterRuntime {
     const boundaries: number[] = snooze.active
       ? [Date.parse(snooze.endsAt!)]
       : [];
+    const quietHoursEnabled = this.suppression.getQuietHoursControl().enabled;
     for (const service of this.config.notifiers ?? []) {
       if (service.enabled === false) continue;
       const window = this.quietHoursClock.window(
@@ -596,7 +624,8 @@ export class AlertCenterRuntime {
         service.quietHours,
       );
       this.suppression.recordQuietWindow(service.name, window);
-      if (window.nextChangeAt) boundaries.push(Date.parse(window.nextChangeAt));
+      if (quietHoursEnabled && window.nextChangeAt)
+        boundaries.push(Date.parse(window.nextChangeAt));
     }
     if (boundaries.length)
       this.suppressionTimer = setTimeout(
@@ -629,6 +658,20 @@ export class AlertCenterRuntime {
       `Snooze ${seconds ? "started/replaced" : "ended"}: source=${source}, seconds=${seconds}`,
     );
     this.emitChange("snooze");
+  }
+
+  setQuietHoursEnabled(enabled: boolean, source = "signalk-put"): void {
+    if (!this.suppression || !this.database)
+      throw new Error("Plugin is not started");
+    this.suppression.setQuietHoursEnabled(enabled, source);
+    this.reconcileSuppression();
+    this.scheduleNextWake();
+    this.requestDeliveryRun();
+    publishQuietHoursControl(this.app, this.suppression.getQuietHoursControl());
+    this.debug(
+      `Quiet hours schedules ${enabled ? "enabled" : "disabled"}: source=${source}`,
+    );
+    this.emitChange("quiet_hours");
   }
 
   private async runScheduler(): Promise<void> {
@@ -1675,7 +1718,14 @@ export class AlertCenterRuntime {
         () => this.suppression!.getSnooze(),
         (seconds, source) => this.setSnooze(seconds, source),
       );
+    if (typeof this.app.registerPutHandler === "function")
+      registerQuietHoursPut(
+        this.app,
+        () => this.suppression!.getQuietHoursControl(),
+        (enabled, source) => this.setQuietHoursEnabled(enabled, source),
+      );
     publishSnooze(this.app, this.suppression.getSnooze());
+    publishQuietHoursControl(this.app, this.suppression.getQuietHoursControl());
     this.scheduleNextWake();
     this.database.processDueActivations();
     this.scheduleNextActivation();
@@ -1784,10 +1834,7 @@ export class AlertCenterRuntime {
             name: notifier.name,
             type: notifier.type,
             enabled: true,
-            quietHours: this.quietHoursClock.window(
-              notifier.name,
-              notifier.quietHours,
-            ),
+            quietHours: this.effectiveQuietWindow(notifier),
             minimumSeverity: notifier.minSeverity ?? "normal",
             repeatIntervalSeconds: notifier.repeatIntervalSeconds ?? 0,
           })),

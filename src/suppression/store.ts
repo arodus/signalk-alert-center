@@ -9,6 +9,11 @@ export interface SnoozeState {
   endsAt: string | null;
   cleanupError?: string;
 }
+export interface QuietHoursControl {
+  enabled: boolean;
+  updatedAt?: string;
+  source?: string;
+}
 export interface SuppressionReason {
   reason: string;
   startedAt: string;
@@ -75,6 +80,45 @@ export class SuppressionStore {
     if (current.cleanupError === message) return;
     this.save({ ...current, cleanupError: message });
     if (message) this.audit("audio_cleanup_failed", { message });
+  }
+  getQuietHoursControl(): QuietHoursControl {
+    const row = this.database.db
+      .prepare(
+        "SELECT value FROM notification_controls WHERE key='quiet-hours-enabled'",
+      )
+      .get() as Row | undefined;
+    return row
+      ? (JSON.parse(String(row.value)) as QuietHoursControl)
+      : { enabled: true };
+  }
+  setQuietHoursEnabled(
+    enabled: boolean,
+    source: string,
+    now = new Date(),
+  ): QuietHoursControl {
+    const previous = this.getQuietHoursControl();
+    if (previous.enabled === enabled) return previous;
+    const state = { enabled, updatedAt: now.toISOString(), source };
+    this.database.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.db
+        .prepare(
+          "INSERT INTO notification_controls(key,value) VALUES ('quiet-hours-enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        )
+        .run(JSON.stringify(state));
+      this.audit(
+        enabled
+          ? "quiet_hours_override_enabled"
+          : "quiet_hours_override_disabled",
+        { source, previous, state },
+        now,
+      );
+      this.database.db.exec("COMMIT");
+    } catch (error) {
+      this.database.db.exec("ROLLBACK");
+      throw error;
+    }
+    return state;
   }
   private save(state: SnoozeState): void {
     this.database.db

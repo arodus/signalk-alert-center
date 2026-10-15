@@ -3,6 +3,7 @@ import { AlertDatabase } from "../src/storage/db";
 import { SuppressionStore, snoozeSeconds } from "../src/suppression/store";
 import { DeliveryScheduler } from "../src/delivery/scheduler";
 import { registerSnoozePuts } from "../src/signalk/snooze";
+import { registerQuietHoursPut } from "../src/signalk/quiet-hours";
 import { ServerAPI, ActionHandler } from "@signalk/server-api";
 
 const start = new Date("2026-10-09T00:00:00Z");
@@ -229,6 +230,63 @@ describe("snooze database restart", () => {
       expect(store.getSnooze()).toEqual(state);
       expect(db.getAlert(alert.id).currentState).toBe("active");
       expect(db.listDueDeliveries(later)).toEqual([]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("quiet-hours Signal K control", () => {
+  it("validates boolean PUTs and is idempotent", () => {
+    const handlers = new Map<string, ActionHandler>();
+    const db = new AlertDatabase();
+    const store = new SuppressionStore(db);
+    registerQuietHoursPut(
+      {
+        registerPutHandler: (_c: string, p: string, h: ActionHandler) =>
+          handlers.set(p, h),
+      } as ServerAPI,
+      () => store.getQuietHoursControl(),
+      (enabled, source) => store.setQuietHoursEnabled(enabled, source, start),
+    );
+    const put = (value: unknown) =>
+      handlers.get("digital.alertCenter.quietHours.enabled")!(
+        "vessels.self",
+        "",
+        value,
+        () => {},
+      );
+    expect(store.getQuietHoursControl()).toEqual({ enabled: true });
+    expect(put(false)).toMatchObject({ statusCode: 200 });
+    expect(store.getQuietHoursControl()).toMatchObject({
+      enabled: false,
+      source: "signalk-put",
+    });
+    expect(put(false)).toMatchObject({ statusCode: 200 });
+    expect(store.events()).toHaveLength(1);
+    expect(put("false")).toMatchObject({ statusCode: 400 });
+    expect(put(true)).toMatchObject({ statusCode: 200 });
+    expect(store.getQuietHoursControl()).toMatchObject({ enabled: true });
+    expect(store.events()).toHaveLength(2);
+    db.close();
+  });
+
+  it("persists the override across a database restart", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "quiet-hours-control-"));
+    const file = join(dir, "state.sqlite");
+    try {
+      let db = new AlertDatabase(file);
+      new SuppressionStore(db).setQuietHoursEnabled(false, "test", start);
+      db.close();
+      db = new AlertDatabase(file);
+      expect(new SuppressionStore(db).getQuietHoursControl()).toMatchObject({
+        enabled: false,
+        source: "test",
+      });
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
