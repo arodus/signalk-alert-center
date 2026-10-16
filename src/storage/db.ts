@@ -381,16 +381,20 @@ export class AlertDatabase {
         .get() as Row;
       const serviceRows = this.db
         .prepare(
-          `SELECT transport_instance_id,
-             SUM(CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused') THEN 1 ELSE 0 END) AS pending,
+          `SELECT d.transport_instance_id,
+             SUM(CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused') THEN 1 ELSE 0 END) AS pending,
              SUM(CASE
-               WHEN state='failed_retryable'
-                 OR (state IN ('pending', 'waiting_connectivity', 'sending') AND attempt_count > 0)
+               WHEN d.state='failed_retryable'
+                 OR (d.state IN ('pending', 'waiting_connectivity', 'sending') AND EXISTS (
+                   SELECT 1 FROM delivery_attempts a
+                   WHERE a.delivery_id=d.id
+                     AND a.outcome IN ('failed_retryable', 'failed_terminal', 'interrupted')
+                 ))
                THEN 1 ELSE 0 END) AS retrying_failures,
-             SUM(CASE WHEN state='failed_terminal' THEN 1 ELSE 0 END) AS terminal_failures,
-             MAX(delivered_at) AS last_success
-           FROM deliveries GROUP BY transport_instance_id
-           ORDER BY transport_instance_id`,
+             SUM(CASE WHEN d.state='failed_terminal' THEN 1 ELSE 0 END) AS terminal_failures,
+             MAX(d.delivered_at) AS last_success
+           FROM deliveries d GROUP BY d.transport_instance_id
+           ORDER BY d.transport_instance_id`,
         )
         .all() as Row[];
       const lastFailure = this.db.prepare(

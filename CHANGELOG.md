@@ -5,6 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Prevent in-progress first delivery attempts from briefly publishing a false
+  notification-service failure followed by an immediate recovery. Service
+  health now changes to failed only after an attempt records a real failure.
+
 Future changes intended for the next release belong here.
 
 ## [0.4.0] - 2026-10-15
