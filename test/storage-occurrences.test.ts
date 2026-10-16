@@ -1596,6 +1596,53 @@ describe("occurrence storage", () => {
     expect(db.retryDelivery("missing")).toBe("not_found");
   });
 
+  it("reports a service failure only after an attempt actually fails", () => {
+    const db = database();
+    db.ingest(active({ sourceKey: "health-in-flight" }), ["wyoming"]);
+    const delivery = db.listDeliveries()[0];
+
+    expect(db.claimDelivery(delivery.id)).toBe(true);
+    expect(db.operationalStatus().services).toContainEqual(
+      expect.objectContaining({
+        id: "wyoming",
+        pendingCount: 1,
+        retryingFailureCount: 0,
+      }),
+    );
+
+    db.recordDeliveryFailure(
+      delivery.id,
+      "WYOMING_ERROR",
+      "Satellite unavailable",
+      true,
+      new Date("2026-01-01T00:01:00Z"),
+    );
+    expect(db.operationalStatus().services).toContainEqual(
+      expect.objectContaining({
+        id: "wyoming",
+        retryingFailureCount: 1,
+      }),
+    );
+
+    expect(db.retryDelivery(delivery.id)).toBe("scheduled");
+    expect(db.claimDelivery(delivery.id)).toBe(true);
+    expect(db.operationalStatus().services).toContainEqual(
+      expect.objectContaining({
+        id: "wyoming",
+        retryingFailureCount: 1,
+      }),
+    );
+
+    db.recordDeliverySuccess(delivery.id);
+    expect(db.operationalStatus().services).toContainEqual(
+      expect.objectContaining({
+        id: "wyoming",
+        pendingCount: 0,
+        retryingFailureCount: 0,
+      }),
+    );
+  });
+
   it("deletes only failed deliveries while retaining an audit event", () => {
     const db = database();
     const failedAlert = db.ingest(active({ sourceKey: "delete-failed" }), [
