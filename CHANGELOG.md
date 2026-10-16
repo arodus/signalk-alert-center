@@ -5,6 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Include and verify npm `gitHead` metadata in future releases so the Signal K
+  Plugin Registry can associate each package with its canonical CI run instead
+  of applying the `no-plugin-ci` score penalty.
+
 Future changes intended for the next release belong here.
 
 ## [0.4.0] - 2026-10-15
