@@ -67,7 +67,7 @@ console.log(JSON.stringify(process.env.FAKE_GIT_HEAD));
         encoding: "utf8",
         env: {
           ...process.env,
-          npm_execpath: join(work, "scripts", "fake-npm.mjs"),
+          NPM_PUBLISH_VERIFY_NPM_CLI: join(work, "scripts", "fake-npm.mjs"),
           FAKE_GIT_HEAD: expectedGitHead,
           FAKE_NPM_COUNT: join(work, "count"),
           NPM_PUBLISH_VERIFY_ATTEMPTS: "3",
