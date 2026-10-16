@@ -23,7 +23,8 @@ if (!/^[0-9a-f]{40}$/.test(expectedGitHead))
     `git rev-parse returned an invalid commit SHA: ${expectedGitHead}`,
   );
 
-const npmCli = process.env.npm_execpath;
+const npmCli =
+  process.env.NPM_PUBLISH_VERIFY_NPM_CLI ?? process.env.npm_execpath;
 const npmCommand = npmCli ? process.execPath : "npm";
 const npmArgs = npmCli ? [npmCli] : [];
 const attempts = Number.parseInt(
