@@ -62,8 +62,11 @@ git push origin vX.Y.Z
 The tag starts `.github/workflows/release.yml`. The workflow reruns the complete
 CI suite, verifies that the annotated tag matches `package.json`, confirms the
 commit belongs to `main`, builds from a clean checkout, inspects the package,
-publishes it through npm trusted publishing, and creates the matching GitHub
-Release. Do not create the GitHub Release manually before this workflow finishes.
+stamps the reviewed tarball with the exact release commit as npm `gitHead`,
+publishes it through npm trusted publishing, verifies the published commit
+metadata, and creates the matching GitHub Release. The Signal K Plugin Registry
+uses `gitHead` to associate the npm version with its canonical plugin CI run. Do
+not create the GitHub Release manually before this workflow finishes.
 
 If validation fails before npm publication, fix the release through another
 reviewed pull request, delete the unpublished tag, and tag the corrected commit.

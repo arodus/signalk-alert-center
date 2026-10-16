@@ -5,6 +5,9 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+- Include and verify npm `gitHead` metadata in future releases so the Signal K
+  Plugin Registry can associate each package with its canonical CI run instead
+  of applying the `no-plugin-ci` score penalty.
 - Prevent in-progress first delivery attempts from briefly publishing a false
   notification-service failure followed by an immediate recovery. Service
   health now changes to failed only after an attempt records a real failure.
