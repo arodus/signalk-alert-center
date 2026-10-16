@@ -5,7 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-Future changes intended for the next release belong here.
+### Release automation
+
+- Retry post-publish npm metadata verification while a newly published package
+  is still being processed by the registry.
 
 ## [0.4.1] - 2026-10-16
 
