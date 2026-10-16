@@ -23,12 +23,15 @@ if (!/^[0-9a-f]{40}$/.test(expectedGitHead))
     `git rev-parse returned an invalid commit SHA: ${expectedGitHead}`,
   );
 
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCli = process.env.npm_execpath;
+const npmCommand = npmCli ? process.execPath : "npm";
+const npmArgs = npmCli ? [npmCli] : [];
 const npmCache = mkdtempSync(join(tmpdir(), "alert-center-npm-cache-"));
 try {
   const publishedGitHeadJson = run(
     npmCommand,
     [
+      ...npmArgs,
       "view",
       `${packageJson.name}@${packageJson.version}`,
       "gitHead",

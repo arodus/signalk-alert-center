@@ -29,10 +29,12 @@ packageJson.gitHead = gitHead;
 writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
 
 const npmCache = mkdtempSync(join(tmpdir(), "alert-center-npm-cache-"));
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCli = process.env.npm_execpath;
+const npmCommand = npmCli ? process.execPath : "npm";
+const npmArgs = npmCli ? [npmCli, "pack", "--json"] : ["pack", "--json"];
 let packed;
 try {
-  packed = spawnSync(npmCommand, ["pack", "--json"], {
+  packed = spawnSync(npmCommand, npmArgs, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
     env: { ...process.env, npm_config_cache: npmCache },
@@ -42,7 +44,9 @@ try {
   rmSync(npmCache, { recursive: true, force: true });
 }
 if (packed.status !== 0)
-  throw new Error(`npm pack failed with exit code ${packed.status ?? 1}`);
+  throw new Error(
+    `npm pack failed with exit code ${packed.status ?? 1}: ${packed.error?.message || packed.stderr?.trim() || packed.stdout?.trim() || "unknown error"}`,
+  );
 
 const report = JSON.parse(packed.stdout)[0];
 if (!report?.filename)
