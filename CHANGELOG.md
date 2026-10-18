@@ -5,10 +5,22 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+Future changes intended for the next release belong here.
+
+## [0.4.2] - 2026-10-18
+
 ### Release automation
 
-- Retry post-publish npm metadata verification while a newly published package
-  is still being processed by the registry.
+- Retry post-publish npm metadata verification for up to five minutes while a
+  newly published package is still being processed by the registry.
+- Keep the publication-verifier regression test isolated from npm-provided
+  environment variables on Windows so the official Signal K Plugin CI passes
+  on Windows with Node.js 22 and 24.
+
+### Upgrading
+
+- This release changes only release automation. It has no plugin runtime,
+  database, configuration, or dependency changes.
 
 ## [0.4.1] - 2026-10-16
 
