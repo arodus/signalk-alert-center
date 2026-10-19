@@ -56,7 +56,6 @@ const defaults = {
       onValue: 1,
       offValue: 0,
     },
-    probe: { url: "https://www.gstatic.com/generate_204", timeoutSeconds: 10 },
     bootTimeoutSeconds: 240,
     internetCheckIntervalSeconds: 5,
     idleCooldownSeconds: 300,
@@ -1196,8 +1195,8 @@ function Connectivity({ config, update }) {
   const set = (patch) => update("connectivity", { ...value, ...patch });
   return (
     <Card
-      title="Internet availability and connection control"
-      help="The availability check pauses Internet-required services while offline. Optionally, Alert Center can turn a Signal K-controlled connection such as Starlink on when needed. It turns the connection off only when it originally turned it on."
+      title="Internet status and connection control"
+      help="Alert Center reads network.internet.state from @meri-imperiumi/signalk-internet. Offline and captive states pause Internet-required services; online and metered states allow alert delivery. Automatic connection control remains blocked until a valid shared state has been observed. Alert Center turns a connection off only when it originally turned it on."
     >
       <label style={{ ...styles.checkLabel, marginBottom: 18 }}>
         <input
@@ -1233,35 +1232,14 @@ function Connectivity({ config, update }) {
             set({ switch: { ...value.switch, offValue } })
           }
         />
-        <Field
-          label="Internet availability check URL"
-          hint="Alert Center sends a HEAD request to this address. Any 2xx response means internet access is available. This check remains active when connection control is disabled."
-        >
-          <input
-            style={styles.input}
-            type="url"
-            value={value.probe?.url ?? ""}
-            onChange={(event) =>
-              set({ probe: { ...value.probe, url: event.target.value } })
-            }
-          />
-        </Field>
         <NumberField
-          label="Give up on each internet check after (seconds)"
-          min={1}
-          value={value.probe?.timeoutSeconds}
-          onChange={(timeoutSeconds) =>
-            set({ probe: { ...value.probe, timeoutSeconds } })
-          }
-        />
-        <NumberField
-          label="Give up waiting after turning the connection on (seconds)"
+          label="Give up waiting for Internet state after turning the connection on (seconds)"
           min={1}
           value={value.bootTimeoutSeconds}
           onChange={(bootTimeoutSeconds) => set({ bootTimeoutSeconds })}
         />
         <NumberField
-          label="Check for internet every (seconds)"
+          label="Recheck Internet state while starting a connection (seconds)"
           min={1}
           value={value.internetCheckIntervalSeconds}
           onChange={(internetCheckIntervalSeconds) =>

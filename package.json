@@ -101,6 +101,7 @@
       "./docs/screenshots/alert-center-tablet.png"
     ],
     "recommends": [
+      "@meri-imperiumi/signalk-internet",
       "signalk-piper",
       "signalk-wyoming"
     ]

@@ -19,7 +19,7 @@ export interface ConnectivitySafetyState {
 }
 type ConnectivitySafetyCheck = () =>
   ConnectivitySafetyState | Promise<ConnectivitySafetyState>;
-type InternetReadyCheck = (signal?: AbortSignal) => Promise<boolean>;
+type InternetAvailabilityCheck = (signal?: AbortSignal) => Promise<boolean>;
 
 export interface ConnectivitySessionSnapshot {
   startedAt?: Date;
@@ -33,7 +33,6 @@ export interface ConnectivitySessionSnapshot {
 
 export interface ConnectivityObservers {
   onSessionChange?: (session: ConnectivitySessionSnapshot) => void;
-  onInternetAvailability?: (online: boolean, checkedAt: Date) => void;
 }
 
 const safeToRelease: ConnectivitySafetyCheck = () => ({
@@ -51,9 +50,9 @@ export class ConnectivityManager {
   lastShutdownDeferredReason?: string;
   lastTransitionAt = new Date();
   lastTransitionFrom?: ConnectivityState;
-  lastProbeAt?: Date;
-  lastProbeSucceeded?: boolean;
-  lastProbeError?: string;
+  lastInternetCheckAt?: Date;
+  lastInternetAvailable?: boolean;
+  lastInternetCheckError?: string;
   private sessionStartedAt?: Date;
   private cooldownTimer?: ReturnType<typeof setTimeout>;
   private wakeTimer?: ReturnType<typeof setTimeout>;
@@ -65,7 +64,8 @@ export class ConnectivityManager {
   constructor(
     private readonly adapter: SwitchAdapter,
     private readonly cooldownMs = 300_000,
-    private readonly internetReady: InternetReadyCheck = async () => true,
+    private readonly internetAvailable: InternetAvailabilityCheck = async () =>
+      true,
     private readonly bootTimeoutMs = 240_000,
     private readonly checkIntervalMs = 5_000,
     private readonly safetyCheck: ConnectivitySafetyCheck = safeToRelease,
@@ -240,15 +240,14 @@ export class ConnectivityManager {
     while (!this.stopped && Date.now() <= deadline) {
       let ready = false;
       try {
-        ready = await this.internetReady(this.stopController.signal);
-        this.lastProbeError = undefined;
+        ready = await this.internetAvailable(this.stopController.signal);
+        this.lastInternetCheckError = undefined;
       } catch (error) {
-        this.lastProbeError =
+        this.lastInternetCheckError =
           error instanceof Error ? error.message : String(error);
       }
-      this.lastProbeAt = new Date();
-      this.lastProbeSucceeded = ready;
-      this.observers.onInternetAvailability?.(ready, this.lastProbeAt);
+      this.lastInternetCheckAt = new Date();
+      this.lastInternetAvailable = ready;
       this.persist();
       if (ready) {
         this.transition("ONLINE");
@@ -260,9 +259,9 @@ export class ConnectivityManager {
     }
     if (this.stopped) return;
     this.transition("FAULT");
-    this.lastError = this.lastProbeError
-      ? `Internet readiness probe failed: ${this.lastProbeError}`
-      : "Internet readiness probe timed out";
+    this.lastError = this.lastInternetCheckError
+      ? `Internet state check failed: ${this.lastInternetCheckError}`
+      : "Internet state did not become available before the timeout";
     this.persist();
   }
 

@@ -579,9 +579,9 @@ export const pluginConfigSchema = {
     },
     connectivity: {
       type: "object",
-      title: "Internet availability and connection control",
+      title: "Internet status and connection control",
       description:
-        "The availability check pauses Internet-required notification services while offline. Optionally, Alert Center can also turn a Signal K-controlled connection such as Starlink on when needed. It turns the connection off only when it originally turned it on.",
+        "Reads network.internet.state from @meri-imperiumi/signalk-internet and pauses Internet-required notification services while offline or captive. Optionally, Alert Center can also turn a Signal K-controlled connection such as Starlink on when needed. Automatic connection control remains blocked until a valid shared state has been observed, and Alert Center turns the connection off only when it originally turned it on.",
       properties: {
         enabled: {
           type: "boolean",
@@ -612,35 +612,15 @@ export const pluginConfigSchema = {
           },
           required: ["path"],
         },
-        probe: {
-          type: "object",
-          title: "Internet availability check",
-          description:
-            "The plugin sends an HTTP HEAD request and considers any 2xx response online. This check also works when connection control is disabled: Internet-required deliveries wait without consuming retry attempts until the check succeeds. Use a lightweight public endpoint that works without authentication.",
-          properties: {
-            url: {
-              type: "string",
-              title: "Internet availability check URL",
-              description:
-                "URL that accepts HEAD requests and returns a 2xx response when the Internet is reachable.",
-              default: "https://www.gstatic.com/generate_204",
-            },
-            timeoutSeconds: {
-              type: "number",
-              title: "Give up on each check after (seconds)",
-              default: 10,
-            },
-          },
-          required: ["url"],
-        },
         bootTimeoutSeconds: {
           type: "number",
-          title: "Give up waiting after turning the connection on (seconds)",
+          title:
+            "Give up waiting for Internet state after turning the connection on (seconds)",
           default: 240,
         },
         internetCheckIntervalSeconds: {
           type: "number",
-          title: "Check for internet every (seconds)",
+          title: "Recheck Internet state while starting a connection (seconds)",
           default: 5,
         },
         idleCooldownSeconds: {

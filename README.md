@@ -204,10 +204,14 @@ physical speaker was audible.
 
 1. Open the Signal K **App Store**.
 2. Install **Signal K Alert Center**.
-3. Open **Server → Plugin Config → Signal K Alert Center**.
-4. Enable the plugin and add any notification services you want to use.
-5. Set the defaults that newly discovered alerts should inherit and save.
-6. Open **Webapps → Signal K Alert Center** to review alerts and adjust individual
+3. Install and enable
+   [`@meri-imperiumi/signalk-internet`](https://github.com/meri-imperiumi/signalk-internet)
+   if Alert Center should pause remote delivery while offline or control an
+   Internet connection.
+4. Open **Server → Plugin Config → Signal K Alert Center**.
+5. Enable the plugin and add any notification services you want to use.
+6. Set the defaults that newly discovered alerts should inherit and save.
+7. Open **Webapps → Signal K Alert Center** to review alerts and adjust individual
    alert settings.
 
 The default database is stored in the plugin's Signal K data directory. You do
@@ -255,12 +259,21 @@ Notification services declare whether they require Internet access. ntfy,
 PagerDuty, Discord, Pushover, and Telegram require Internet; Wyoming sound and
 speech delivery is local and remains available offline.
 
-The configured availability check starts in an **unknown** state, so Alert Center
-allows the first remote attempt. A network failure triggers the check. Once the
-check confirms the vessel is offline, remote deliveries remain durably in
-**Waiting for Internet availability** without consuming further retry attempts.
-Alert Center checks periodically and resumes them automatically when Internet
-access returns. This behavior works even when connection control is disabled.
+Alert Center consumes the preferred `network.internet.state` value published by
+[`@meri-imperiumi/signalk-internet`](https://github.com/meri-imperiumi/signalk-internet).
+`online` and `metered` allow alert delivery. `offline` and `captive` keep remote
+deliveries durably in **Waiting for Internet availability** without consuming
+retry attempts. A transition back to `online` or `metered` resumes them
+automatically. This behavior works even when connection control is disabled.
+
+The Internet plugin is recommended rather than required. If the path is missing,
+cleared, or invalid, Alert Center reports the state as **unknown** and uses its
+normal retry schedule instead of holding deliveries indefinitely. Configure
+hardware mappings and its active probe in the Internet plugin; Alert Center does
+not perform a second external connectivity probe. Automatic connection control
+is blocked while the state is unknown: Alert Center preserves the durable wake
+request but does not energize the configured switch. It reconsiders that request
+as soon as a valid shared state is observed.
 
 Alert Center can optionally turn on a Signal K PUT-capable connectivity switch,
 such as a Starlink power control, when eligible work is waiting. It stores
@@ -269,9 +282,9 @@ recovery remain safe. It only turns a connection off when the live switch still
 shows on and it can prove that it turned that session on. Leave connection
 control disabled if another system manages the switch.
 
-The default connectivity check uses Google's lightweight `generate_204`
-endpoint. You can replace it with another URL that returns any successful 2xx
-response.
+After Alert Center turns a configured connection on, it waits for
+`network.internet.state` to become `online` or `metered`. The boot timeout and
+local state-recheck interval remain configurable in Alert Center.
 
 ## Notification ingestion load
 

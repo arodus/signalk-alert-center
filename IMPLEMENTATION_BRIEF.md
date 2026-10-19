@@ -608,8 +608,9 @@ Fault transitions are possible from power request, state confirmation, and Inter
    - Signal K PUT ON;
    - confirm observed ON;
    - `startedByPlugin = true`.
-4. Begin Internet readiness checks.
-5. Transition ONLINE after successful probe.
+4. Wait for the preferred Signal K `network.internet.state` value to report
+   `online` or `metered`.
+5. Transition ONLINE after that shared state confirms availability.
 
 Persist enough information to behave conservatively after restart.
 
@@ -617,17 +618,14 @@ Persist enough information to behave conservatively after restart.
 
 Do not assume switch ON means Internet ready.
 
-Use one or more configurable readiness probes.
+Use the preferred `network.internet.state` value published by the recommended
+optional `@meri-imperiumi/signalk-internet` plugin. Treat `online` and `metered`
+as available, and `offline` and `captive` as unavailable. Missing, cleared, and
+invalid values are unknown and must not strand delivery work.
 
-Possible options:
-
-- HTTPS request to configured URL;
-- DNS + HTTPS;
-- ntfy/PagerDuty endpoint reachability is not sufficient by itself if only one service happens to be down.
-
-Keep probes low-frequency.
-
-Do not probe aggressively while Starlink is OFF.
+Hardware mappings, active probing, captive-portal detection, and probe cadence
+belong in the shared Internet plugin. Alert Center must not run a duplicate
+external probe.
 
 ## Phase 12: safe shutdown
 
@@ -732,11 +730,6 @@ connectivity:
   internetCheckIntervalSeconds: 5
   idleCooldownSeconds: 300
 
-  probe:
-    type: https
-    # Must accept HEAD and return 2xx when the Internet is reachable.
-    url: https://www.gstatic.com/generate_204
-
 notifiers:
   - name: Crew ntfy
     type: ntfy
@@ -816,7 +809,7 @@ Use:
 
 - fake clock;
 - fake Signal K app/PUT handler;
-- fake Internet probe;
+- fake `network.internet.state` publisher;
 - mocked ntfy server;
 - mocked PagerDuty API;
 - mocked Discord webhook;

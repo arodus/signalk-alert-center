@@ -47,10 +47,14 @@ import {
   ConnectivitySessionSnapshot,
   ConnectivityState,
 } from "./connectivity/manager";
-import { createInternetProbe } from "./connectivity/internet";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { DeliveryScheduler } from "./delivery/scheduler";
 import { ServerDisplayUnits } from "./signalk/display-units";
+import {
+  extractInternetState,
+  INTERNET_STATE_PATH,
+  internetStateSnapshot,
+} from "./signalk/internet-state";
 import {
   extractNavigationState,
   isAnchoredOrMoored,
@@ -76,7 +80,7 @@ import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
 import { TelegramTransport } from "./transports/telegram";
 import { PushoverTransport } from "./transports/pushover";
-import { NotificationTransport, TransportResult } from "./transports/transport";
+import { NotificationTransport } from "./transports/transport";
 import {
   WyomingAnnouncementApi,
   WyomingAnnouncementContent,
@@ -265,6 +269,9 @@ export class AlertCenterRuntime {
       database?.overdueActivationCount
         ? `${database.overdueActivationCount} activation(s) overdue`
         : undefined,
+      this.config.connectivity?.enabled && this.internet?.state === "unknown"
+        ? `Automatic connection control is blocked until @meri-imperiumi/signalk-internet publishes a valid Internet state`
+        : undefined,
       ...services
         .filter(
           (service) =>
@@ -310,9 +317,9 @@ export class AlertCenterRuntime {
             lastError: this.connectivity.lastError,
             lastTransitionAt: this.connectivity.lastTransitionAt,
             lastTransitionFrom: this.connectivity.lastTransitionFrom,
-            lastProbeAt: this.connectivity.lastProbeAt,
-            lastProbeSucceeded: this.connectivity.lastProbeSucceeded,
-            lastProbeError: this.connectivity.lastProbeError,
+            lastInternetCheckAt: this.connectivity.lastInternetCheckAt,
+            lastInternetAvailable: this.connectivity.lastInternetAvailable,
+            lastInternetCheckError: this.connectivity.lastInternetCheckError,
             pendingWakeCount: database?.pendingWakeCount ?? 0,
             nextWakeAt:
               database?.nextWakeAt ?? this.connectivity.scheduledWakeAt,
@@ -621,6 +628,10 @@ export class AlertCenterRuntime {
     });
   }
 
+  private hasInternetStateProvider(): boolean {
+    return Boolean(this.internet && this.internet.state !== "unknown");
+  }
+
   private hasEligibleConnectivityWork(): boolean {
     if (!this.suppression || this.suppressionReason()) return false;
     return this.suppression
@@ -657,20 +668,23 @@ export class AlertCenterRuntime {
   private gateOfflineDelivery(delivery: DeliveryRecord): boolean {
     if (
       !this.transportRequiresInternet(delivery) ||
-      this.internet?.state !== "offline"
+      this.internet?.available !== false
     )
       return true;
     if (this.db().waitForConnectivity(delivery.id))
       this.debug(
         `Waiting for Internet: deliveryId=${delivery.id}, service=${delivery.transportInstanceId}`,
       );
-    this.internet.watchOffline();
     return false;
   }
 
   private onInternetAvailability(status: InternetAvailabilityStatus): void {
     if (!this.database || this.stopping) return;
-    if (status.state === "offline") {
+    // A durable wake request may have been held while the optional provider was
+    // unavailable. Reconsider it on every state transition, and cancel an
+    // already-scheduled timer if the provider clears its value.
+    this.scheduleNextWake();
+    if (status.available === false) {
       let waiting = 0;
       for (const delivery of this.suppression?.pending() ?? []) {
         if (
@@ -679,40 +693,23 @@ export class AlertCenterRuntime {
         )
           waiting += 1;
       }
-      this.internet?.watchOffline();
       if (waiting) {
-        this.debug(`Internet unavailable: ${waiting} delivery(s) waiting`);
+        this.debug(`Internet ${status.state}: ${waiting} delivery(s) waiting`);
         this.scheduleNextDelivery();
-        this.emitChange("internet_offline");
       }
+      this.emitChange(`internet_${status.state}`);
       return;
     }
-    if (status.state !== "online") return;
     const resumed = this.db().resumeWaitingForConnectivity();
     if (resumed)
-      this.debug(`Internet available: resumed ${resumed} delivery(s)`);
+      this.debug(
+        status.available
+          ? `Internet ${status.state}: resumed ${resumed} delivery(s)`
+          : `Internet state unavailable: returned ${resumed} delivery(s) to the normal retry schedule`,
+      );
     this.scheduleNextDelivery();
     this.requestDeliveryRun();
-    if (resumed) this.emitChange("internet_online");
-  }
-
-  private onTransportResult(
-    delivery: DeliveryRecord,
-    result: TransportResult,
-  ): void {
-    if (!this.transportRequiresInternet(delivery) || !this.internet) return;
-    if (
-      result.kind === "success" ||
-      result.kind === "terminal" ||
-      result.code.startsWith("HTTP_")
-    ) {
-      this.internet.record(true);
-      return;
-    }
-    if (["NETWORK", "DELIVERY_TIMEOUT"].includes(result.code))
-      void this.internet.checkNow().then((online) => {
-        if (!online) this.internet?.watchOffline();
-      });
+    this.emitChange(`internet_${status.state}`);
   }
 
   private cancelAnnouncement(
@@ -904,12 +901,13 @@ export class AlertCenterRuntime {
 
   private scheduleNextWake(): void {
     if (this.stopping) return;
+    this.connectivity?.cancelScheduledWake();
+    if (!this.hasInternetStateProvider()) return;
     const nextWake = this.suppressionReason()
       ? undefined
       : this.database
           ?.listWakeRequests()
           .find((request) => this.canWakeForAlert(request.alertId));
-    this.connectivity?.cancelScheduledWake();
     if (nextWake) this.connectivity?.scheduleWakeAt(nextWake.dueAt);
   }
 
@@ -1695,20 +1693,6 @@ export class AlertCenterRuntime {
     );
     this.lastQueueWarningAt = 0;
 
-    const internetProbe = options.connectivity?.probe
-      ? createInternetProbe({
-          url: options.connectivity.probe.url,
-          timeoutMs: (options.connectivity.probe.timeoutSeconds ?? 10) * 1000,
-        })
-      : undefined;
-    this.internet = internetProbe
-      ? new InternetAvailabilityMonitor(
-          internetProbe,
-          (options.connectivity?.internetCheckIntervalSeconds ?? 5) * 1000,
-          (status) => this.onInternetAvailability(status),
-        )
-      : undefined;
-
     this.transports = new Map<string, NotificationTransport>();
     const propertyApp = this.app as ServerAPI & PropertyValueApp;
     if (
@@ -1839,8 +1823,6 @@ export class AlertCenterRuntime {
       },
       {
         beforeSend: (delivery) => this.maySend(delivery),
-        onResult: (delivery, _transport, result) =>
-          this.onTransportResult(delivery, result),
         batchSize: options.delivery?.batchSize ?? 50,
         concurrency: options.delivery?.concurrency ?? 4,
         requestTimeoutSeconds: options.delivery?.requestTimeoutSeconds ?? 15,
@@ -1857,6 +1839,13 @@ export class AlertCenterRuntime {
         },
       },
     );
+    this.internet = new InternetAvailabilityMonitor((status) =>
+      this.onInternetAvailability(status),
+    );
+    const internetSnapshot = internetStateSnapshot(
+      this.app.getSelfPath?.(INTERNET_STATE_PATH as Path),
+    );
+    if (internetSnapshot) this.internet.observe(internetSnapshot);
     const switchConfig = options.connectivity?.switch;
     if (options.connectivity?.enabled && switchConfig)
       this.connectivity = new ConnectivityManager(
@@ -1867,7 +1856,7 @@ export class AlertCenterRuntime {
           switchConfig.offValue,
         ),
         (options.connectivity.idleCooldownSeconds ?? 300) * 1000,
-        internetProbe,
+        () => this.internet!.checkNow(),
         (options.connectivity.bootTimeoutSeconds ?? 240) * 1000,
         (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
         () => ({
@@ -1886,6 +1875,7 @@ export class AlertCenterRuntime {
         }),
         () =>
           Boolean(
+            this.hasInternetStateProvider() &&
             this.database
               ?.listWakeRequests()
               .some((request) => this.canWakeForAlert(request.alertId)),
@@ -1893,8 +1883,6 @@ export class AlertCenterRuntime {
         {
           onSessionChange: (session) =>
             this.database?.saveConnectivitySession(session),
-          onInternetAvailability: (online, checkedAt) =>
-            this.internet?.record(online, checkedAt),
         },
       );
 
@@ -1916,14 +1904,10 @@ export class AlertCenterRuntime {
 
     const waitingForConnectivity = this.database.waitingForConnectivityCount();
     if (waitingForConnectivity > 0) {
-      if (this.internet)
-        void this.internet.checkNow().then((online) => {
-          if (!online) this.internet?.watchOffline();
-        });
-      else {
+      if (this.internet.available !== false) {
         this.database.resumeWaitingForConnectivity();
         this.debug(
-          `Internet availability check is not configured: returned ${waitingForConnectivity} delivery(s) to the normal retry schedule`,
+          `Internet state is ${this.internet.state}: returned ${waitingForConnectivity} delivery(s) to the normal retry schedule`,
         );
       }
     }
@@ -1961,6 +1945,23 @@ export class AlertCenterRuntime {
         : []),
     ];
     const unsubscribes: Array<() => void> = [];
+    this.app.subscriptionmanager.subscribe(
+      {
+        context: "vessels.self" as Context,
+        sourcePolicy: "preferred",
+        subscribe: [
+          { path: INTERNET_STATE_PATH as Path, policy: "instant" as const },
+        ],
+      },
+      unsubscribes,
+      (error: unknown) =>
+        this.reportAsyncError("Internet-state subscription failed", error),
+      (delta: unknown) => {
+        if (generation !== this.runtimeGeneration || this.stopping) return;
+        const observation = extractInternetState(delta);
+        if (observation) this.internet?.observe(observation);
+      },
+    );
     this.app.subscriptionmanager.subscribe(
       {
         context: "vessels.self" as Context,

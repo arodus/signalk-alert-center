@@ -77,6 +77,30 @@ eventController.abort();
 await json(`${signalkUrl}/plugins/signalk-test-fixture/reset`, {
   method: "POST",
 });
+await json(`${signalkUrl}/plugins/signalk-test-fixture/internet`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ state: "captive" }),
+});
+await eventually(
+  () => json(`${signalkUrl}/plugins/signalk-alert-center/status`),
+  (status) =>
+    status.connectivity.internetAvailability.state === "captive" &&
+    status.connectivity.internetAvailability.available === false,
+  "captive Internet state was not observed",
+);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/internet`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ state: "metered" }),
+});
+await eventually(
+  () => json(`${signalkUrl}/plugins/signalk-alert-center/status`),
+  (status) =>
+    status.connectivity.internetAvailability.state === "metered" &&
+    status.connectivity.internetAvailability.available === true,
+  "metered Internet state was not observed",
+);
 const definitionPage = await eventually(
   () =>
     json(`${signalkUrl}/plugins/signalk-alert-center/definitions?limit=100`),

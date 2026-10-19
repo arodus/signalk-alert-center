@@ -6,7 +6,6 @@ import { PagerDutyTransport } from "../src/transports/pagerduty";
 import { TelegramTransport } from "../src/transports/telegram";
 import { PushoverTransport } from "../src/transports/pushover";
 import { AlertRecord, DeliveryRecord } from "../src/alerts/types";
-import { createInternetProbe } from "../src/connectivity/internet";
 
 const dockerAvailable = (() => {
   try {
@@ -76,9 +75,6 @@ describe.skipIf(!enabled)("Docker HTTP transport integration", () => {
   });
 
   it("delivers ntfy, PagerDuty, Discord, Telegram, and Pushover payloads over HTTP", async () => {
-    await expect(
-      createInternetProbe({ url: `${baseUrl}/health` })(),
-    ).resolves.toBe(true);
     const transports = [
       new NtfyTransport({ server: baseUrl, topic: "ntfy-topic" }),
       new PagerDutyTransport("routing-key", `${baseUrl}/pagerduty`),
