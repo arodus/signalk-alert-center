@@ -1,4 +1,4 @@
-import { AlertRecord, DeliveryRecord } from "../alerts/types";
+import { AlertRecord, DeliveryRecord, Severity } from "../alerts/types";
 import {
   classifyHttp,
   NotificationTransport,
@@ -6,6 +6,16 @@ import {
   TransportContext,
   TransportResult,
 } from "./transport";
+
+type PagerDutySeverity = "critical" | "error" | "warning" | "info";
+
+const pagerDutySeverity: Record<Severity, PagerDutySeverity> = {
+  normal: "info",
+  alert: "info",
+  warn: "warning",
+  alarm: "error",
+  emergency: "critical",
+};
 
 export class PagerDutyTransport implements NotificationTransport {
   readonly type = "pagerduty";
@@ -18,30 +28,32 @@ export class PagerDutyTransport implements NotificationTransport {
     delivery: DeliveryRecord,
     context: TransportContext,
   ): Promise<TransportResult> {
-    const payload = {
+    const eventAction =
+      delivery.operation === "resolve"
+        ? "resolve"
+        : delivery.operation === "acknowledge"
+          ? "acknowledge"
+          : "trigger";
+    const event = {
       routing_key: this.routingKey,
-      event_action:
-        delivery.operation === "resolve"
-          ? "resolve"
-          : delivery.operation === "acknowledge"
-            ? "acknowledge"
-            : "trigger",
+      event_action: eventAction,
       dedup_key: `signalk:${alert.sourceKey}`,
-      payload: {
-        summary: context.rendered.body,
-        severity:
-          context.rendered.severity === "emergency"
-            ? "critical"
-            : context.rendered.severity,
-        source: alert.path,
-        timestamp: context.now.toISOString(),
-      },
+      ...(eventAction === "trigger"
+        ? {
+            payload: {
+              summary: context.rendered.body,
+              severity: pagerDutySeverity[context.rendered.severity],
+              source: alert.path,
+              timestamp: context.now.toISOString(),
+            },
+          }
+        : {}),
     };
     try {
       const response = await fetch(this.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(event),
         signal: context.signal,
       });
       return classifyHttp(response.status, await readResponseBody(response));

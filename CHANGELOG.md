@@ -5,7 +5,11 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-Future changes intended for the next release belong here.
+### Fixes
+
+- Send PagerDuty acknowledge and resolve events without trigger-only payload
+  fields, and translate every Signal K severity to a value accepted by
+  PagerDuty. Existing failed deliveries can be retried after upgrading.
 
 ## [0.4.2] - 2026-10-18
 

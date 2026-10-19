@@ -38,7 +38,57 @@ function delivery(operation: DeliveryRecord["operation"]): DeliveryRecord {
 describe("PagerDutyTransport", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each(["acknowledge", "resolve"] as const)(
+    "sends a minimal %s event without a trigger payload",
+    async (operation) => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+      vi.stubGlobal("fetch", fetchMock);
+      const transport = new PagerDutyTransport("routing-key");
+
+      await transport.send(alert, delivery(operation), {
+        rendered: renderAlert(alert),
+        now,
+        signal: new AbortController().signal,
+      });
+
+      const request = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(JSON.parse(String(request.body))).toEqual({
+        routing_key: "routing-key",
+        event_action: operation,
+        dedup_key: `signalk:${alert.sourceKey}`,
+      });
+    },
+  );
+
   it.each([
+    ["normal", "info"],
+    ["alert", "info"],
+    ["warn", "warning"],
+    ["alarm", "error"],
+    ["emergency", "critical"],
+  ] as const)("maps %s trigger severity to %s", async (severity, expected) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    const transport = new PagerDutyTransport("routing-key");
+    const severityAlert = { ...alert, maxSeverity: severity };
+
+    await transport.send(severityAlert, delivery("trigger"), {
+      rendered: renderAlert(severityAlert),
+      now,
+      signal: new AbortController().signal,
+    });
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      routing_key: "routing-key",
+      event_action: "trigger",
+      dedup_key: `signalk:${alert.sourceKey}`,
+      payload: { severity: expected },
+    });
+  });
+
+  it.each([
+    ["notify", "trigger"],
     ["trigger", "trigger"],
     ["acknowledge", "acknowledge"],
     ["resolve", "resolve"],
