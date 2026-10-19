@@ -7,6 +7,15 @@ Versioning while it remains pre-1.0.
 
 ### Fixes
 
+- Pause Internet-required notification services when the configured availability
+  check confirms the vessel is offline. Waiting deliveries remain durable and do
+  not consume retry attempts; they resume automatically when Internet access
+  returns. Local Wyoming sound and speech delivery continues while offline.
+- Persist plugin-owned connectivity sessions across restart, retain ownership
+  after an Internet boot timeout, and release only a still-observed connection
+  that the plugin originally turned on.
+- Document the legacy alert catalog, acknowledge, and silence routes in OpenAPI,
+  and wait for those actions to finish before reporting success.
 - Send PagerDuty acknowledge and resolve events without trigger-only payload
   fields, and translate every Signal K severity to a value accepted by
   PagerDuty. Existing failed deliveries can be retried after upgrading.

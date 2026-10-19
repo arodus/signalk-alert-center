@@ -148,6 +148,8 @@ function renderDiagnostics(status) {
   const scheduler = status.scheduler ?? {};
   const database = status.database ?? {};
   const connectivity = status.connectivity ?? {};
+  const internetAvailability =
+    connectivity.internetAvailability?.state ?? "unknown";
   const reasons = status.health?.reasons ?? [];
   const services = status.services ?? [];
   renderNotifierTests(services);
@@ -200,11 +202,11 @@ function renderDiagnostics(status) {
     ],
     [
       "Connectivity",
-      `${connectivity.state ?? "OFF"} · ${connectivity.ownedByPlugin ? "plugin-owned" : "not plugin-owned"} · last transition ${formatDate(connectivity.lastTransitionAt)} · ${connectivity.pendingWakeCount ?? 0} pending wake${connectivity.lastProbeAt ? ` · probe ${connectivity.lastProbeSucceeded ? "passed" : "failed"} ${formatDate(connectivity.lastProbeAt)}` : ""}${connectivity.lastError ? ` · ${connectivity.lastError}` : ""}`,
+      `${connectivity.state ?? "OFF"} · Internet ${internetAvailability} · ${connectivity.ownedByPlugin ? "plugin-owned" : "not plugin-owned"} · last transition ${formatDate(connectivity.lastTransitionAt)} · ${connectivity.pendingWakeCount ?? 0} pending wake${connectivity.lastProbeAt ? ` · probe ${connectivity.lastProbeSucceeded ? "passed" : "failed"} ${formatDate(connectivity.lastProbeAt)}` : ""}${connectivity.lastError ? ` · ${connectivity.lastError}` : ""}`,
     ],
     ...services.map((service) => [
       `Service: ${service.name}`,
-      `${service.enabled ? "Enabled" : "Disabled"}${service.quietHours?.enabled ? ` · Quiet hours ${service.quietHours.suspended ? "overridden by Signal K control" : service.quietHours.active ? `active: ${service.quietHours.minimumSeverity} and above` : "scheduled"} (${service.quietHours.timeZone})${service.quietHours.suspended ? "" : ` · next change ${formatDate(service.quietHours.nextChangeAt)}`}` : ""} · ${service.pendingCount} pending · last success ${formatDate(service.lastSuccessAt)} · last failure ${formatDate(service.lastFailureAt)}${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
+      `${service.enabled ? "Enabled" : "Disabled"} · ${service.requiresInternet ? "Internet required" : "Available offline"}${service.quietHours?.enabled ? ` · Quiet hours ${service.quietHours.suspended ? "overridden by Signal K control" : service.quietHours.active ? `active: ${service.quietHours.minimumSeverity} and above` : "scheduled"} (${service.quietHours.timeZone})${service.quietHours.suspended ? "" : ` · next change ${formatDate(service.quietHours.nextChangeAt)}`}` : ""} · ${service.pendingCount} pending · last success ${formatDate(service.lastSuccessAt)} · last failure ${formatDate(service.lastFailureAt)}${service.lastFailureCode ? ` (${service.lastFailureCode})` : ""}`,
     ]),
   ];
   if (reasons.length) items.unshift(["Health reason", reasons.join(" · ")]);
@@ -242,7 +244,7 @@ function renderNotifierTests(services) {
       const quiet = service.quietHours?.enabled
         ? `<p class="service-quiet-hours">Quiet hours ${service.quietHours.suspended ? "overridden by Signal K control" : service.quietHours.active ? `active · ${escapeHtml(service.quietHours.minimumSeverity)} and above` : "scheduled"} · ${escapeHtml(service.quietHours.timeZone)}${service.quietHours.suspended ? "" : ` · next change ${escapeHtml(formatDate(service.quietHours.nextChangeAt))}`}</p>`
         : "";
-      return `<article class="service-test-card"><div><strong>${escapeHtml(service.name ?? id)}</strong><span>${escapeHtml(service.type ?? "unknown")} · ${service.enabled === false ? "disabled" : "enabled"}</span></div><div class="service-test-actions">${buttons}</div>${quiet}${outcome}</article>`;
+      return `<article class="service-test-card"><div><strong>${escapeHtml(service.name ?? id)}</strong><span>${escapeHtml(service.type ?? "unknown")} · ${service.enabled === false ? "disabled" : "enabled"} · ${service.requiresInternet ? "Internet required" : "available offline"}</span></div><div class="service-test-actions">${buttons}</div>${quiet}${outcome}</article>`;
     })
     .join("");
 }
@@ -649,9 +651,11 @@ function renderDeliveries(deliveries) {
               : `Queued ${formatDate(delivery.createdAt)}`;
             const outcomeTime = delivery.deliveredAt
               ? `${audioWasSkipped(delivery) ? "Skipped" : service.type === "wyoming" ? "Accepted" : "Delivered"} ${formatDate(delivery.deliveredAt)}`
-              : delivery.nextAttemptAt
-                ? `Next retry ${formatDate(delivery.nextAttemptAt)}`
-                : "No retry scheduled";
+              : delivery.state === "waiting_connectivity"
+                ? "Waiting for Internet availability"
+                : delivery.nextAttemptAt
+                  ? `Next retry ${formatDate(delivery.nextAttemptAt)}`
+                  : "No retry scheduled";
             const playback = (delivery.playback ?? [])
               .map(
                 (item) =>
@@ -906,7 +910,7 @@ async function load(preserveLoadedHistory = false) {
     elements.pendingCount.textContent = pendingDeliveryCount;
     elements.deliveryTabCount.textContent = state.deliveryTotal;
     elements.connectivityNote.textContent = status.connectivity?.state
-      ? `${status.health?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
+      ? `${status.health?.state ?? "unknown"} · Internet ${status.connectivity.internetAvailability?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
       : "delivery intents waiting";
     state.lastStatus = status;
     renderDiagnostics(status);
@@ -1314,7 +1318,7 @@ function openPolicy(id) {
           const repeatDescription = globalRepeat
             ? `Global: every ${globalRepeat} seconds`
             : "Global: send once";
-          return `<div class="notifier-policy-option"><label class="check-label"><input type="checkbox" name="notifier" value="${escapeHtml(id)}" ${(policy.notifierIds ?? []).includes(id) ? "checked" : ""} /><span>${escapeHtml(notifier.name ?? id)} <small>${escapeHtml(notifier.type ?? "")}${notifier.minimumSeverity ? ` · sends ${escapeHtml(notifier.minimumSeverity)} and above` : ""}</small></span></label><label class="notifier-repeat-field"><span>Repeat seconds <small>${escapeHtml(repeatDescription)}</small></span><input class="notifier-repeat" data-notifier-id="${escapeHtml(id)}" type="number" min="0" max="31536000" value="${repeatOverride === undefined ? "" : escapeHtml(repeatOverride)}" placeholder="Inherit" /></label></div>`;
+          return `<div class="notifier-policy-option"><label class="check-label"><input type="checkbox" name="notifier" value="${escapeHtml(id)}" ${(policy.notifierIds ?? []).includes(id) ? "checked" : ""} /><span>${escapeHtml(notifier.name ?? id)} <small>${escapeHtml(notifier.type ?? "")} · ${notifier.requiresInternet ? "Internet required" : "available offline"}${notifier.minimumSeverity ? ` · sends ${escapeHtml(notifier.minimumSeverity)} and above` : ""}</small></span></label><label class="notifier-repeat-field"><span>Repeat seconds <small>${escapeHtml(repeatDescription)}</small></span><input class="notifier-repeat" data-notifier-id="${escapeHtml(id)}" type="number" min="0" max="31536000" value="${repeatOverride === undefined ? "" : escapeHtml(repeatOverride)}" placeholder="Inherit" /></label></div>`;
         })
         .join("")
     : '<p class="alert-meta">No notification services are configured. Add one in the Signal K plugin settings first.</p>';

@@ -72,6 +72,7 @@ export async function pushoverResult(
 
 export class PushoverTransport implements NotificationTransport {
   readonly type = "pushover";
+  readonly requiresInternet = true;
   constructor(
     private readonly config: PushoverConfig,
     private readonly endpoint = pushoverEndpoint,

@@ -18,6 +18,8 @@ export type TransportResult =
   | { kind: "retryable" | "terminal"; code: string; message: string };
 export interface NotificationTransport {
   readonly type: string;
+  /** Whether this transport must wait for confirmed Internet availability. */
+  readonly requiresInternet: boolean;
   send(
     alert: AlertRecord,
     delivery: DeliveryRecord,

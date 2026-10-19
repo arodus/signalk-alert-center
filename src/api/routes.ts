@@ -1000,8 +1000,8 @@ export function registerRoutes(
   status: () => unknown,
   runScheduler: () => Promise<void>,
   catalog: () => unknown,
-  acknowledgeAlert: (id: string) => boolean,
-  silenceAlert: (id: string) => boolean,
+  acknowledgeAlert: (id: string) => MaybePromise<boolean>,
+  silenceAlert: (id: string) => MaybePromise<boolean>,
 ): void {
   addRoute(router, "get", "/status", "readonly", (_req, res) =>
     res.json(status()),
@@ -1018,12 +1018,12 @@ export function registerRoutes(
       "post",
       `/alerts/:id/${action}`,
       "readwrite",
-      (req, res) => {
+      wrap(async (req, res) => {
         const id = req.params?.id;
-        if (!id || !callback(id))
-          return fail(res, 404, "NOT_FOUND", "Alert was not found");
+        if (!id || !(await callback(id)))
+          throw new ApiError(404, "NOT_FOUND", "Alert was not found");
         res.json({ status: `${action}d` });
-      },
+      }),
     );
   addRoute(
     router,

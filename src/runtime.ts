@@ -38,7 +38,15 @@ import {
   registerRoutes,
 } from "./api/routes";
 import { NotifierConfig, PluginConfig, validateConfig } from "./config";
-import { ConnectivityManager } from "./connectivity/manager";
+import {
+  InternetAvailabilityMonitor,
+  InternetAvailabilityStatus,
+} from "./connectivity/availability";
+import {
+  ConnectivityManager,
+  ConnectivitySessionSnapshot,
+  ConnectivityState,
+} from "./connectivity/manager";
 import { createInternetProbe } from "./connectivity/internet";
 import { createSignalKSwitch } from "./connectivity/signalk-switch";
 import { DeliveryScheduler } from "./delivery/scheduler";
@@ -68,7 +76,7 @@ import { NtfyTransport } from "./transports/ntfy";
 import { PagerDutyTransport } from "./transports/pagerduty";
 import { TelegramTransport } from "./transports/telegram";
 import { PushoverTransport } from "./transports/pushover";
-import { NotificationTransport } from "./transports/transport";
+import { NotificationTransport, TransportResult } from "./transports/transport";
 import {
   WyomingAnnouncementApi,
   WyomingAnnouncementContent,
@@ -86,6 +94,16 @@ const UPSTREAM_ACTION_TIMEOUT_MS = 5_000;
 const DEFAULT_INGESTION_QUEUE_LIMIT = 2_000;
 const DEFAULT_INGESTION_BATCH_SIZE = 100;
 const QUEUE_WARNING_INTERVAL_MS = 60_000;
+const connectivityStates: ConnectivityState[] = [
+  "OFF",
+  "REQUESTING_ON",
+  "POWERED",
+  "WAITING_FOR_INTERNET",
+  "ONLINE",
+  "IDLE_COOLDOWN",
+  "REQUESTING_OFF",
+  "FAULT",
+];
 
 interface PropertyValueEntry {
   value?: unknown;
@@ -112,6 +130,7 @@ export class AlertCenterRuntime {
   private database?: AlertDatabase;
   private scheduler?: DeliveryScheduler;
   private connectivity?: ConnectivityManager;
+  private internet?: InternetAvailabilityMonitor;
   private policy?: AlertPolicyResolver;
   private unsubscribe?: () => void;
   private activationTimer?: ReturnType<typeof setTimeout>;
@@ -212,6 +231,7 @@ export class AlertCenterRuntime {
         name: notifier.name,
         type: notifier.type,
         enabled: notifier.enabled !== false,
+        requiresInternet: notifier.type !== "wyoming",
         quietHours: this.effectiveQuietWindow(notifier),
         pendingCount: service?.pendingCount ?? 0,
         retryingFailureCount: service?.retryingFailureCount ?? 0,
@@ -298,6 +318,9 @@ export class AlertCenterRuntime {
               database?.nextWakeAt ?? this.connectivity.scheduledWakeAt,
             shutdownDeferredReason:
               this.connectivity.lastShutdownDeferredReason,
+            internetAvailability: this.internet?.status() ?? {
+              state: "unknown",
+            },
           }
         : {
             state: "OFF",
@@ -305,6 +328,9 @@ export class AlertCenterRuntime {
             ownedByPlugin: false,
             pendingWakeCount: database?.pendingWakeCount ?? 0,
             nextWakeAt: database?.nextWakeAt,
+            internetAvailability: this.internet?.status() ?? {
+              state: "unknown",
+            },
           },
       alerts: {
         definitions: this.database?.definitionCount() ?? 0,
@@ -613,12 +639,80 @@ export class AlertCenterRuntime {
 
   private maySend(delivery: DeliveryRecord): boolean {
     const reason = this.suppressionReason(delivery);
-    if (!reason) return true;
+    if (!reason) return this.gateOfflineDelivery(delivery);
     this.suppression?.hold(
       this.db().getDelivery(delivery.id) ?? delivery,
       reason,
     );
     return false;
+  }
+
+  private transportRequiresInternet(delivery: DeliveryRecord): boolean {
+    return (
+      this.transports.get(delivery.transportInstanceId)?.requiresInternet ===
+      true
+    );
+  }
+
+  private gateOfflineDelivery(delivery: DeliveryRecord): boolean {
+    if (
+      !this.transportRequiresInternet(delivery) ||
+      this.internet?.state !== "offline"
+    )
+      return true;
+    if (this.db().waitForConnectivity(delivery.id))
+      this.debug(
+        `Waiting for Internet: deliveryId=${delivery.id}, service=${delivery.transportInstanceId}`,
+      );
+    this.internet.watchOffline();
+    return false;
+  }
+
+  private onInternetAvailability(status: InternetAvailabilityStatus): void {
+    if (!this.database || this.stopping) return;
+    if (status.state === "offline") {
+      let waiting = 0;
+      for (const delivery of this.suppression?.pending() ?? []) {
+        if (
+          this.transportRequiresInternet(delivery) &&
+          this.db().waitForConnectivity(delivery.id)
+        )
+          waiting += 1;
+      }
+      this.internet?.watchOffline();
+      if (waiting) {
+        this.debug(`Internet unavailable: ${waiting} delivery(s) waiting`);
+        this.scheduleNextDelivery();
+        this.emitChange("internet_offline");
+      }
+      return;
+    }
+    if (status.state !== "online") return;
+    const resumed = this.db().resumeWaitingForConnectivity();
+    if (resumed)
+      this.debug(`Internet available: resumed ${resumed} delivery(s)`);
+    this.scheduleNextDelivery();
+    this.requestDeliveryRun();
+    if (resumed) this.emitChange("internet_online");
+  }
+
+  private onTransportResult(
+    delivery: DeliveryRecord,
+    result: TransportResult,
+  ): void {
+    if (!this.transportRequiresInternet(delivery) || !this.internet) return;
+    if (
+      result.kind === "success" ||
+      result.kind === "terminal" ||
+      result.code.startsWith("HTTP_")
+    ) {
+      this.internet.record(true);
+      return;
+    }
+    if (["NETWORK", "DELIVERY_TIMEOUT"].includes(result.code))
+      void this.internet.checkNow().then((online) => {
+        if (!online) this.internet?.watchOffline();
+      });
   }
 
   private cancelAnnouncement(
@@ -1601,6 +1695,20 @@ export class AlertCenterRuntime {
     );
     this.lastQueueWarningAt = 0;
 
+    const internetProbe = options.connectivity?.probe
+      ? createInternetProbe({
+          url: options.connectivity.probe.url,
+          timeoutMs: (options.connectivity.probe.timeoutSeconds ?? 10) * 1000,
+        })
+      : undefined;
+    this.internet = internetProbe
+      ? new InternetAvailabilityMonitor(
+          internetProbe,
+          (options.connectivity?.internetCheckIntervalSeconds ?? 5) * 1000,
+          (status) => this.onInternetAvailability(status),
+        )
+      : undefined;
+
     this.transports = new Map<string, NotificationTransport>();
     const propertyApp = this.app as ServerAPI & PropertyValueApp;
     if (
@@ -1731,6 +1839,8 @@ export class AlertCenterRuntime {
       },
       {
         beforeSend: (delivery) => this.maySend(delivery),
+        onResult: (delivery, _transport, result) =>
+          this.onTransportResult(delivery, result),
         batchSize: options.delivery?.batchSize ?? 50,
         concurrency: options.delivery?.concurrency ?? 4,
         requestTimeoutSeconds: options.delivery?.requestTimeoutSeconds ?? 15,
@@ -1757,13 +1867,7 @@ export class AlertCenterRuntime {
           switchConfig.offValue,
         ),
         (options.connectivity.idleCooldownSeconds ?? 300) * 1000,
-        options.connectivity.probe
-          ? createInternetProbe({
-              url: options.connectivity.probe.url,
-              timeoutMs:
-                (options.connectivity.probe.timeoutSeconds ?? 10) * 1000,
-            })
-          : undefined,
+        internetProbe,
         (options.connectivity.bootTimeoutSeconds ?? 240) * 1000,
         (options.connectivity.internetCheckIntervalSeconds ?? 5) * 1000,
         () => ({
@@ -1786,7 +1890,43 @@ export class AlertCenterRuntime {
               ?.listWakeRequests()
               .some((request) => this.canWakeForAlert(request.alertId)),
           ),
+        {
+          onSessionChange: (session) =>
+            this.database?.saveConnectivitySession(session),
+          onInternetAvailability: (online, checkedAt) =>
+            this.internet?.record(online, checkedAt),
+        },
       );
+
+    if (this.connectivity) {
+      const stored = this.database.getConnectivitySession();
+      const session: ConnectivitySessionSnapshot | undefined =
+        stored && connectivityStates.includes(stored.state as ConnectivityState)
+          ? {
+              ...stored,
+              state: stored.state as ConnectivityState,
+            }
+          : undefined;
+      void this.connectivity
+        .recover(session)
+        .catch((error: unknown) =>
+          this.reportAsyncError("Could not recover connectivity state", error),
+        );
+    }
+
+    const waitingForConnectivity = this.database.waitingForConnectivityCount();
+    if (waitingForConnectivity > 0) {
+      if (this.internet)
+        void this.internet.checkNow().then((online) => {
+          if (!online) this.internet?.watchOffline();
+        });
+      else {
+        this.database.resumeWaitingForConnectivity();
+        this.debug(
+          `Internet availability check is not configured: returned ${waitingForConnectivity} delivery(s) to the normal retry schedule`,
+        );
+      }
+    }
 
     this.reconcileSuppression();
     if (typeof this.app.registerPutHandler === "function")
@@ -1901,8 +2041,14 @@ export class AlertCenterRuntime {
         this.database
           ?.listDefinitions()
           .map((item) => this.definitionView(item)) ?? [],
-      (id) => Boolean(repository.acknowledgeOccurrence(id)),
-      (id) => Boolean(repository.silenceOccurrence(id)),
+      async (id) => {
+        const result = await repository.acknowledgeOccurrence(id);
+        return Boolean(result && result !== "inactive");
+      },
+      async (id) => {
+        const result = await repository.silenceOccurrence(id);
+        return Boolean(result && result !== "inactive");
+      },
     );
     registerAlertCenterRoutes(compatible, {
       repository: () => (this.database ? repository : undefined),
@@ -1919,6 +2065,7 @@ export class AlertCenterRuntime {
             name: notifier.name,
             type: notifier.type,
             enabled: true,
+            requiresInternet: notifier.type !== "wyoming",
             quietHours: this.effectiveQuietWindow(notifier),
             minimumSeverity: notifier.minSeverity ?? "normal",
             repeatIntervalSeconds: notifier.repeatIntervalSeconds ?? 0,
@@ -2052,6 +2199,7 @@ export class AlertCenterRuntime {
     if (this.retentionTimer) clearInterval(this.retentionTimer);
     await this.scheduler?.stop();
     await this.deliveryRun;
+    this.internet?.stop();
     this.connectivity?.stop();
     this.database?.close();
     this.database = undefined;
@@ -2064,6 +2212,7 @@ export class AlertCenterRuntime {
     this.scheduler = undefined;
     this.deliveryRun = undefined;
     this.connectivity = undefined;
+    this.internet = undefined;
     this.policy = undefined;
     this.transports.clear();
     this.serviceHealthFingerprints.clear();

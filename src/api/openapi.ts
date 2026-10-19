@@ -39,12 +39,45 @@ const page = (item: string, includeTotal = false) => ({
   },
 });
 
-/** Complete OpenAPI document for routes registered by registerAlertCenterRoutes. */
+/** Complete OpenAPI document for every route registered by the plugin. */
 export function getAlertCenterOpenApi() {
   return {
     openapi: "3.0.3",
     info: { title: "Signal K Alert Center", version: "1.0.0" },
     paths: {
+      "/alerts": {
+        get: {
+          summary: "List the legacy alert-definition catalog",
+          deprecated: true,
+          responses: {
+            "200": response("Alert definitions", {
+              type: "array",
+              items: { $ref: "#/components/schemas/Definition" },
+            }),
+            ...errors,
+          },
+        },
+      },
+      ...Object.fromEntries(
+        ["acknowledge", "silence"].map((action) => [
+          `/alerts/{id}/${action}`,
+          {
+            post: {
+              summary: `${action === "acknowledge" ? "Acknowledge" : "Silence"} an occurrence through the legacy route`,
+              deprecated: true,
+              parameters: [idParameter],
+              responses: {
+                "200": response("Action accepted", {
+                  type: "object",
+                  required: ["status"],
+                  properties: { status: { type: "string" } },
+                }),
+                ...errors,
+              },
+            },
+          },
+        ]),
+      ),
       "/snooze": {
         get: {
           summary: "Get durable global snooze state",
@@ -591,6 +624,7 @@ export function getAlertCenterOpenApi() {
                   "name",
                   "type",
                   "enabled",
+                  "requiresInternet",
                   "pendingCount",
                   "retryingFailureCount",
                   "terminalFailureCount",
@@ -600,6 +634,7 @@ export function getAlertCenterOpenApi() {
                   name: { type: "string" },
                   type: { type: "string" },
                   enabled: { type: "boolean" },
+                  requiresInternet: { type: "boolean" },
                   quietHours: { $ref: "#/components/schemas/QuietHoursStatus" },
                   pendingCount: { type: "integer", minimum: 0 },
                   retryingFailureCount: { type: "integer", minimum: 0 },
@@ -1039,7 +1074,7 @@ export function getAlertCenterOpenApi() {
         },
         Notifier: {
           type: "object",
-          required: ["id", "name", "type", "enabled"],
+          required: ["id", "name", "type", "enabled", "requiresInternet"],
           properties: {
             id: { type: "string" },
             name: {
@@ -1049,6 +1084,11 @@ export function getAlertCenterOpenApi() {
             },
             type: { type: "string" },
             enabled: { type: "boolean" },
+            requiresInternet: {
+              type: "boolean",
+              description:
+                "True for remote services that wait for Internet availability; false for local services such as Wyoming audio.",
+            },
             quietHours: { $ref: "#/components/schemas/QuietHoursStatus" },
             minimumSeverity: { $ref: "#/components/schemas/Severity" },
             repeatIntervalSeconds: {

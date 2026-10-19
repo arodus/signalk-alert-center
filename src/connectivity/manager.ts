@@ -21,6 +21,21 @@ type ConnectivitySafetyCheck = () =>
   ConnectivitySafetyState | Promise<ConnectivitySafetyState>;
 type InternetReadyCheck = (signal?: AbortSignal) => Promise<boolean>;
 
+export interface ConnectivitySessionSnapshot {
+  startedAt?: Date;
+  startedByPlugin: boolean;
+  state: ConnectivityState;
+  observedSwitchOn?: boolean;
+  wakeDueAt?: Date;
+  lastError?: string;
+  updatedAt: Date;
+}
+
+export interface ConnectivityObservers {
+  onSessionChange?: (session: ConnectivitySessionSnapshot) => void;
+  onInternetAvailability?: (online: boolean, checkedAt: Date) => void;
+}
+
 const safeToRelease: ConnectivitySafetyCheck = () => ({
   pendingDelivery: false,
   activeWakeAlert: false,
@@ -39,6 +54,7 @@ export class ConnectivityManager {
   lastProbeAt?: Date;
   lastProbeSucceeded?: boolean;
   lastProbeError?: string;
+  private sessionStartedAt?: Date;
   private cooldownTimer?: ReturnType<typeof setTimeout>;
   private wakeTimer?: ReturnType<typeof setTimeout>;
   private wakeDueAt?: Date;
@@ -54,6 +70,7 @@ export class ConnectivityManager {
     private readonly checkIntervalMs = 5_000,
     private readonly safetyCheck: ConnectivitySafetyCheck = safeToRelease,
     private readonly mayWake: () => boolean = () => true,
+    private readonly observers: ConnectivityObservers = {},
   ) {}
 
   get scheduledWakeAt(): Date | undefined {
@@ -65,6 +82,65 @@ export class ConnectivityManager {
     this.lastTransitionFrom = this.state;
     this.state = next;
     this.lastTransitionAt = new Date();
+    this.persist();
+  }
+
+  private persist(): void {
+    this.observers.onSessionChange?.({
+      startedAt: this.sessionStartedAt,
+      startedByPlugin: this.ownedByPlugin,
+      state: this.state,
+      observedSwitchOn: this.switchOn,
+      wakeDueAt: this.wakeDueAt,
+      lastError: this.lastError,
+      updatedAt: new Date(),
+    });
+  }
+
+  /** Reconcile durable ownership with the observed switch before scheduling. */
+  async recover(session?: ConnectivitySessionSnapshot): Promise<void> {
+    let observed: boolean | undefined;
+    try {
+      observed = await this.adapter.getState();
+    } catch (error) {
+      if (this.stopped) return;
+      this.switchOn = undefined;
+      this.ownedByPlugin = false;
+      this.sessionStartedAt = undefined;
+      this.lastError = `Could not read switch state after restart: ${error instanceof Error ? error.message : String(error)}`;
+      this.transition("FAULT");
+      this.persist();
+      return;
+    }
+    if (this.stopped) return;
+    this.switchOn = observed;
+    if (observed === false) {
+      this.ownedByPlugin = false;
+      this.sessionStartedAt = undefined;
+      this.lastError = undefined;
+      this.transition("OFF");
+      this.persist();
+      return;
+    }
+    if (observed !== true) {
+      this.ownedByPlugin = false;
+      this.sessionStartedAt = undefined;
+      this.lastError =
+        "Switch state is unknown after restart; leaving connectivity untouched";
+      this.transition("FAULT");
+      this.persist();
+      return;
+    }
+    this.ownedByPlugin = Boolean(
+      session?.startedByPlugin &&
+      session.observedSwitchOn !== false &&
+      session.state !== "OFF",
+    );
+    this.sessionStartedAt = this.ownedByPlugin ? session?.startedAt : undefined;
+    this.lastError = undefined;
+    this.transition("POWERED");
+    this.persist();
+    await this.waitForInternet();
   }
 
   async requestWake(): Promise<void> {
@@ -91,21 +167,37 @@ export class ConnectivityManager {
       this.cancelCooldown();
       return;
     }
-    const observed = await this.adapter.getState();
+    let observed: boolean | undefined;
+    try {
+      observed = await this.adapter.getState();
+    } catch (error) {
+      if (this.stopped) return;
+      this.switchOn = undefined;
+      this.ownedByPlugin = false;
+      this.sessionStartedAt = undefined;
+      this.transition("FAULT");
+      this.lastError = `Could not read switch state: ${error instanceof Error ? error.message : String(error)}`;
+      this.persist();
+      return;
+    }
     if (this.stopped || !this.mayWake()) return;
     this.switchOn = observed;
     if (observed === true) {
-      this.ownedByPlugin = false;
+      // A retry after an Internet boot timeout must not discard ownership.
       this.transition("POWERED");
       return this.waitForInternet();
     }
     if (observed !== false) {
       this.ownedByPlugin = false;
+      this.sessionStartedAt = undefined;
       this.transition("FAULT");
       this.lastError =
         "Switch state is unknown; leaving connectivity untouched";
+      this.persist();
       return;
     }
+    this.ownedByPlugin = false;
+    this.sessionStartedAt = new Date();
     this.transition("REQUESTING_ON");
     try {
       await this.adapter.setState(true);
@@ -116,6 +208,7 @@ export class ConnectivityManager {
     } catch (error) {
       this.transition("FAULT");
       this.lastError = error instanceof Error ? error.message : String(error);
+      this.persist();
     }
   }
 
@@ -127,14 +220,18 @@ export class ConnectivityManager {
     this.wakeTimer = setTimeout(() => {
       this.wakeTimer = undefined;
       this.wakeDueAt = undefined;
+      this.persist();
       void this.requestWake();
     }, delay);
+    this.wakeTimer.unref?.();
+    this.persist();
   }
 
   cancelScheduledWake(): void {
     if (this.wakeTimer) clearTimeout(this.wakeTimer);
     this.wakeTimer = undefined;
     this.wakeDueAt = undefined;
+    this.persist();
   }
 
   private async waitForInternet(): Promise<void> {
@@ -151,6 +248,8 @@ export class ConnectivityManager {
       }
       this.lastProbeAt = new Date();
       this.lastProbeSucceeded = ready;
+      this.observers.onInternetAvailability?.(ready, this.lastProbeAt);
+      this.persist();
       if (ready) {
         this.transition("ONLINE");
         return;
@@ -164,12 +263,16 @@ export class ConnectivityManager {
     this.lastError = this.lastProbeError
       ? `Internet readiness probe failed: ${this.lastProbeError}`
       : "Internet readiness probe timed out";
+    this.persist();
   }
 
   beginCooldown(): void {
     if (
       !this.ownedByPlugin ||
-      (this.state !== "ONLINE" && this.state !== "IDLE_COOLDOWN")
+      this.switchOn !== true ||
+      (this.state !== "ONLINE" &&
+        this.state !== "IDLE_COOLDOWN" &&
+        this.state !== "FAULT")
     )
       return;
     this.transition("IDLE_COOLDOWN");
@@ -178,6 +281,7 @@ export class ConnectivityManager {
     this.cooldownTimer = setTimeout(() => {
       void this.releaseIfSafe();
     }, this.cooldownMs);
+    this.cooldownTimer.unref?.();
   }
 
   cancelCooldown(): void {
@@ -204,10 +308,12 @@ export class ConnectivityManager {
       await this.adapter.setState(false);
       this.switchOn = false;
       this.ownedByPlugin = false;
+      this.sessionStartedAt = undefined;
       this.transition("OFF");
     } catch (error) {
       this.transition("FAULT");
       this.lastError = error instanceof Error ? error.message : String(error);
+      this.persist();
     }
   }
 

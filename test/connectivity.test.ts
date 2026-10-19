@@ -81,6 +81,71 @@ describe("connectivity ownership and durable wake requests", () => {
     expect(manager.lastError).toBe("Internet readiness probe timed out");
   });
 
+  it("restores persisted plugin ownership only when the switch is still on", async () => {
+    const adapter = new FakeSwitch();
+    adapter.state = true;
+    const manager = new ConnectivityManager(adapter, 0, async () => true);
+    managers.push(manager);
+
+    await manager.recover({
+      startedAt: new Date("2026-10-19T08:00:00Z"),
+      startedByPlugin: true,
+      state: "ONLINE",
+      observedSwitchOn: true,
+      updatedAt: new Date("2026-10-19T08:01:00Z"),
+    });
+    manager.beginCooldown();
+    await manager.releaseIfSafe();
+
+    expect(manager.ownedByPlugin).toBe(false);
+    expect(adapter.commands).toEqual([false]);
+    expect(manager.state).toBe("OFF");
+  });
+
+  it("keeps ownership after an Internet boot timeout and can release safely", async () => {
+    const adapter = new FakeSwitch();
+    const manager = new ConnectivityManager(
+      adapter,
+      0,
+      async () => false,
+      0,
+      1,
+    );
+    managers.push(manager);
+
+    await manager.requestWake();
+    expect(manager.state).toBe("FAULT");
+    expect(manager.ownedByPlugin).toBe(true);
+
+    manager.beginCooldown();
+    await manager.releaseIfSafe();
+
+    expect(adapter.commands).toEqual([true, false]);
+    expect(manager.state).toBe("OFF");
+  });
+
+  it("fails safely when the switch state cannot be read during recovery", async () => {
+    const adapter: SwitchAdapter = {
+      getState: async () => {
+        throw new Error("PUT provider unavailable");
+      },
+      setState: async () => {},
+    };
+    const manager = new ConnectivityManager(adapter, 0);
+    managers.push(manager);
+
+    await manager.recover({
+      startedByPlugin: true,
+      state: "ONLINE",
+      observedSwitchOn: true,
+      updatedAt: new Date("2026-10-19T08:00:00Z"),
+    });
+
+    expect(manager.state).toBe("FAULT");
+    expect(manager.ownedByPlugin).toBe(false);
+    expect(manager.lastError).toContain("PUT provider unavailable");
+  });
+
   it("re-checks live safety state before switching off", async () => {
     const adapter = new FakeSwitch();
     let pendingDelivery = true;
@@ -168,6 +233,45 @@ describe("connectivity ownership and durable wake requests", () => {
     expect(database.listWakeDue(new Date("2026-09-05T10:10:00.000Z"))).toEqual([
       { alertId: alert.id, dueAt },
     ]);
+  });
+
+  it("persists connectivity ownership and resumes waiting deliveries", () => {
+    const database = new AlertDatabase();
+    databases.push(database);
+    const now = new Date("2026-10-19T08:00:00Z");
+    database.saveConnectivitySession({
+      startedAt: now,
+      startedByPlugin: true,
+      state: "ONLINE",
+      observedSwitchOn: true,
+      updatedAt: now,
+    });
+    const lifecycle = new AlertLifecycle(database, ["ntfy-main"]);
+    lifecycle.ingest(
+      {
+        sourceKey: "notifications.internet.wait",
+        path: "notifications.internet.wait",
+        severity: "alarm",
+        state: "active",
+      },
+      now,
+    );
+    const delivery = database.listDueDeliveries(now)[0];
+
+    expect(database.waitForConnectivity(delivery.id, now)).toBe(true);
+    expect(database.listDueDeliveries(now)).toEqual([]);
+    expect(database.nextDeliveryDueAt()).toBeUndefined();
+    expect(database.waitingForConnectivityCount()).toBe(1);
+    expect(database.getConnectivitySession()).toMatchObject({
+      startedAt: now,
+      startedByPlugin: true,
+      state: "ONLINE",
+      observedSwitchOn: true,
+      updatedAt: now,
+    });
+
+    expect(database.resumeWaitingForConnectivity(now)).toBe(1);
+    expect(database.listDueDeliveries(now)).toHaveLength(1);
   });
 
   it("keeps the original wake-after deadline when an alert is updated", () => {

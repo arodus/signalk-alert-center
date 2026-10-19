@@ -54,6 +54,16 @@ export interface DatabaseOperationalStatus {
   error?: string;
 }
 
+export interface ConnectivitySessionRecord {
+  startedAt?: Date;
+  startedByPlugin: boolean;
+  state: string;
+  observedSwitchOn?: boolean;
+  wakeDueAt?: Date;
+  lastError?: string;
+  updatedAt: Date;
+}
+
 export interface WyomingPlaybackSnapshotInput {
   id: string;
   requestId?: string;
@@ -441,6 +451,56 @@ export class AlertDatabase {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  getConnectivitySession(): ConnectivitySessionRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM connectivity_sessions WHERE id=1")
+      .get() as Row | undefined;
+    if (!row) return undefined;
+    return {
+      startedAt: date(row.started_at),
+      startedByPlugin: Boolean(row.started_by_plugin),
+      state: String(row.state),
+      observedSwitchOn:
+        row.observed_switch_on === null || row.observed_switch_on === undefined
+          ? undefined
+          : Boolean(row.observed_switch_on),
+      wakeDueAt: date(row.wake_due_at),
+      lastError: row.last_error ? String(row.last_error) : undefined,
+      updatedAt: new Date(String(row.updated_at)),
+    };
+  }
+
+  saveConnectivitySession(session: ConnectivitySessionRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO connectivity_sessions
+          (id, started_at, started_by_plugin, state, observed_switch_on,
+           wake_due_at, last_error, updated_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           started_at=excluded.started_at,
+           started_by_plugin=excluded.started_by_plugin,
+           state=excluded.state,
+           observed_switch_on=excluded.observed_switch_on,
+           wake_due_at=excluded.wake_due_at,
+           last_error=excluded.last_error,
+           updated_at=excluded.updated_at`,
+      )
+      .run(
+        session.startedAt?.toISOString() ?? null,
+        session.startedByPlugin ? 1 : 0,
+        session.state,
+        session.observedSwitchOn === undefined
+          ? null
+          : session.observedSwitchOn
+            ? 1
+            : 0,
+        session.wakeDueAt?.toISOString() ?? null,
+        session.lastError ?? null,
+        session.updatedAt.toISOString(),
+      );
   }
 
   upsertDefinition(
@@ -1760,7 +1820,7 @@ export class AlertDatabase {
         `SELECT MIN(due_at) AS due_at FROM (
            SELECT COALESCE(next_attempt_at, created_at) AS due_at
            FROM deliveries
-           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed')
+           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed', 'waiting_connectivity')
            UNION ALL
            SELECT n.next_repeat_at AS due_at
            FROM occurrence_notifiers n
@@ -1997,13 +2057,44 @@ export class AlertDatabase {
       this.db
         .prepare(
           `SELECT * FROM deliveries
-           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed')
+           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed', 'waiting_connectivity')
              AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
            ORDER BY COALESCE(next_attempt_at, created_at), rowid
            LIMIT ?`,
         )
         .all(now.toISOString(), Math.max(1, Math.min(200, limit))) as Row[]
     ).map(deliveryRecord);
+  }
+
+  waitForConnectivity(id: string, now = new Date()): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE deliveries
+         SET state='waiting_connectivity', next_attempt_at=NULL, updated_at=?
+         WHERE id=? AND state IN ('pending', 'failed_retryable')`,
+      )
+      .run(now.toISOString(), id);
+    return result.changes > 0;
+  }
+
+  resumeWaitingForConnectivity(now = new Date()): number {
+    const result = this.db
+      .prepare(
+        `UPDATE deliveries
+         SET state='pending', next_attempt_at=NULL, updated_at=?
+         WHERE state='waiting_connectivity'`,
+      )
+      .run(now.toISOString());
+    return Number(result.changes);
+  }
+
+  waitingForConnectivityCount(): number {
+    const row = this.db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM deliveries WHERE state='waiting_connectivity'",
+      )
+      .get() as Row;
+    return Number(row.count);
   }
 
   claimDelivery(id: string, now = new Date()): boolean {

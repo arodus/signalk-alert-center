@@ -28,6 +28,11 @@ export interface DeliverySchedulerStatus {
 
 export interface DeliverySchedulerOptions {
   beforeSend?: (delivery: DeliveryRecord) => boolean;
+  onResult?: (
+    delivery: DeliveryRecord,
+    transport: NotificationTransport,
+    result: TransportResult,
+  ) => void;
   unitMetadata?: (
     path: string,
   ) => UnitMetadata | undefined | Promise<UnitMetadata | undefined>;
@@ -256,6 +261,7 @@ export class DeliveryScheduler {
     }
     if (result.kind === "success") {
       this.database.recordDeliverySuccess(delivery.id, result.remoteId, now);
+      this.options.onResult?.(delivery, transport, result);
       summary.succeeded += 1;
       return;
     }
@@ -269,6 +275,7 @@ export class DeliveryScheduler {
         : undefined,
       now,
     );
+    this.options.onResult?.(delivery, transport, result);
     if (result.kind === "retryable") summary.retryableFailures += 1;
     else summary.terminalFailures += 1;
   }

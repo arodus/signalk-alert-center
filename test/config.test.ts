@@ -97,7 +97,10 @@ describe("validateConfig", () => {
     ]);
     const connectionControl = pluginConfigSchema.properties.connectivity;
     expect(connectionControl.title).toBe(
-      "Internet connection control (for example Starlink)",
+      "Internet availability and connection control",
+    );
+    expect(connectionControl.properties.probe.description).toContain(
+      "wait without consuming retry attempts",
     );
     expect(connectionControl.description).toContain(
       "only when it originally turned it on",

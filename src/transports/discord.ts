@@ -9,6 +9,7 @@ import {
 
 export class DiscordTransport implements NotificationTransport {
   readonly type = "discord";
+  readonly requiresInternet = true;
   constructor(private readonly webhookUrl: string) {}
   async send(
     _alert: AlertRecord,

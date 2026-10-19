@@ -1151,6 +1151,7 @@ dialog input[type="checkbox"] {
   overflow-wrap: anywhere;
 }
 .status-pill.failed_retryable,
+.status-pill.waiting_connectivity,
 .status-pill.sending {
   color: #8b5a0b;
   background: #fff0d4;

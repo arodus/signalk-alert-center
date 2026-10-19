@@ -22,6 +22,7 @@ interface TelegramResponse {
 /** Durable text delivery through Telegram's HTTPS Bot API. */
 export class TelegramTransport implements NotificationTransport {
   readonly type = "telegram";
+  readonly requiresInternet = true;
 
   constructor(
     private readonly config: TelegramConfig,
