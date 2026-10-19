@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-19
+
 ### Fixes
 
 - Pause Internet-required notification services when the configured availability
@@ -19,6 +21,28 @@ Versioning while it remains pre-1.0.
 - Send PagerDuty acknowledge and resolve events without trigger-only payload
   fields, and translate every Signal K severity to a value accepted by
   PagerDuty. Existing failed deliveries can be retried after upgrading.
+
+### Behavior and configuration
+
+- Notification services now report whether they require Internet access. ntfy,
+  PagerDuty, Discord, Pushover, and Telegram wait while confirmed offline;
+  Wyoming sound and speech remain available locally.
+- The existing Internet availability check also controls retry pausing when
+  connection-switch control is disabled. No new setting is required. Without a
+  configured check, deliveries use the previous normal retry schedule.
+- The first remote attempt is still allowed while Internet availability is
+  unknown. A network failure starts the check; the configured endpoint defines
+  whether Internet access is considered available.
+
+### API and compatibility
+
+- Notifier and status responses expose `requiresInternet` and aggregate Internet
+  availability. OpenAPI now includes the legacy alert catalog, acknowledge, and
+  silence routes.
+- No database migration or dependency change is required. Existing history,
+  policies, delivery attempts, and connectivity settings are preserved.
+- Rollback to 0.4.2 does not require restoring the database. Deliveries waiting
+  for Internet return to 0.4.2's normal retry behavior after rollback.
 
 ## [0.4.2] - 2026-10-18
 
