@@ -579,9 +579,9 @@ export const pluginConfigSchema = {
     },
     connectivity: {
       type: "object",
-      title: "Internet connection control (for example Starlink)",
+      title: "Internet availability and connection control",
       description:
-        "Optional. Alert Center can turn a Signal K-controlled connection on when notifications need internet access. It turns the connection off only when it originally turned it on.",
+        "The availability check pauses Internet-required notification services while offline. Optionally, Alert Center can also turn a Signal K-controlled connection such as Starlink on when needed. It turns the connection off only when it originally turned it on.",
       properties: {
         enabled: {
           type: "boolean",
@@ -616,7 +616,7 @@ export const pluginConfigSchema = {
           type: "object",
           title: "Internet availability check",
           description:
-            "The plugin sends an HTTP HEAD request and considers any 2xx response online. Use a lightweight public endpoint that works without authentication.",
+            "The plugin sends an HTTP HEAD request and considers any 2xx response online. This check also works when connection control is disabled: Internet-required deliveries wait without consuming retry attempts until the check succeeds. Use a lightweight public endpoint that works without authentication.",
           properties: {
             url: {
               type: "string",

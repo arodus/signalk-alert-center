@@ -251,14 +251,39 @@ history, deliveries, and per-alert settings. Global plugin configuration is kept
 
 ## Connectivity control
 
+Notification services declare whether they require Internet access. ntfy,
+PagerDuty, Discord, Pushover, and Telegram require Internet; Wyoming sound and
+speech delivery is local and remains available offline.
+
+The configured availability check starts in an **unknown** state, so Alert Center
+allows the first remote attempt. A network failure triggers the check. Once the
+check confirms the vessel is offline, remote deliveries remain durably in
+**Waiting for Internet availability** without consuming further retry attempts.
+Alert Center checks periodically and resumes them automatically when Internet
+access returns. This behavior works even when connection control is disabled.
+
 Alert Center can optionally turn on a Signal K PUT-capable connectivity switch,
-such as a Starlink power control, when eligible work is waiting. It only turns a
-connection off when it can prove that it turned that session on. Leave this
-feature disabled if another system manages connectivity.
+such as a Starlink power control, when eligible work is waiting. It stores
+ownership of a connection that it started so restart and Internet boot timeout
+recovery remain safe. It only turns a connection off when the live switch still
+shows on and it can prove that it turned that session on. Leave connection
+control disabled if another system manages the switch.
 
 The default connectivity check uses Google's lightweight `generate_204`
 endpoint. You can replace it with another URL that returns any successful 2xx
 response.
+
+## Notification ingestion load
+
+The default in-memory ingestion limit is 2,000 pending, non-equivalent Signal K
+notification updates. The plugin persists 100 updates per event-loop turn by
+default. Identical pending updates for the same source are coalesced, so repeated
+unchanged sensor reports do not each consume a slot. "Under load" therefore
+means more than 2,000 distinct state, severity, message, or sampled-value
+transitions arrive before the worker can drain the queue. Further transitions
+are rejected and the dashboard diagnostics and plugin log report the count.
+Both limits can be adjusted under **Advanced → Performance and retry**; raising
+the queue limit increases peak memory use rather than persistence throughput.
 
 ## Privacy and network access
 

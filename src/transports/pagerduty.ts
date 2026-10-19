@@ -19,6 +19,7 @@ const pagerDutySeverity: Record<Severity, PagerDutySeverity> = {
 
 export class PagerDutyTransport implements NotificationTransport {
   readonly type = "pagerduty";
+  readonly requiresInternet = true;
   constructor(
     private readonly routingKey: string,
     private readonly endpoint = "https://events.pagerduty.com/v2/enqueue",

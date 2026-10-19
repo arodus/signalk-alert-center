@@ -1196,8 +1196,8 @@ function Connectivity({ config, update }) {
   const set = (patch) => update("connectivity", { ...value, ...patch });
   return (
     <Card
-      title="Internet connection control"
-      help="Optional. Alert Center can turn a Signal K-controlled connection such as Starlink on when notifications need internet access. It turns the connection off only when it originally turned it on."
+      title="Internet availability and connection control"
+      help="The availability check pauses Internet-required services while offline. Optionally, Alert Center can turn a Signal K-controlled connection such as Starlink on when needed. It turns the connection off only when it originally turned it on."
     >
       <label style={{ ...styles.checkLabel, marginBottom: 18 }}>
         <input
@@ -1235,7 +1235,7 @@ function Connectivity({ config, update }) {
         />
         <Field
           label="Internet availability check URL"
-          hint="Alert Center sends a HEAD request to this address. Any 2xx response means internet access is available."
+          hint="Alert Center sends a HEAD request to this address. Any 2xx response means internet access is available. This check remains active when connection control is disabled."
         >
           <input
             style={styles.input}

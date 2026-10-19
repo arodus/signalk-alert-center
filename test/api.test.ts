@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AlertCenterRepository,
   registerAlertCenterRoutes,
+  registerRoutes,
   RouterLike,
 } from "../src/api/routes";
 
@@ -511,6 +512,48 @@ describe("alert-center routes", () => {
         error: { code: "ALERT_INACTIVE" },
       });
     }
+  });
+});
+
+describe("legacy alert routes", () => {
+  it("awaits mutations and returns not found instead of reporting false success", async () => {
+    const handlers = new Map<string, Handler>();
+    const registrar = (method: string) => (path: unknown, handler: unknown) =>
+      handlers.set(`${method} ${path}`, handler as Handler);
+    const router: RouterLike = {
+      get: registrar("GET"),
+      post: registrar("POST"),
+      access() {
+        return {
+          get: registrar("GET"),
+          post: registrar("POST"),
+        };
+      },
+    };
+    registerRoutes(
+      router,
+      () => undefined,
+      () => ({}),
+      async () => {},
+      () => [],
+      async (id) => id === "active",
+      async () => false,
+    );
+
+    const invoke = async (path: string, id: string) => {
+      const response = new FakeResponse();
+      handlers.get(`POST ${path}`)?.({ params: { id } }, response);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return response;
+    };
+
+    const found = await invoke("/alerts/:id/acknowledge", "active");
+    expect(found.statusCode).toBe(200);
+    expect(found.body).toEqual({ status: "acknowledged" });
+
+    const missing = await invoke("/alerts/:id/acknowledge", "missing");
+    expect(missing.statusCode).toBe(404);
+    expect(missing.body).toMatchObject({ error: { code: "NOT_FOUND" } });
   });
 });
 

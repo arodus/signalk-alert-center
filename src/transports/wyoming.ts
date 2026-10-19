@@ -133,6 +133,7 @@ export function renderSpeechText(
 
 export class WyomingTransport implements NotificationTransport {
   readonly type = "wyoming";
+  readonly requiresInternet = false;
 
   constructor(private readonly options: WyomingTransportOptions) {}
 

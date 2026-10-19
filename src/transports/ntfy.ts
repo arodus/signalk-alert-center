@@ -9,6 +9,7 @@ import {
 
 export class NtfyTransport implements NotificationTransport {
   readonly type = "ntfy";
+  readonly requiresInternet = true;
   constructor(
     private readonly config: { server: string; topic: string; token?: string },
   ) {}

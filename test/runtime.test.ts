@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ServerAPI } from "@signalk/server-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AlertLifecycle } from "../src/alerts/lifecycle";
 import { pathDefinitionId } from "../src/alerts/policy";
 import { AlertCenterRepository, Page } from "../src/api/routes";
 import { AlertCenterRuntime } from "../src/runtime";
@@ -77,6 +78,59 @@ describe("AlertCenterRuntime", () => {
     expect(databasePath({ storage: { path: absolutePath } })).toBe(
       absolutePath,
     );
+  });
+
+  it("returns waiting deliveries to normal retries when the probe is removed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-no-probe-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    const database = new AlertDatabase(filename);
+    const lifecycle = new AlertLifecycle(database, ["crew"]);
+    lifecycle.ingest({
+      sourceKey: "notifications.offline.restart",
+      path: "notifications.offline.restart",
+      severity: "alarm",
+      state: "active",
+    });
+    const delivery = database.listDueDeliveries()[0];
+    database.waitForConnectivity(delivery.id);
+    database.close();
+
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(() => ({})),
+      selfContext: "vessels.self",
+      handleMessage: vi.fn(),
+      setPluginStatus: vi.fn(),
+      subscriptionmanager: {
+        subscribe: (_command: unknown, unsubscribes: Array<() => void>) =>
+          unsubscribes.push(vi.fn()),
+      },
+    } as unknown as ServerAPI;
+    const runtime = new AlertCenterRuntime(app);
+    runtime.start({
+      storage: { path: filename },
+      notifiers: [
+        {
+          name: "crew",
+          type: "ntfy",
+          server: "https://notify.invalid",
+          topic: "test",
+        },
+      ],
+    });
+    try {
+      const reopened = (runtime as unknown as { database: AlertDatabase })
+        .database;
+      expect(reopened.getDelivery(delivery.id)?.state).toBe("pending");
+      expect(app.debug).toHaveBeenCalledWith(
+        expect.stringContaining("returned 1 delivery(s)"),
+      );
+    } finally {
+      await runtime.stop();
+    }
   });
 
   it("discovers zones and persists source-aware recurring occurrences", async () => {
@@ -888,6 +942,135 @@ describe("AlertCenterRuntime", () => {
           },
         ],
       });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("waits for confirmed Internet without blocking local Wyoming delivery", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-offline-runtime-"));
+    directories.push(directory);
+    let subscriber: ((delta: unknown) => void) | undefined;
+    let online = false;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://probe.example/status")
+        return new Response(null, { status: online ? 204 : 503 });
+      if (!online) throw new Error("offline");
+      return new Response("ok", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const announcementApi = {
+      version: 1 as const,
+      announce: vi.fn(async (request: { requestId?: string }) => ({
+        id: request.requestId ?? "announcement",
+        requestId: request.requestId,
+        state: "queued" as const,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        targets: { cabin: { state: "queued" as const } },
+      })),
+    };
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(() => ({})),
+      selfContext: "vessels.self",
+      handleMessage: vi.fn(),
+      setPluginStatus: vi.fn(),
+      onPropertyValues: (
+        _name: string,
+        callback: (history: Array<{ value: unknown }>) => void,
+      ) => {
+        callback([{ value: announcementApi }]);
+        return vi.fn();
+      },
+      subscriptionmanager: {
+        subscribe: (
+          _command: unknown,
+          unsubscribes: Array<() => void>,
+          _onError: (error: unknown) => void,
+          callback: (delta: unknown) => void,
+        ) => {
+          subscriber = callback;
+          unsubscribes.push(vi.fn());
+        },
+      },
+    } as unknown as ServerAPI;
+    const runtime = new AlertCenterRuntime(app);
+    runtime.start({
+      notifiers: [
+        {
+          name: "Remote ntfy",
+          type: "ntfy",
+          server: "https://ntfy.example",
+          topic: "boat",
+        },
+        { name: "Cabin audio", type: "wyoming" },
+      ],
+      defaults: {
+        minSeverity: "normal",
+        notifiers: ["Remote ntfy", "Cabin audio"],
+        speechEnabled: false,
+      },
+      connectivity: {
+        enabled: false,
+        probe: { url: "https://probe.example/status", timeoutSeconds: 1 },
+        internetCheckIntervalSeconds: 60,
+      },
+    });
+    try {
+      subscriber?.({
+        updates: [
+          {
+            $source: "fixture",
+            values: [
+              {
+                path: "notifications.offline.test",
+                value: {
+                  state: "alarm",
+                  method: ["sound"],
+                  message: "Offline test",
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const database = (runtime as unknown as { database: AlertDatabase })
+        .database;
+      await vi.waitFor(() => {
+        const deliveries = database.listDeliveries();
+        expect(
+          deliveries.find(
+            (delivery) => delivery.transportInstanceId === "Remote ntfy",
+          ),
+        ).toMatchObject({ state: "waiting_connectivity", attemptCount: 1 });
+        expect(
+          deliveries.find(
+            (delivery) => delivery.transportInstanceId === "Cabin audio",
+          ),
+        ).toMatchObject({ state: "delivered", attemptCount: 1 });
+      });
+      expect(announcementApi.announce).toHaveBeenCalledTimes(1);
+
+      online = true;
+      const internet = (
+        runtime as unknown as {
+          internet: { checkNow(): Promise<boolean> };
+        }
+      ).internet;
+      await expect(internet.checkNow()).resolves.toBe(true);
+      await vi.waitFor(() => {
+        expect(
+          database
+            .listDeliveries()
+            .find((delivery) => delivery.transportInstanceId === "Remote ntfy"),
+        ).toMatchObject({ state: "delivered", attemptCount: 2 });
+      });
+      expect(announcementApi.announce).toHaveBeenCalledTimes(1);
     } finally {
       await runtime.stop();
     }

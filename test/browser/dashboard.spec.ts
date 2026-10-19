@@ -684,13 +684,18 @@ test("offers database reset as a confirmed action", async ({ page }) => {
   ).toBeEnabled();
 });
 
-test("explains internet connection control in user-facing terms", async ({
+test("explains internet availability and connection control in user-facing terms", async ({
   page,
 }) => {
   await page.goto("/admin/#/apps/configuration/signalk-alert-center");
   await page.getByRole("button", { name: "Connectivity", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Internet connection control" }),
+    page.getByRole("heading", {
+      name: "Internet availability and connection control",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/pauses Internet-required services while offline/),
   ).toBeVisible();
   await expect(
     page.getByLabel("Allow Alert Center to control the internet connection"),
