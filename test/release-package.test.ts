@@ -59,15 +59,24 @@ it("stamps the release tarball with gitHead without changing the checkout", () =
     git("add", ".");
     git("commit", "-m", "Release fixture");
     const expectedGitHead = git("rev-parse", "HEAD");
+    const githubOutput = join(work, "github-output");
 
     const result = spawnSync(
       process.execPath,
       ["scripts/create-release-package.mjs"],
-      { cwd: work, encoding: "utf8" },
+      {
+        cwd: work,
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_OUTPUT: githubOutput },
+      },
     );
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(join(work, "package.json"), "utf8")).toBe(
       originalPackageJson,
+    );
+    expect(readFileSync(githubOutput, "utf8")).toBe(
+      "package-file=release-package-fixture-1.2.3.tgz\n" +
+        "checksum-file=release-package-fixture-1.2.3.tgz.sha256\n",
     );
 
     const packageFile = join(work, "release-package-fixture-1.2.3.tgz");
