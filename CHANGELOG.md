@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-20
+
 ### Connectivity
 
 - Use the preferred `network.internet.state` value from the recommended optional
