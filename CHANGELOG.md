@@ -5,6 +5,22 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Connectivity
+
+- Use the preferred `network.internet.state` value from the recommended optional
+  `@meri-imperiumi/signalk-internet` plugin as the single Internet-availability
+  source. `online` and `metered` permit remote alert delivery; `offline` and
+  `captive` pause it without consuming retry attempts.
+- Remove Alert Center's duplicate HTTP probe URL and timeout settings. Configure
+  hardware mappings and active probing in `@meri-imperiumi/signalk-internet`.
+  Existing saved probe fields are ignored after upgrading.
+- Keep normal retry behavior when `network.internet.state` is missing, cleared,
+  or invalid so an unavailable optional provider cannot strand durable work.
+- Block automatic connection wake commands until a valid shared Internet state
+  has been observed. Wake requests remain durable and are reconsidered when the
+  provider starts publishing, so a missing optional plugin cannot energize and
+  strand the configured connection.
+
 ## [0.4.3] - 2026-10-19
 
 ### Fixes

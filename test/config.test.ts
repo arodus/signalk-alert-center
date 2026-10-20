@@ -67,13 +67,6 @@ describe("validateConfig", () => {
     ]);
   });
 
-  it("uses a public endpoint suitable for the HEAD-based Internet probe", () => {
-    expect(
-      pluginConfigSchema.properties.connectivity.properties.probe.properties.url
-        .default,
-    ).toBe("https://www.gstatic.com/generate_204");
-  });
-
   it("keeps navigation-aware snooze opt-in and validates its setting", () => {
     const snooze = pluginConfigSchema.properties.snooze;
     expect(snooze.properties.onlyWhenAnchoredOrMoored.default).toBe(false);
@@ -97,11 +90,10 @@ describe("validateConfig", () => {
     ]);
     const connectionControl = pluginConfigSchema.properties.connectivity;
     expect(connectionControl.title).toBe(
-      "Internet availability and connection control",
+      "Internet status and connection control",
     );
-    expect(connectionControl.properties.probe.description).toContain(
-      "wait without consuming retry attempts",
-    );
+    expect(connectionControl.properties.probe).toBeUndefined();
+    expect(connectionControl.description).toContain("network.internet.state");
     expect(connectionControl.description).toContain(
       "only when it originally turned it on",
     );
@@ -379,7 +371,7 @@ describe("validateConfig", () => {
           switch: { path: "switch", onValue: 1, offValue: 0 },
         },
       }),
-    ).toThrow("Internet probe");
+    ).not.toThrow();
   });
 
   it("accepts non-negative activation delays and rejects invalid policies", () => {

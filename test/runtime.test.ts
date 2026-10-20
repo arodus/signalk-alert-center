@@ -80,7 +80,7 @@ describe("AlertCenterRuntime", () => {
     );
   });
 
-  it("returns waiting deliveries to normal retries when the probe is removed", async () => {
+  it("returns waiting deliveries to normal retries when Internet state is unavailable", async () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-no-probe-"));
     directories.push(directory);
     const filename = join(directory, "alerts.sqlite");
@@ -126,7 +126,120 @@ describe("AlertCenterRuntime", () => {
         .database;
       expect(reopened.getDelivery(delivery.id)?.state).toBe("pending");
       expect(app.debug).toHaveBeenCalledWith(
-        expect.stringContaining("returned 1 delivery(s)"),
+        expect.stringContaining(
+          "Internet state is unknown: returned 1 delivery(s)",
+        ),
+      );
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("does not energize the connection switch until an Internet-state provider is observed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "notifier-wake-guard-"));
+    directories.push(directory);
+    let notificationSubscriber: ((delta: unknown) => void) | undefined;
+    let internetSubscriber: ((delta: unknown) => void) | undefined;
+    const putSelfPath = vi.fn(async () => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    );
+    const switchPath = "electrical.switches.starlink.state";
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(() => ({})),
+      getSelfPath: vi.fn((path: string) =>
+        path === switchPath ? 0 : undefined,
+      ),
+      putSelfPath,
+      selfContext: "vessels.self",
+      handleMessage: vi.fn(),
+      setPluginStatus: vi.fn(),
+      subscriptionmanager: {
+        subscribe: (
+          command: unknown,
+          unsubscribes: Array<() => void>,
+          _onError: (error: unknown) => void,
+          callback: (delta: unknown) => void,
+        ) => {
+          const paths = (
+            command as { subscribe?: Array<{ path?: string }> }
+          ).subscribe?.map((item) => item.path);
+          if (paths?.includes("network.internet.state"))
+            internetSubscriber = callback;
+          else notificationSubscriber = callback;
+          unsubscribes.push(vi.fn());
+        },
+      },
+    } as unknown as ServerAPI;
+    const runtime = new AlertCenterRuntime(app);
+    runtime.start({
+      notifiers: [
+        {
+          name: "Crew",
+          type: "ntfy",
+          server: "https://ntfy.example",
+          topic: "boat",
+        },
+      ],
+      defaults: {
+        minSeverity: "normal",
+        notifiers: ["Crew"],
+        connectivity: { mode: "wake" },
+      },
+      connectivity: {
+        enabled: true,
+        switch: { path: switchPath, onValue: 1, offValue: 0 },
+        bootTimeoutSeconds: 60,
+        internetCheckIntervalSeconds: 60,
+      },
+    });
+    try {
+      notificationSubscriber?.({
+        updates: [
+          {
+            $source: "fixture",
+            values: [
+              {
+                path: "notifications.connection.required",
+                value: { state: "alarm", message: "Connection required" },
+              },
+            ],
+          },
+        ],
+      });
+
+      const database = (runtime as unknown as { database: AlertDatabase })
+        .database;
+      await vi.waitFor(() =>
+        expect(database.listWakeRequests()).toHaveLength(1),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(putSelfPath).not.toHaveBeenCalled();
+      expect(runtime.status()).toMatchObject({
+        health: {
+          state: "degraded",
+          reasons: expect.arrayContaining([
+            expect.stringContaining("Automatic connection control is blocked"),
+          ]),
+        },
+      });
+
+      internetSubscriber?.({
+        updates: [
+          {
+            $source: "signalk-internet.internet",
+            values: [{ path: "network.internet.state", value: "offline" }],
+          },
+        ],
+      });
+      await vi.waitFor(() =>
+        expect(putSelfPath).toHaveBeenCalledWith(switchPath, 1),
       );
     } finally {
       await runtime.stop();
@@ -532,7 +645,7 @@ describe("AlertCenterRuntime", () => {
       await runtime.stop();
       vi.unstubAllGlobals();
     }
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(2);
   });
 
   it("stores service health notifications without delivering them", async () => {
@@ -780,23 +893,26 @@ describe("AlertCenterRuntime", () => {
     const runtime = new AlertCenterRuntime(app);
     runtime.start({ ingestion: { queueLimit: 10, batchSize: 2 } });
     try {
-      await vi.waitFor(() => {
-        expect(runtime.status()).toMatchObject({
-          reconciliation: {
-            state: "complete",
-            snapshotEntries: 1,
-            queuedEntries: 10_000,
-          },
-          ingestion: {
-            depth: 0,
-            limit: 10,
-            highWaterMark: 10,
-            received: 10_000,
-            processed: 10,
-            rejected: 9_990,
-          },
-        });
-      });
+      await vi.waitFor(
+        () => {
+          expect(runtime.status()).toMatchObject({
+            reconciliation: {
+              state: "complete",
+              snapshotEntries: 1,
+              queuedEntries: 10_000,
+            },
+            ingestion: {
+              depth: 0,
+              limit: 10,
+              highWaterMark: 10,
+              received: 10_000,
+              processed: 10,
+              rejected: 9_990,
+            },
+          });
+        },
+        { timeout: 10_000 },
+      );
     } finally {
       await runtime.stop();
     }
@@ -951,11 +1067,10 @@ describe("AlertCenterRuntime", () => {
     const directory = mkdtempSync(join(tmpdir(), "notifier-offline-runtime-"));
     directories.push(directory);
     let subscriber: ((delta: unknown) => void) | undefined;
+    let internetSubscriber: ((delta: unknown) => void) | undefined;
+    let internetSubscription: unknown;
     let online = false;
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url === "https://probe.example/status")
-        return new Response(null, { status: online ? 204 : 503 });
+    const fetchMock = vi.fn(async () => {
       if (!online) throw new Error("offline");
       return new Response("ok", { status: 200 });
     });
@@ -988,12 +1103,18 @@ describe("AlertCenterRuntime", () => {
       },
       subscriptionmanager: {
         subscribe: (
-          _command: unknown,
+          command: unknown,
           unsubscribes: Array<() => void>,
           _onError: (error: unknown) => void,
           callback: (delta: unknown) => void,
         ) => {
-          subscriber = callback;
+          const paths = (
+            command as { subscribe?: Array<{ path?: string }> }
+          ).subscribe?.map((item) => item.path);
+          if (paths?.includes("network.internet.state")) {
+            internetSubscription = command;
+            internetSubscriber = callback;
+          } else subscriber = callback;
           unsubscribes.push(vi.fn());
         },
       },
@@ -1016,11 +1137,23 @@ describe("AlertCenterRuntime", () => {
       },
       connectivity: {
         enabled: false,
-        probe: { url: "https://probe.example/status", timeoutSeconds: 1 },
         internetCheckIntervalSeconds: 60,
       },
     });
     try {
+      expect(internetSubscription).toMatchObject({
+        context: "vessels.self",
+        sourcePolicy: "preferred",
+        subscribe: [{ path: "network.internet.state", policy: "instant" }],
+      });
+      internetSubscriber?.({
+        updates: [
+          {
+            $source: "signalk-internet.internet",
+            values: [{ path: "network.internet.state", value: "offline" }],
+          },
+        ],
+      });
       subscriber?.({
         updates: [
           {
@@ -1047,7 +1180,7 @@ describe("AlertCenterRuntime", () => {
           deliveries.find(
             (delivery) => delivery.transportInstanceId === "Remote ntfy",
           ),
-        ).toMatchObject({ state: "waiting_connectivity", attemptCount: 1 });
+        ).toMatchObject({ state: "waiting_connectivity", attemptCount: 0 });
         expect(
           deliveries.find(
             (delivery) => delivery.transportInstanceId === "Cabin audio",
@@ -1057,18 +1190,20 @@ describe("AlertCenterRuntime", () => {
       expect(announcementApi.announce).toHaveBeenCalledTimes(1);
 
       online = true;
-      const internet = (
-        runtime as unknown as {
-          internet: { checkNow(): Promise<boolean> };
-        }
-      ).internet;
-      await expect(internet.checkNow()).resolves.toBe(true);
+      internetSubscriber?.({
+        updates: [
+          {
+            $source: "signalk-internet.internet",
+            values: [{ path: "network.internet.state", value: "online" }],
+          },
+        ],
+      });
       await vi.waitFor(() => {
         expect(
           database
             .listDeliveries()
             .find((delivery) => delivery.transportInstanceId === "Remote ntfy"),
-        ).toMatchObject({ state: "delivered", attemptCount: 2 });
+        ).toMatchObject({ state: "delivered", attemptCount: 1 });
       });
       expect(announcementApi.announce).toHaveBeenCalledTimes(1);
     } finally {

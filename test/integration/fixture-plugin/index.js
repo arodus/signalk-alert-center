@@ -2,10 +2,12 @@ const DEFAULT_PATH =
   "notifications.environment.inside.refrigerator.temperature";
 const ZONE_PATH = "environment.inside.refrigerator.temperature";
 const SWITCH_PATH = "electrical.switches.fixture.state";
+const INTERNET_STATE_PATH = "network.internet.state";
 
 module.exports = function fixturePlugin(app) {
   const events = [];
   let switchValue = 0;
+  let internetState = "online";
   let seedTimer;
 
   function publish(path, value, source = "fixture.default") {
@@ -158,6 +160,7 @@ module.exports = function fixturePlugin(app) {
         );
       }
       publish(SWITCH_PATH, switchValue, "fixture.switch");
+      publish(INTERNET_STATE_PATH, internetState, "signalk-internet.internet");
       // Signal K attaches metadata to an existing model path, so publish a
       // deterministic value before the zone definition.
       publish(ZONE_PATH, 280, "fixture.zones");
@@ -192,6 +195,7 @@ module.exports = function fixturePlugin(app) {
         response.json({
           events,
           switchValue,
+          internetState,
           zonePath: ZONE_PATH,
           selfContext: app.selfContext,
         });
@@ -199,8 +203,24 @@ module.exports = function fixturePlugin(app) {
       writes.post("/reset", (_request, response) => {
         events.length = 0;
         switchValue = 0;
+        internetState = "online";
         publish(SWITCH_PATH, switchValue, "fixture.switch");
+        publish(
+          INTERNET_STATE_PATH,
+          internetState,
+          "signalk-internet.internet",
+        );
         response.json({ reset: true });
+      });
+      writes.post("/internet", (request, response) => {
+        internetState = request.body?.state ?? "online";
+        response.json(
+          publish(
+            INTERNET_STATE_PATH,
+            internetState,
+            "signalk-internet.internet",
+          ),
+        );
       });
       writes.post("/raise", (request, response) => {
         const body = request.body ?? {};

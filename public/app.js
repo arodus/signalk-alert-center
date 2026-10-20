@@ -202,7 +202,7 @@ function renderDiagnostics(status) {
     ],
     [
       "Connectivity",
-      `${connectivity.state ?? "OFF"} · Internet ${internetAvailability} · ${connectivity.ownedByPlugin ? "plugin-owned" : "not plugin-owned"} · last transition ${formatDate(connectivity.lastTransitionAt)} · ${connectivity.pendingWakeCount ?? 0} pending wake${connectivity.lastProbeAt ? ` · probe ${connectivity.lastProbeSucceeded ? "passed" : "failed"} ${formatDate(connectivity.lastProbeAt)}` : ""}${connectivity.lastError ? ` · ${connectivity.lastError}` : ""}`,
+      `${connectivity.state ?? "OFF"} · Internet ${internetAvailability} from network.internet.state${connectivity.internetAvailability?.source ? ` (${connectivity.internetAvailability.source})` : ""}${connectivity.internetAvailability?.lastUpdatedAt ? ` · state updated ${formatDate(connectivity.internetAvailability.lastUpdatedAt)}` : ""} · ${connectivity.ownedByPlugin ? "plugin-owned" : "not plugin-owned"} · last transition ${formatDate(connectivity.lastTransitionAt)} · ${connectivity.pendingWakeCount ?? 0} pending wake${connectivity.lastInternetCheckAt ? ` · state check ${connectivity.lastInternetAvailable ? "available" : "unavailable"} ${formatDate(connectivity.lastInternetCheckAt)}` : ""}${connectivity.lastError ? ` · ${connectivity.lastError}` : ""}`,
     ],
     ...services.map((service) => [
       `Service: ${service.name}`,
