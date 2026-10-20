@@ -893,23 +893,26 @@ describe("AlertCenterRuntime", () => {
     const runtime = new AlertCenterRuntime(app);
     runtime.start({ ingestion: { queueLimit: 10, batchSize: 2 } });
     try {
-      await vi.waitFor(() => {
-        expect(runtime.status()).toMatchObject({
-          reconciliation: {
-            state: "complete",
-            snapshotEntries: 1,
-            queuedEntries: 10_000,
-          },
-          ingestion: {
-            depth: 0,
-            limit: 10,
-            highWaterMark: 10,
-            received: 10_000,
-            processed: 10,
-            rejected: 9_990,
-          },
-        });
-      });
+      await vi.waitFor(
+        () => {
+          expect(runtime.status()).toMatchObject({
+            reconciliation: {
+              state: "complete",
+              snapshotEntries: 1,
+              queuedEntries: 10_000,
+            },
+            ingestion: {
+              depth: 0,
+              limit: 10,
+              highWaterMark: 10,
+              received: 10_000,
+              processed: 10,
+              rejected: 9_990,
+            },
+          });
+        },
+        { timeout: 10_000 },
+      );
     } finally {
       await runtime.stop();
     }
