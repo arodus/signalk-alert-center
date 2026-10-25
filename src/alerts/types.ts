@@ -1,3 +1,4 @@
+import type { CoreAlert } from "../signalk/core-alerts";
 /** Reading captured at notification receipt; raw Signal K message stays intact. */
 export interface MessageSample {
   message: string;
@@ -22,6 +23,9 @@ export type ConnectivityMode =
   | { mode: "wake_after"; delaySeconds: number };
 
 export interface AlertRecord {
+  coreAlert?: CoreAlert;
+  /** True only when a condition return or successful terminal action was observed. */
+  coreResolutionConfirmed?: boolean;
   id: string;
   definitionId?: string;
   occurrenceNumber?: number;
@@ -303,6 +307,8 @@ export interface OccurrencePage {
 }
 
 export interface NormalizedAlert {
+  coreAlert?: CoreAlert;
+  coreResolutionConfirmed?: boolean;
   sourceKey: string;
   path: string;
   source?: string;

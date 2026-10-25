@@ -5,6 +5,19 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Core alerts migration
+
+- Consume the proposed Signal K core alerts API alongside legacy notifications,
+  preserving core IDs, grouped momentary alerts, condition/acknowledgment state,
+  source status and durable per-service delivery. Native acknowledgment and
+  silence use the core API; Wyoming follows core silence and attention state.
+- Preserve existing history and pending deliveries through database schema
+  version 4. Native `alerts.*` paths have separate delivery policies from legacy
+  notification paths. See [migration notes](docs/core-alerts-migration.md) for the
+  pinned development server and testing instructions.
+- Show unclassified core removals separately and withhold automatic recovery
+  messages for them while upstream removal semantics are being clarified.
+
 ## [0.5.0] - 2026-10-20
 
 ### Connectivity

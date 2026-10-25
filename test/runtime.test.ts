@@ -381,7 +381,7 @@ describe("AlertCenterRuntime", () => {
           rejected: 0,
         },
         scheduler: { running: false, activeRequests: 0 },
-        database: { healthy: true, schemaVersion: 3, expectedSchemaVersion: 3 },
+        database: { healthy: true, schemaVersion: 4, expectedSchemaVersion: 4 },
         services: [
           {
             id: "warning",

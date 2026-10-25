@@ -1,3 +1,4 @@
+import { isCoreAlert } from "./core-alerts";
 import { ServerAPI } from "@signalk/server-api";
 import { isZoneMessage } from "../../public/units";
 import { normalizeNotification } from "../alerts/normalize";
@@ -10,7 +11,12 @@ export function captureMessageSample(
 ): MessageSample | undefined {
   const { message } = normalizeNotification(entry.path, entry.value);
   if (!message || !isZoneMessage(message)) return undefined;
-  const path = entry.path.replace(/^notifications\./, "");
+  const core =
+    entry.kind === "core" && isCoreAlert(entry.value) ? entry.value : undefined;
+  const path = core
+    ? core.references?.[0]
+    : entry.path.replace(/^notifications\./, "");
+  if (!path) return undefined;
   const sample: MessageSample = {
     message,
     capturedAt: new Date().toISOString(),

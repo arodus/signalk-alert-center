@@ -585,6 +585,10 @@ export function getAlertCenterOpenApi() {
             quietHours: {
               $ref: "#/components/schemas/QuietHoursControl",
             },
+            alertSources: {
+              type: "array",
+              items: { type: "string", enum: ["notifications", "alerts"] },
+            },
             suppressionEvents: {
               type: "array",
               maxItems: 100,
@@ -854,6 +858,56 @@ export function getAlertCenterOpenApi() {
           },
           additionalProperties: false,
         },
+        CoreAlert: {
+          type: "object",
+          description:
+            "Canonical Signal K core alert snapshot, retaining its identity, condition, attention state, source and references.",
+          required: [
+            "id",
+            "path",
+            "state",
+            "priority",
+            "condition",
+            "latching",
+            "silenced",
+            "stale",
+          ],
+          properties: {
+            id: { type: "string" },
+            path: { type: "string" },
+            $source: { type: "string" },
+            state: {
+              type: "string",
+              enum: [
+                "unacknowledged",
+                "acknowledged",
+                "rtn-unacknowledged",
+                "normal",
+              ],
+            },
+            priority: {
+              type: "string",
+              enum: ["caution", "warning", "alarm", "emergency"],
+            },
+            condition: { type: "boolean" },
+            latching: { type: "boolean" },
+            silenced: { type: "boolean" },
+            stale: { type: "boolean" },
+            sourceOnline: { type: "boolean" },
+            context: { type: "string" },
+            message: { type: "string" },
+            references: { type: "array", items: { type: "string" } },
+            raisedAt: { type: "string", format: "date-time" },
+            stateChangedAt: { type: "string", format: "date-time" },
+            silencedUntil: { type: "string", format: "date-time" },
+            lastSourceUpdate: { type: "string", format: "date-time" },
+            acknowledgedAt: { type: "string", format: "date-time" },
+            acknowledgedBy: { type: "string" },
+            clearedAt: { type: "string", format: "date-time" },
+            data: { type: "object", additionalProperties: true },
+          },
+          additionalProperties: true,
+        },
         Occurrence: {
           type: "object",
           required: [
@@ -866,6 +920,12 @@ export function getAlertCenterOpenApi() {
             "startedAt",
           ],
           properties: {
+            coreAlert: { $ref: "#/components/schemas/CoreAlert" },
+            coreResolutionConfirmed: {
+              type: "boolean",
+              description:
+                "False for an unclassified core removal; it must not be reported as recovery.",
+            },
             messageSample: { $ref: "#/components/schemas/MessageSample" },
             id: { type: "string" },
             definitionId: { type: "string" },
@@ -1143,7 +1203,7 @@ export function getAlertCenterOpenApi() {
           properties: {
             status: {
               type: "string",
-              enum: ["acknowledged", "silenced"],
+              enum: ["acknowledged", "silenced", "failed"],
             },
             upstream: {
               type: "string",

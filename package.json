@@ -69,7 +69,8 @@
     "package:check": "node scripts/verify-package.mjs",
     "package:smoke": "node scripts/smoke-package.mjs",
     "release:check": "npm run format:check && npm run typecheck && npm test && npm run build && npm run package:check && npm run package:smoke",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:core": "npm run build && node test/integration/core-alerts.mjs"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",

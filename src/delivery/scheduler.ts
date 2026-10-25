@@ -153,9 +153,10 @@ export class DeliveryScheduler {
   ): Promise<void> {
     let metadata: UnitMetadata | undefined;
     try {
-      metadata = await this.options.unitMetadata?.(
-        this.database.getAlert(delivery.alertId).path,
-      );
+      const stored = this.database.getAlert(delivery.alertId);
+      const reference = stored.coreAlert?.references?.[0];
+      if (!stored.coreAlert || reference)
+        metadata = await this.options.unitMetadata?.(reference ?? stored.path);
     } catch {
       /* use captured units */
     }
@@ -187,8 +188,9 @@ export class DeliveryScheduler {
           message: delivery.alertSnapshot.message,
           messageSample: delivery.alertSnapshot.messageSample,
           lastSeenAt: delivery.alertSnapshot.at,
-          clearedAt:
-            delivery.alertSnapshot.state === "cleared"
+          clearedAt: alert.coreAlert
+            ? alert.clearedAt
+            : delivery.alertSnapshot.state === "cleared"
               ? delivery.alertSnapshot.at
               : undefined,
         }

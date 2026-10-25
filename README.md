@@ -1,5 +1,9 @@
 # Signal K Alert Center
 
+Development builds also integrate with the proposed Signal K core alerts API.
+See [core alerts migration](docs/core-alerts-migration.md) for the tested PR
+branch, preserved legacy behavior, upgrade details and deferred removal handling.
+
 One place for your boat's alerts, history, and notification delivery. See live
 readings and configured Signal K zones, keep history across restarts, and queue
 notifications while offline for delivery when connectivity returns.

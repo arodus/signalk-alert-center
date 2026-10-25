@@ -65,7 +65,7 @@ export interface AlertPolicyPatch {
     { mode: "queue" | "wake" } | { mode: "wake_after"; delaySeconds: number };
 }
 export interface ActionResult {
-  status: "acknowledged" | "silenced";
+  status: "acknowledged" | "silenced" | "failed";
   upstream?:
     "applied" | "unsupported" | "failed" | "timed_out" | "not_requested";
   message?: string;
