@@ -103,6 +103,7 @@
     ],
     "recommends": [
       "@meri-imperiumi/signalk-internet",
+      "signalk-alert-rules",
       "signalk-piper",
       "signalk-wyoming"
     ]

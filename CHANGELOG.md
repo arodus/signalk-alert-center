@@ -7,6 +7,7 @@ Versioning while it remains pre-1.0.
 
 ### Core alerts migration
 
+- Recommend Signal K Alert Rules as the companion plugin for creating alert rules.
 - List every Alert Rules rule in the dashboard, including never-fired, disabled
   and invalid rules, and configure its delivery before the first occurrence.
   Wildcard instances share the rule's saved delivery settings while retaining
