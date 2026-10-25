@@ -775,10 +775,12 @@ export class AlertDatabase {
     definitionId: string,
     policy: Omit<AlertPolicyRecord, "definitionId" | "updatedAt">,
     now = new Date(),
+    definition?: AlertDefinitionRecord,
   ): AlertPolicyRecord {
     const timestamp = now.toISOString();
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (definition) this.upsertDefinition(definition, now);
       this.db
         .prepare(
           `INSERT INTO alert_policies

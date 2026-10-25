@@ -21,17 +21,17 @@ Replace them with upstream types when published.
 
 ## Identity and state
 
-| Core fact                                  | Alert Center behavior                                                                                                            |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| Core alert ID                              | Stored separately from the local occurrence/delivery IDs; one local occurrence per core ID                                       |
-| Condition path                             | Delivery policy belongs to `alerts.<path>`, separate from any legacy `notifications.<path>` policy                               |
-| Producer `$source`                         | Preserved from the alert itself; the outer `alertsApi` publisher is not treated as the producer                                  |
-| `caution`, `warning`, `alarm`, `emergency` | Mapped to existing `alert`, `warn`, `alarm`, `emergency` delivery severities                                                     |
-| `rtn-unacknowledged`                       | Remains visible/actionable; condition return cancels activation and wake requests, stops repeats, and records confirmed recovery |
-| Latching/momentary alert                   | Retained despite `condition:false`; repeated raises under one core ID remain grouped, with fresh delivery cycles                 |
-| Stale/offline producer                     | Shown as stale, never interpreted as condition recovery                                                                          |
-| Acknowledge/silence                        | Calls core by ID, awaits confirmation, and records failures without a false local success                                        |
-| Core silence                               | Pauses/cancels Wyoming audio; remote notifier delivery remains independent; core unsilence resumes audio                         |
+| Core fact                                  | Alert Center behavior                                                                                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core alert ID                              | Stored separately from the local occurrence/delivery IDs; one local occurrence per core ID                                                         |
+| Condition path                             | Alert Rules policies belong to the producer and rule slug; other native policies belong to `alerts.<path>`. Both are separate from legacy policies |
+| Producer `$source`                         | Preserved from the alert itself; the outer `alertsApi` publisher is not treated as the producer                                                    |
+| `caution`, `warning`, `alarm`, `emergency` | Mapped to existing `alert`, `warn`, `alarm`, `emergency` delivery severities                                                                       |
+| `rtn-unacknowledged`                       | Remains visible/actionable; condition return cancels activation and wake requests, stops repeats, and records confirmed recovery                   |
+| Latching/momentary alert                   | Retained despite `condition:false`; repeated raises under one core ID remain grouped, with fresh delivery cycles                                   |
+| Stale/offline producer                     | Shown as stale, never interpreted as condition recovery                                                                                            |
+| Acknowledge/silence                        | Calls core by ID, awaits confirmation, and records failures without a false local success                                                          |
+| Core silence                               | Pauses/cancels Wyoming audio; remote notifier delivery remains independent; core unsilence resumes audio                                           |
 
 The API keeps its existing `state: active|cleared` field for local membership and
 adds `coreAlert` with the core lifecycle, condition, references and source status.
@@ -69,11 +69,61 @@ queued remote deliveries and prior event payloads remain stored.
 
 This version does not replay core history to reconstruct alerts that both began
 and ended while Alert Center was stopped. History remains Alert Center's durable
-record of what it observed. Core alerts are discovered on first observation;
-importing never-fired rule definitions and migrating legacy policy paths require
-separate explicit mappings. Core latching semantics take precedence over the
+record of what it observed. Native alerts from other producers are discovered on
+first observation. Legacy policy paths are not automatically mapped to native
+alerts. Core latching semantics take precedence over the
 legacy one-time policy for native alerts. Keep equivalent legacy producers and
 new rules from both raising the same physical condition during a test cutover.
+
+## Per-rule delivery settings
+
+The dashboard reads `GET /plugins/signalk-alert-rules/rules` with the existing
+Signal K session cookie. It displays every listed rule, including never-fired,
+disabled and invalid rules. Opening Alert Center, refreshing it or returning to
+its browser tab refreshes the catalog; other dashboard reloads reuse it for up
+to 15 seconds. No background server polling, additional token or access to the
+rules plugin's private files is needed. Read permission is sufficient to view
+the catalog; saving delivery settings requires read/write permission.
+
+Rule discovery is a read-only dashboard operation. It does not create database
+occurrences, history, delivery work, audio or wake requests. Never-fired rules
+without saved settings are assembled into the list from the catalog and global
+delivery defaults. A definition becomes durable when its settings are saved or
+an alert is observed. The `/definitions` API lists durable definitions; the full
+rule catalog remains owned by Alert Rules. `/policy-defaults` supplies effective
+global defaults for the dashboard's never-fired entries.
+
+Policies use `rule:signalk-alert-rules:<slug>` as identity. Saving a never-fired
+rule's policy includes its validated `rule` descriptor in the existing
+`PATCH /definitions/{id}/policy` request. The definition and custom policy are
+stored transactionally. A native alert belongs to that rule only when its core
+`$source` is `signalk-alert-rules` and its `data.rule` identifies the slug. This
+uses the producer's published identity contract rather than guessing from paths.
+The adapter is tested with rules commit
+`ae6a2ee2595314ff0f6021e827d87759a0470db5`.
+
+Every instance of a wildcard rule shares its delivery settings. Each keeps its
+own core ID, local occurrence, history and delivery attempts. Newly discovered
+instances receive the saved rule policy even after restart and with the browser
+closed. Policy edits apply to future occurrences; pending delivery work retains
+its existing policy. Rules without custom settings inherit global defaults.
+Native producers without this rule identity continue to use path-based policies.
+Legacy notification policies remain separate and are not migrated.
+
+Rule names and paths shown from the catalog follow edits in Alert Rules; delivery
+settings follow the stable slug even if its alert path changes. Disabling a rule
+is distinct from disabling delivery. Detection, thresholds and rule enablement
+stay in Alert Rules, linked from the detail drawer. Invalid rules can have
+settings prepared but cannot produce alerts until fixed in Alert Rules.
+
+Unavailable catalogs and permission failures are shown explicitly. Previously
+stored definitions, policies and queued work are preserved. A rule removed from
+the catalog is labelled as no longer listed when the catalog is available; its
+stored data is not automatically deleted. Recreating the same slug reuses its
+saved settings. Use Remove stored alert when it is inactive if those settings
+and its stored history should be discarded. Definitions already recorded by an
+earlier development build under a native path are retained; no historical
+reparenting or automatic policy transfer is performed.
 
 ## Deferred removal classification
 
@@ -100,11 +150,12 @@ docker compose -f docker-compose.acceptance.yml down -v
 npm run test:browser
 ```
 
-For the core server, build the pinned checkout in a separate directory with Node
-22 or 24 as described by upstream, then run:
+For core acceptance, build the pinned server and rules plugin checkouts in
+separate directories with Node 22 or 24 as described by upstream, then run:
 
 ```sh
-SIGNALK_CORE_SERVER_DIR=/absolute/path/to/signalk-server npm run test:core
+SIGNALK_CORE_SERVER_DIR=/absolute/path/to/signalk-server \
+SIGNALK_ALERT_RULES_DIR=/absolute/path/to/signalk-alert-rules npm run test:core
 ```
 
 The test verifies the exact upstream commit, creates its own temporary config and
@@ -112,4 +163,7 @@ database, starts the real server on a temporary loopback port and sends only to
 local mock notifiers. It covers canonical deltas, silence expiry, condition
 return, acknowledgment, grouped momentary alerts, independent notifier success
 and retries, process restart and unclassified removals. It stops the server and
-removes its temporary data on completion. It does not change `~/.signalk`.
+removes its temporary data on completion. It also creates a real wildcard rule,
+saves delivery settings before it fires, feeds isolated sensor values, verifies
+first delivery and a new instance after restart, and acknowledges a returned
+rule alert. It does not change `~/.signalk`.

@@ -11,6 +11,19 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const server = process.env.SIGNALK_CORE_SERVER_DIR;
+const rules = process.env.SIGNALK_ALERT_RULES_DIR;
+assert.ok(
+  rules,
+  "Set SIGNALK_ALERT_RULES_DIR to a built hatlabs/signalk-alert-rules checkout",
+);
+assert.equal(
+  execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: rules,
+    encoding: "utf8",
+  }).trim(),
+  "ae6a2ee2595314ff0f6021e827d87759a0470db5",
+  "Review rule discovery and identity before updating this pin",
+);
 assert.ok(
   server,
   "Set SIGNALK_CORE_SERVER_DIR to a built hatlabs/signalk-server checkout",
@@ -132,6 +145,42 @@ try {
     path.join(directory, "node_modules/signalk-alert-center"),
   );
   await mkdir(path.join(directory, "plugin-config-data"));
+  await symlink(
+    rules,
+    path.join(directory, "node_modules/signalk-alert-rules"),
+  );
+  const sensorPlugin = path.join(
+    directory,
+    "node_modules/alert-center-rule-fixture",
+  );
+  await mkdir(sensorPlugin);
+  await writeFile(
+    path.join(sensorPlugin, "package.json"),
+    JSON.stringify({
+      name: "alert-center-rule-fixture",
+      version: "1.0.0",
+      main: "index.js",
+      keywords: ["signalk-node-server-plugin"],
+    }),
+  );
+  await writeFile(
+    path.join(sensorPlugin, "index.js"),
+    `module.exports = (app) => ({
+    id: 'alert-center-rule-fixture', name: 'Rule sensor fixture', schema: {}, start() {}, stop() {},
+    registerWithRouter(router) { router.post('/sample', (req, res) => {
+      const instance = req.body.instance;
+      if (!['house', 'engine'].includes(instance) || typeof req.body.value !== 'number') return res.status(400).json({ error: 'invalid fixture input' });
+      app.handleMessage('alert-center-rule-fixture', { updates: [{ values: [{ path: 'electrical.batteries.' + instance + '.voltage', value: req.body.value }] }] });
+      res.json({ ok: true });
+    }); }
+  });`,
+  );
+  for (const name of ["signalk-alert-rules", "alert-center-rule-fixture"]) {
+    await writeFile(
+      path.join(directory, "plugin-config-data", name + ".json"),
+      JSON.stringify({ enabled: true, configuration: {} }),
+    );
+  }
   await writeFile(
     path.join(directory, "settings.json"),
     JSON.stringify({
@@ -257,8 +306,108 @@ try {
     "unclassified removal retained",
   );
   assert.equal((await occurrence(caution.id)).coreResolutionConfirmed, false);
+
+  const ruleRoute = "/plugins/signalk-alert-rules/rules";
+  const ruleEntry = await json(ruleRoute, "POST", {
+    slug: "battery-low",
+    name: "Battery voltage low",
+    condition: "voltageLow",
+    signal: { path: "electrical.batteries.*.voltage" },
+    detector: {
+      type: "sustained",
+      direction: "below",
+      steps: [{ limit: 12, priority: "alarm" }],
+    },
+    message: "Battery voltage low",
+  });
+  assert.equal(ruleEntry.alertPath, "electrical.batteries.*.voltageLow");
+  assert.ok(
+    (await json(ruleRoute)).some((entry) => entry.slug === "battery-low"),
+  );
+  const ruleId = "rule:signalk-alert-rules:battery-low";
+  const rulePolicy = `${ac}/definitions/${encodeURIComponent(ruleId)}/policy`;
+  await json(rulePolicy, "PATCH", {
+    rule: {
+      slug: ruleEntry.slug,
+      name: ruleEntry.rule.name,
+      alertPath: ruleEntry.alertPath,
+    },
+    notifierIds: ["success"],
+    activationDelaySeconds: 2,
+    overrideFields: ["notifierIds", "activationDelaySeconds"],
+  });
+  assert.equal(
+    (await json(`${ac}/occurrences?definitionId=${encodeURIComponent(ruleId)}`))
+      .items.length,
+    0,
+  );
+  const ruleOccurrences = async () =>
+    (await json(`${ac}/occurrences?definitionId=${encodeURIComponent(ruleId)}`))
+      .items;
+  const sample = (instance, value) =>
+    json("/plugins/alert-center-rule-fixture/sample", "POST", {
+      instance,
+      value,
+    });
+  await sample("house", 11);
+  let house = await until(
+    async () =>
+      (await ruleOccurrences()).find((item) => item.path.includes(".house.")),
+    "sensor to rule to core to Alert Center",
+  );
+  assert.equal(house.coreAlert.data.rule, "battery-low");
+  assert.equal(house.activationDelaySeconds, 2);
+  await until(async () => {
+    const current = await occurrence(house.coreAlert.id);
+    return (
+      current.deliveries.length === 1 &&
+      current.deliveries[0].state === "delivered"
+    );
+  }, "first rule occurrence uses saved notifier selection");
+  const houseDeliveryId = (await occurrence(house.coreAlert.id)).deliveries[0]
+    .id;
+  await stop();
+  await start();
+  // No dashboard or rule-catalog request is needed to apply the saved policy.
+  await sample("engine", 11);
+  const engine = await until(
+    async () =>
+      (await ruleOccurrences()).find((item) => item.path.includes(".engine.")),
+    "new wildcard instance after restart",
+  );
+  assert.equal(engine.activationDelaySeconds, 2);
+  await until(
+    async () =>
+      (await occurrence(engine.coreAlert.id)).deliveries.some(
+        (item) => item.state === "delivered",
+      ),
+    "second wildcard instance delivered",
+  );
+  house = await occurrence(house.coreAlert.id);
+  assert.equal(house.deliveries.length, 1);
+  assert.equal(house.deliveries[0].id, houseDeliveryId);
+  assert.equal(house.deliveries[0].attemptCount, 1);
+  assert.equal(
+    (await json(`${ac}/definitions?limit=100`)).items.filter(
+      (item) => item.id === ruleId,
+    ).length,
+    1,
+  );
+  await sample("house", 13);
+  await until(
+    async () =>
+      (await occurrence(house.coreAlert.id)).coreAlert.state ===
+      "rtn-unacknowledged",
+    "rule condition returns",
+  );
+  await json(`${ac}/occurrences/${house.id}/acknowledge`, "POST", {});
+  await until(
+    async () =>
+      (await occurrence(house.coreAlert.id)).coreAlert.state === "normal",
+    "rule alert acknowledged through core",
+  );
   console.log(
-    "Core alerts acceptance passed: canonical deltas, silence expiry, return/acknowledge, parallel delivery, restart, grouped latching, deferred removal classification.",
+    "Core alerts acceptance passed: canonical deltas, silence expiry, return/acknowledge, parallel delivery, restart, grouped latching, deferred removal classification, real rule discovery, wildcard policy and sensor-to-delivery after restart.",
   );
 } catch (error) {
   console.error(log);

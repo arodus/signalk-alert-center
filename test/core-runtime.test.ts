@@ -281,3 +281,49 @@ it("cancels core-silenced Wyoming audio, resumes on unsilence, and leaves remote
   );
   expect(db.getAlert(remote.alertId).acknowledgedAt).toBeDefined();
 });
+
+it("stores never-fired rule settings and snapshots them independently for each instance", async () => {
+  const { runtime, db, repository, publish } = setup();
+  await vi.waitFor(() =>
+    expect(runtime.status().reconciliation.state).toBe("complete"),
+  );
+  const id = "rule:signalk-alert-rules:battery-low";
+  await repository.updatePolicy(id, {
+    rule: {
+      slug: "battery-low",
+      name: "Battery low",
+      alertPath: "electrical.batteries.*.voltageLow",
+    },
+    minimumSeverity: "alarm",
+    activationDelaySeconds: 20,
+    overrideFields: ["minimumSeverity", "activationDelaySeconds"],
+  });
+  expect(db.listOccurrences()).toHaveLength(0);
+  expect(db.listDeliveries()).toHaveLength(0);
+  const alert = (instance: string) =>
+    coreFixture({
+      id: instance,
+      path: `electrical.batteries.${instance}.voltageLow`,
+      $source: "signalk-alert-rules",
+      data: { rule: "battery-low", instance },
+    });
+  publish(alert("house"));
+  await vi.waitFor(() => expect(db.listOccurrences()).toHaveLength(1));
+  await repository.updatePolicy(id, { activationDelaySeconds: 40 });
+  publish(alert("engine"));
+  await vi.waitFor(() => expect(db.listOccurrences()).toHaveLength(2));
+  const rows = db.listOccurrences();
+  expect(rows.find((row) => row.coreAlert?.id === "house")).toMatchObject({
+    definitionId: id,
+    activationDelaySeconds: 20,
+    minimumSeverity: "alarm",
+  });
+  expect(rows.find((row) => row.coreAlert?.id === "engine")).toMatchObject({
+    definitionId: id,
+    activationDelaySeconds: 40,
+    minimumSeverity: "alarm",
+  });
+  expect(
+    db.listDefinitions().filter((row) => row.sourceType === "rule"),
+  ).toHaveLength(1);
+});

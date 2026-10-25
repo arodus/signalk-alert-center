@@ -1,3 +1,4 @@
+import { ruleDefinition } from "./signalk/alert-rules";
 import {
   CoreAlert,
   coreAlertsApi,
@@ -1119,9 +1120,9 @@ export class AlertCenterRuntime {
           (notifier) => serviceHealthPath(notifier.name) === normalized.path,
         )
       : undefined;
-    const policy = this.policies().forPath(
-      normalized.path,
-      normalized.severity,
+    const definitionId = this.policies().ensureDefinitionForAlert(normalized);
+    const policy = this.policies().forDefinition(
+      this.db().getDefinition(definitionId),
     );
     const configuredNotifiers = new Map(
       (this.config.notifiers ?? []).map((notifier) => [
@@ -1151,7 +1152,7 @@ export class AlertCenterRuntime {
       policy.enabled ? notifierIds : [],
       receivedAt,
       {
-        definitionId: this.policies().ensureDefinitionForPath(normalized.path),
+        definitionId,
         activationDelaySeconds: serviceHealth
           ? 0
           : policy.activationDelaySeconds,
@@ -1602,7 +1603,10 @@ export class AlertCenterRuntime {
       },
       getDefinition: (id) => this.getDefinition(id),
       updatePolicy: (id: string, patch: AlertPolicyPatch) => {
-        const current = this.getDefinition(id);
+        const discovered = patch.rule ? ruleDefinition(patch.rule) : undefined;
+        const stored = this.getDefinition(id);
+        const current =
+          stored ?? (discovered ? this.definitionView(discovered) : undefined);
         if (!current) return undefined;
         const previousOverrides = new Set(current.policy.overriddenFields);
         const changedFields: AlertPolicyField[] = [];
@@ -1634,6 +1638,7 @@ export class AlertCenterRuntime {
           ? [...patch.overrideFields]
           : [...new Set([...previousOverrides, ...changedFields])];
         if (overrideFields.length === 0) {
+          if (discovered) this.db().upsertDefinition(discovered);
           this.db().clearPolicy(id);
           const inherited = this.getDefinition(id);
           this.debug(
@@ -1642,29 +1647,36 @@ export class AlertCenterRuntime {
           this.emitChange("policy");
           return inherited;
         }
-        this.db().setPolicy(id, {
-          enabled: patch.enabled ?? current.policy.enabled,
-          oneTime: patch.oneTime ?? current.policy.oneTime,
-          minimumSeverity:
-            patch.minimumSeverity ?? current.policy.minimumSeverity,
-          activationDelaySeconds:
-            patch.activationDelaySeconds ??
-            current.policy.activationDelaySeconds,
-          connectivity: patch.connectivity ?? current.policy.connectivity,
-          notifierIds: patch.notifierIds ?? current.policy.notifierIds,
-          notifierRepeatOverrides:
-            patch.notifierRepeatOverrides ??
-            current.policy.notifierRepeatOverrides,
-          soundEnabled: patch.soundEnabled ?? current.policy.soundEnabled,
-          soundId: patch.soundId ?? current.policy.soundId,
-          speechEnabled: patch.speechEnabled ?? current.policy.speechEnabled,
-          speechMinimumSeverity:
-            patch.speechMinimumSeverity ?? current.policy.speechMinimumSeverity,
-          speechTemplate: patch.speechTemplate ?? current.policy.speechTemplate,
-          speechAnnounceClear:
-            patch.speechAnnounceClear ?? current.policy.speechAnnounceClear,
-          overrideFields,
-        });
+        this.db().setPolicy(
+          id,
+          {
+            enabled: patch.enabled ?? current.policy.enabled,
+            oneTime: patch.oneTime ?? current.policy.oneTime,
+            minimumSeverity:
+              patch.minimumSeverity ?? current.policy.minimumSeverity,
+            activationDelaySeconds:
+              patch.activationDelaySeconds ??
+              current.policy.activationDelaySeconds,
+            connectivity: patch.connectivity ?? current.policy.connectivity,
+            notifierIds: patch.notifierIds ?? current.policy.notifierIds,
+            notifierRepeatOverrides:
+              patch.notifierRepeatOverrides ??
+              current.policy.notifierRepeatOverrides,
+            soundEnabled: patch.soundEnabled ?? current.policy.soundEnabled,
+            soundId: patch.soundId ?? current.policy.soundId,
+            speechEnabled: patch.speechEnabled ?? current.policy.speechEnabled,
+            speechMinimumSeverity:
+              patch.speechMinimumSeverity ??
+              current.policy.speechMinimumSeverity,
+            speechTemplate:
+              patch.speechTemplate ?? current.policy.speechTemplate,
+            speechAnnounceClear:
+              patch.speechAnnounceClear ?? current.policy.speechAnnounceClear,
+            overrideFields,
+          },
+          new Date(),
+          discovered,
+        );
         const updated = this.getDefinition(id);
         this.debug(`Updated alert policy: definitionId=${id}`);
         this.emitChange("policy");
@@ -2239,6 +2251,7 @@ export class AlertCenterRuntime {
       },
     );
     registerAlertCenterRoutes(compatible, {
+      defaultPolicy: () => this.policies().defaultPolicy(),
       repository: () => (this.database ? repository : undefined),
       snooze: () => this.suppression?.getSnooze(),
       setSnooze: (seconds) => {

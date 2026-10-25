@@ -45,6 +45,18 @@ export function getAlertCenterOpenApi() {
     openapi: "3.0.3",
     info: { title: "Signal K Alert Center", version: "1.0.0" },
     paths: {
+      "/policy-defaults": {
+        get: {
+          summary:
+            "Get effective global delivery defaults for never-fired rules",
+          responses: {
+            "200": response("Default policy", {
+              $ref: "#/components/schemas/Policy",
+            }),
+            ...errors,
+          },
+        },
+      },
       "/alerts": {
         get: {
           summary: "List the legacy alert-definition catalog",
@@ -242,7 +254,7 @@ export function getAlertCenterOpenApi() {
             {
               name: "sourceType",
               in: "query",
-              schema: { type: "string", enum: ["zone", "recognized"] },
+              schema: { type: "string", enum: ["zone", "recognized", "rule"] },
             },
             { name: "enabled", in: "query", schema: { type: "boolean" } },
           ],
@@ -754,11 +766,50 @@ export function getAlertCenterOpenApi() {
             "speechAnnounceClear",
           ],
         },
+        RuleDescriptor: {
+          type: "object",
+          required: ["slug", "name"],
+          additionalProperties: false,
+          description:
+            "Delivery-policy identity from signalk-alert-rules. Does not create or modify the upstream rule. The definition ID must be rule:signalk-alert-rules:<slug>.",
+          properties: {
+            slug: {
+              type: "string",
+              maxLength: 64,
+              pattern: "^[a-z0-9]+(-[a-z0-9]+)*$",
+            },
+            name: { type: "string", minLength: 1, maxLength: 200 },
+            alertPath: {
+              type: "string",
+              minLength: 1,
+              maxLength: 255,
+              description:
+                "Path without alerts., possibly with wildcard segments. Omitted when the rule has no valid alert path.",
+            },
+          },
+        },
         PolicyPatch: {
           type: "object",
           minProperties: 1,
+          anyOf: [
+            "overrideFields",
+            "enabled",
+            "oneTime",
+            "notifierIds",
+            "notifierRepeatOverrides",
+            "activationDelaySeconds",
+            "minimumSeverity",
+            "soundEnabled",
+            "soundId",
+            "speechEnabled",
+            "speechMinimumSeverity",
+            "speechTemplate",
+            "speechAnnounceClear",
+            "connectivity",
+          ].map((field) => ({ required: [field] })),
           additionalProperties: false,
           properties: {
+            rule: { $ref: "#/components/schemas/RuleDescriptor" },
             overrideFields: {
               type: "array",
               items: { $ref: "#/components/schemas/AlertPolicyField" },
@@ -834,9 +885,13 @@ export function getAlertCenterOpenApi() {
             description: { type: "string" },
             sourceType: {
               type: "string",
-              enum: ["zone", "recognized"],
+              enum: ["zone", "recognized", "rule"],
             },
-            pathPattern: { type: "string" },
+            pathPattern: {
+              type: "string",
+              description: "May be empty for a rule whose path is unavailable.",
+            },
+            metadata: { type: "object", additionalProperties: true },
             zone: { type: "string" },
             oneTime: { type: "boolean" },
             lastFiredAt: { type: "string", format: "date-time" },

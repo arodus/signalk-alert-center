@@ -1,4 +1,5 @@
 import { PluginConfig } from "../config";
+import { ruleDefinition, ruleFromAlert } from "../signalk/alert-rules";
 import { AlertDatabase } from "../storage/db";
 import {
   AlertDefinitionRecord,
@@ -6,6 +7,7 @@ import {
   AlertPolicyField,
   AlertPolicyRecord,
   ConnectivityMode,
+  NormalizedAlert,
   Severity,
 } from "./types";
 import { ConfiguredZonePath } from "./zones";
@@ -143,7 +145,29 @@ export class AlertPolicyResolver {
   }
 
   forDefinition(definition: AlertDefinitionRecord): EffectivePolicy {
-    return this.forPath(definition.pathPattern);
+    if (definition.sourceType !== "rule")
+      return this.forPath(definition.pathPattern);
+    return this.applyStored(
+      this.defaults(),
+      this.database.getPolicy(definition.id),
+    );
+  }
+
+  defaultPolicy(): EffectivePolicy {
+    return this.applyStored(this.defaults(), undefined);
+  }
+
+  ensureDefinitionForAlert(alert: NormalizedAlert): string {
+    const rule = ruleFromAlert(alert);
+    if (!rule) return this.ensureDefinitionForPath(alert.path);
+    const definition = ruleDefinition(rule);
+    try {
+      // Retain the catalog's wildcard path and the saved rule identity.
+      this.database.getDefinition(definition.id);
+    } catch {
+      this.database.upsertDefinition(definition);
+    }
+    return definition.id;
   }
 
   seedDefinitions(zones: ConfiguredZonePath[]): void {

@@ -112,7 +112,7 @@ export interface AlertHistoryPage {
 
 export interface AlertDefinitionRecord {
   id: string;
-  sourceType: "zone" | "recognized";
+  sourceType: "zone" | "recognized" | "rule";
   pathPattern: string;
   name: string;
   metadata?: unknown;

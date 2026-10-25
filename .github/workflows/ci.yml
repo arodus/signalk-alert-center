@@ -89,6 +89,16 @@ jobs:
         working-directory: .core-server
       - run: npm run build:all
         working-directory: .core-server
+      - uses: actions/checkout@v4
+        with:
+          repository: hatlabs/signalk-alert-rules
+          ref: ae6a2ee2595314ff0f6021e827d87759a0470db5
+          path: .alert-rules
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: .alert-rules
+      - run: npm run build
+        working-directory: .alert-rules
       - run: npm run test:core
         env:
+          SIGNALK_ALERT_RULES_DIR: ${{ github.workspace }}/.alert-rules
           SIGNALK_CORE_SERVER_DIR: ${{ github.workspace }}/.core-server
