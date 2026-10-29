@@ -21,7 +21,7 @@ assert.equal(
     cwd: rules,
     encoding: "utf8",
   }).trim(),
-  "ae6a2ee2595314ff0f6021e827d87759a0470db5",
+  "5f6fbb9d32e8e47e614ab11fab81b2bcae90424e",
   "Review rule discovery and identity before updating this pin",
 );
 assert.ok(
@@ -33,7 +33,7 @@ assert.equal(
     cwd: server,
     encoding: "utf8",
   }).trim(),
-  "ae7f8684514c96cbca9208a3da3c1e8440840021",
+  "33f487c7135db583a26b394ce04509b7b6c512ac",
   "Review any upstream API changes before updating this pin",
 );
 const directory = await mkdtemp(path.join(tmpdir(), "alert-center-core-"));
@@ -169,8 +169,8 @@ try {
     id: 'alert-center-rule-fixture', name: 'Rule sensor fixture', schema: {}, start() {}, stop() {},
     registerWithRouter(router) { router.post('/sample', (req, res) => {
       const instance = req.body.instance;
-      if (!['house', 'engine'].includes(instance) || typeof req.body.value !== 'number') return res.status(400).json({ error: 'invalid fixture input' });
-      app.handleMessage('alert-center-rule-fixture', { updates: [{ values: [{ path: 'electrical.batteries.' + instance + '.voltage', value: req.body.value }] }] });
+      if (!['house', 'engine', 'coolant'].includes(instance) || typeof req.body.value !== 'number') return res.status(400).json({ error: 'invalid fixture input' });
+      app.handleMessage('alert-center-rule-fixture', { updates: [{ values: [{ path: instance === 'coolant' ? 'propulsion.main.coolantTemperature' : 'electrical.batteries.' + instance + '.voltage', value: req.body.value }] }] });
       res.json({ ok: true });
     }); }
   });`,
@@ -293,7 +293,7 @@ try {
     event.id,
   );
 
-  // A normal snapshot alone remains unclassified, even for a genuine clear.
+  // Core now identifies genuine completion in its terminal delta.
   const caution = await json(core, "POST", {
     path: "acceptance.caution",
     priority: "caution",
@@ -303,9 +303,13 @@ try {
   await json(`${core}/${caution.id}/condition`, "PUT", { active: false });
   await until(
     async () => (await occurrence(caution.id)).coreAlert.state === "normal",
-    "unclassified removal retained",
+    "condition completion retained",
   );
-  assert.equal((await occurrence(caution.id)).coreResolutionConfirmed, false);
+  assert.equal((await occurrence(caution.id)).coreResolutionConfirmed, true);
+  assert.equal(
+    (await occurrence(caution.id)).coreAlert.clearReason,
+    "condition",
+  );
 
   const ruleRoute = "/plugins/signalk-alert-rules/rules";
   const ruleEntry = await json(ruleRoute, "POST", {
@@ -406,8 +410,83 @@ try {
       (await occurrence(house.coreAlert.id)).coreAlert.state === "normal",
     "rule alert acknowledged through core",
   );
+  assert.equal(
+    (await occurrence(house.coreAlert.id)).coreAlert.clearReason,
+    "acknowledged",
+  );
+
+  // Real producer conversion flows through unchanged to remote delivery.
+  await json(ruleRoute, "POST", {
+    slug: "coolant-hot",
+    name: "Coolant hot",
+    condition: "coolantHot",
+    signal: { path: "propulsion.main.coolantTemperature" },
+    detector: {
+      type: "sustained",
+      direction: "above",
+      steps: [{ limit: 363.15, priority: "alarm" }],
+    },
+    message: "Coolant {value} above {limit}; difference 5 K",
+  });
+  await sample("coolant", 373.15);
+  const coolant = await until(
+    async () =>
+      (await json(`${ac}/occurrences?limit=100`)).items.find(
+        (item) => item.coreAlert?.data?.rule === "coolant-hot",
+      ),
+    "rule message in admin units",
+  );
+  assert.equal(coolant.message, "Coolant 100 °C above 90 °C; difference 5 K");
+  await until(
+    () => requests.some((request) => request.body.includes(coolant.message)),
+    "converted rule text preserved in delivery",
+  );
+
+  // Exercise genuine displacement at core's public active-set cap. No private
+  // server fields or production configuration: fillers have no delivery targets.
+  await json(`${core}/${next.id}/acknowledge`, "POST", {});
+  const victim = await json(core, "POST", {
+    path: "acceptance.displacementVictim",
+    priority: "caution",
+    message: "Displacement victim",
+  });
+  const victimLocal = await until(
+    () => occurrence(victim.id),
+    "displacement victim retained",
+  );
+  await stop();
+  await writeFile(
+    path.join(directory, "plugin-config-data/signalk-alert-center.json"),
+    JSON.stringify({
+      enabled: true,
+      configuration: { ...configuration, defaults: { notifiers: [] } },
+    }),
+  );
+  await start();
+  const active = await json(core);
+  for (let i = active.length; i < 1000; i++) {
+    await json(core, "POST", {
+      path: `acceptance.capacity${i}`,
+      priority: "warning",
+      message: "Capacity fixture",
+    });
+  }
+  await json(core, "POST", {
+    path: "acceptance.urgent",
+    priority: "emergency",
+    message: "Urgent fixture",
+  });
+  const displaced = await until(async () => {
+    const item = await json(`${ac}/occurrences/${victimLocal.id}`);
+    return item.coreAlert?.clearReason === "displaced" && item;
+  }, "displacement reason in the real terminal delta");
+  assert.equal(displaced.coreResolutionConfirmed, false);
+  assert.equal(displaced.clearedAt, undefined);
+  assert.ok(
+    displaced.deliveries.every((delivery) => delivery.operation !== "resolve"),
+  );
   console.log(
-    "Core alerts acceptance passed: canonical deltas, silence expiry, return/acknowledge, parallel delivery, restart, grouped latching, deferred removal classification, real rule discovery, wildcard policy and sensor-to-delivery after restart.",
+    "Core alerts acceptance passed: canonical deltas, silence expiry, return/acknowledge, parallel delivery, restart, grouped latching, terminal removal reasons, displacement without recovery, display-unit rule messages, real rule discovery, wildcard policy and sensor-to-delivery after restart.",
   );
 } catch (error) {
   console.error(log);

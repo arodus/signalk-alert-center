@@ -345,10 +345,19 @@ const liveValues = new AlertLiveValues(
 window.addEventListener("pagehide", () => liveValues.close());
 function displayedMessage(item, live = false, message = item?.message) {
   if (!item) return message;
+  if (item.coreAlert?.$source === "signalk-alert-rules") return message;
   const definition = state.definitions.find(
     (entry) =>
       entry.id === item.definitionId || entry.pathPattern === item.path,
   );
+  // History and delivery summaries need not carry the full core snapshot.
+  if (
+    (item.source === "signalk-alert-rules" &&
+      item.sourceKey?.startsWith("core:")) ||
+    (definition?.sourceType === "rule" &&
+      definition.metadata?.rule?.provider === "signalk-alert-rules")
+  )
+    return message;
   const metadata =
     displayMetadata.get(definition?.pathPattern)?.metadata ??
     definition?.metadata ??
@@ -475,9 +484,12 @@ function occurrenceState(occurrence) {
     unacknowledged: "Unacknowledged",
     acknowledged: "Acknowledged",
     "rtn-unacknowledged": "Ended · awaiting acknowledgment",
-    normal: occurrence.coreResolutionConfirmed
-      ? "Resolved"
-      : "Removed · reason unconfirmed",
+    normal:
+      core.clearReason === "displaced"
+        ? "Displaced · recovery not confirmed"
+        : occurrence.coreResolutionConfirmed
+          ? "Resolved"
+          : "Removed · reason unconfirmed",
   };
   return `${labels[core.state] ?? core.state}${core.stale ? " · stale source" : ""}`;
 }
@@ -1181,7 +1193,7 @@ async function openOccurrence(id) {
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
     bindOccurrenceActions();

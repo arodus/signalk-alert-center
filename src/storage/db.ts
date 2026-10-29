@@ -1035,6 +1035,7 @@ export class AlertDatabase {
         : alert.state === "cleared";
       const resolutionConfirmed =
         core &&
+        core.clearReason !== "displaced" &&
         (alert.coreResolutionConfirmed ||
           core.state === "rtn-unacknowledged" ||
           (core.state === "normal" &&
@@ -1142,6 +1143,7 @@ export class AlertDatabase {
           );
         persistCore(id);
         if (
+          core?.clearReason === "displaced" ||
           reannounced ||
           (core?.state === "unacknowledged" &&
             isCoreAlert(previousCore) &&

@@ -22,8 +22,14 @@ Versioning while it remains pre-1.0.
   version 4. Native `alerts.*` paths have separate delivery policies from legacy
   notification paths. See [migration notes](docs/core-alerts-migration.md) for the
   pinned development server and testing instructions.
-- Show unclassified core removals separately and withhold automatic recovery
-  messages for them while upstream removal semantics are being clarified.
+- Use core terminal removal reasons to send recovery for completed conditions and
+  acknowledgments, while marking displaced alerts without claiming recovery.
+  Queued initial deliveries and history remain durable. Missing or unknown reasons
+  remain unclassified unless recovery was independently confirmed.
+- Preserve Alert Rules' message units in the dashboard and all delivery services,
+  including speech. The updated rules plugin formats messages in the admin's units;
+  Alert Center no longer reinterprets differences or SI fallback values in that text.
+  Legacy notification unit conversion remains available.
 
 ## [0.5.0] - 2026-10-20
 

@@ -155,7 +155,10 @@ export class DeliveryScheduler {
     try {
       const stored = this.database.getAlert(delivery.alertId);
       const reference = stored.coreAlert?.references?.[0];
-      if (!stored.coreAlert || reference)
+      if (
+        stored.coreAlert?.$source !== "signalk-alert-rules" &&
+        (!stored.coreAlert || reference)
+      )
         metadata = await this.options.unitMetadata?.(reference ?? stored.path);
     } catch {
       /* use captured units */
@@ -220,16 +223,20 @@ export class DeliveryScheduler {
     try {
       const sending = (async () => {
         // Presentation-only copy: durable snapshots and original payload stay intact.
+        const ruleMessage =
+          deliveryAlert.coreAlert?.$source === "signalk-alert-rules";
         let messageAlert = {
           ...deliveryAlert,
-          message: convertAlertMessage(
-            deliveryAlert.message,
-            { units: deliveryAlert.messageSample?.units },
-            deliveryAlert.messageSample?.value,
-          ),
+          message: ruleMessage
+            ? deliveryAlert.message
+            : convertAlertMessage(
+                deliveryAlert.message,
+                { units: deliveryAlert.messageSample?.units },
+                deliveryAlert.messageSample?.value,
+              ),
         };
         try {
-          if (metadata || deliveryAlert.messageSample)
+          if (!ruleMessage && (metadata || deliveryAlert.messageSample))
             messageAlert = {
               ...deliveryAlert,
               message: convertAlertMessage(

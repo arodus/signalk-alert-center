@@ -1,6 +1,6 @@
 import type { AlertDefinitionRecord, NormalizedAlert } from "../alerts/types";
 
-/** Public identity contract of hatlabs/signalk-alert-rules at ae6a2ee. */
+/** Public identity contract of hatlabs/signalk-alert-rules at 5f6fbb9. */
 export const RULES_PROVIDER = "signalk-alert-rules";
 export const ruleDefinitionId = (slug: string): string =>
   `rule:${RULES_PROVIDER}:${slug}`;

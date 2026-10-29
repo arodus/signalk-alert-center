@@ -2,7 +2,7 @@
 
 Development builds also integrate with the proposed Signal K core alerts API.
 See [core alerts migration](docs/core-alerts-migration.md) for the tested PR
-branch, preserved legacy behavior, upgrade details and deferred removal handling.
+branch, preserved legacy behavior, upgrade details and removal-reason handling.
 
 Alert Rules definitions are listed before they fire. Configure delivery once
 per rule; wildcard instances share that policy while keeping separate history.

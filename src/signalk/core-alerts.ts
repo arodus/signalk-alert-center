@@ -2,7 +2,7 @@ import type { ServerAPI } from "@signalk/server-api";
 import type { NormalizedAlert, Severity } from "../alerts/types";
 import type { SignalKNotificationInput } from "./notifications";
 
-/** Temporary compatibility surface for SignalK/signalk-server#3012, ae7f868.
+/** Temporary compatibility surface for SignalK/signalk-server#3012, 33f487c.
  * Replace with the server-api exports when the alerts API is published.
  */
 export interface CoreAlert {
@@ -21,6 +21,7 @@ export interface CoreAlert {
   acknowledgedAt?: string;
   acknowledgedBy?: string;
   clearedAt?: string;
+  clearReason?: "condition" | "acknowledged" | "displaced";
   sourceOnline: boolean;
   lastSourceUpdate: string;
   stale: boolean;
@@ -105,6 +106,10 @@ export function normalizeCoreAlert(alert: CoreAlert): NormalizedAlert {
     acknowledged: alert.state === "acknowledged",
     sourceTimestamp: new Date(alert.stateChangedAt),
     coreAlert: alert,
+    coreResolutionConfirmed:
+      alert.state === "normal" &&
+      (alert.clearReason === "condition" ||
+        alert.clearReason === "acknowledged"),
   };
 }
 
@@ -166,6 +171,7 @@ export function coreAlertSignature(alert: CoreAlert): string {
     alert.stateChangedAt,
     alert.acknowledgedAt,
     alert.acknowledgedBy,
+    alert.clearReason,
     alert.stale,
     alert.sourceOnline,
   ]);

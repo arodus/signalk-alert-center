@@ -1499,6 +1499,7 @@ export class AlertCenterRuntime {
             const normalized = normalizeCoreAlert({
               ...occurrence.coreAlert,
               state: "normal",
+              clearReason: "acknowledged",
               condition: false,
               silenced: false,
               silencedUntil: undefined,

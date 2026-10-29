@@ -318,6 +318,124 @@ describe("core alerts migration", () => {
     expect(ingest(db, { id: "core-2" }).id).not.toBe(first.id);
   });
 
+  it.each(["condition", "acknowledged"] as const)(
+    "confirms %s completion and resolves exactly once after an offline trigger succeeds",
+    (clearReason) => {
+      const db = database();
+      const first = ingest(db);
+      const terminal = {
+        state: "normal" as const,
+        condition: false,
+        clearReason,
+        clearedAt: "2026-10-25T08:01:00Z",
+        stateChangedAt: "2026-10-25T08:01:00Z",
+      };
+      ingest(db, terminal);
+      ingest(db, terminal);
+      expect(db.getAlert(first.id).coreResolutionConfirmed).toBe(true);
+      expect(db.listDeliveries().some((d) => d.operation === "resolve")).toBe(
+        false,
+      );
+      const trigger = db
+        .listDeliveries()
+        .find((d) => d.transportInstanceId === "incident")!;
+      db.claimDelivery(trigger.id);
+      db.recordDeliverySuccess(trigger.id);
+      db.configureResolvingNotifiers(["incident"]);
+      expect(
+        db.listDeliveries().filter((d) => d.operation === "resolve"),
+      ).toHaveLength(1);
+      expect(renderAlert(db.getAlert(first.id)).body).toContain("Cleared at");
+      expect(
+        db
+          .listAlertEvents()
+          .some(
+            (e) =>
+              e.eventType === "core_removed" &&
+              JSON.stringify(e).includes(clearReason),
+          ),
+      ).toBe(true);
+    },
+  );
+
+  it("retains displacement across restart without resolving, losing pending triggers or repeating", () => {
+    const directory = mkdtempSync(join(tmpdir(), "core-displaced-"));
+    directories.push(directory);
+    const filename = join(directory, "alerts.sqlite");
+    let db = new AlertDatabase(filename);
+    const first = ingest(db);
+    ingest(db, {
+      state: "normal",
+      condition: false,
+      clearReason: "displaced",
+      clearedAt: "2026-10-25T08:01:00Z",
+      stateChangedAt: "2026-10-25T08:01:00Z",
+    });
+    db.close();
+    db = new AlertDatabase(filename);
+    databases.push(db);
+    const alert = db.getAlert(first.id);
+    expect(alert.coreAlert?.clearReason).toBe("displaced");
+    expect(alert.coreResolutionConfirmed).toBe(false);
+    expect(alert.clearedAt).toBeUndefined();
+    expect(renderAlert(alert).body).toContain("Displaced");
+    expect(renderAlert(alert).body).not.toContain("Cleared at");
+    expect(db.listDeliveries()).toHaveLength(2);
+    for (const delivery of db.listDeliveries()) {
+      expect(db.claimDelivery(delivery.id)).toBe(true);
+      db.recordDeliverySuccess(delivery.id);
+    }
+    db.configureResolvingNotifiers(["incident"]);
+    expect(db.listDeliveries().some((d) => d.operation === "resolve")).toBe(
+      false,
+    );
+    expect(db.processDueRepeats(new Date("2026-10-26T08:00:00Z"))).toBe(0);
+  });
+
+  it("does not coalesce a newly supplied terminal reason and suppresses pending recovery on displacement", () => {
+    const db = database();
+    ingest(db);
+    const trigger = db
+      .listDeliveries()
+      .find((d) => d.transportInstanceId === "incident")!;
+    db.claimDelivery(trigger.id);
+    db.recordDeliverySuccess(trigger.id);
+    const terminal = {
+      state: "normal" as const,
+      condition: false,
+      stateChangedAt: "2026-10-25T08:01:00Z",
+    };
+    ingest(db, terminal);
+    ingest(db, { ...terminal, clearReason: "condition" });
+    const resolve = db.listDeliveries().find((d) => d.operation === "resolve")!;
+    expect(resolve.state).toBe("pending");
+    // A returned condition may still be displaced while awaiting acknowledgment.
+    const displacedDb = database();
+    ingest(displacedDb);
+    const delivered = displacedDb
+      .listDeliveries()
+      .find((d) => d.transportInstanceId === "incident")!;
+    displacedDb.claimDelivery(delivered.id);
+    displacedDb.recordDeliverySuccess(delivered.id);
+    ingest(displacedDb, { ...terminal, state: "rtn-unacknowledged" });
+    const pendingResolve = displacedDb
+      .listDeliveries()
+      .find((d) => d.operation === "resolve")!;
+    ingest(displacedDb, { ...terminal, clearReason: "displaced" });
+    expect(displacedDb.getDelivery(pendingResolve.id)?.state).toBe(
+      "suppressed",
+    );
+    expect(
+      displacedDb.getAlert(delivered.alertId).coreResolutionConfirmed,
+    ).toBe(false);
+    const queue = new BoundedIngestionQueue(10);
+    queue.enqueue(coreAlertEntry(coreFixture(terminal)));
+    queue.enqueue(
+      coreAlertEntry(coreFixture({ ...terminal, clearReason: "condition" })),
+    );
+    expect(queue.depth).toBe(2);
+  });
+
   it("migrates version 3 without losing legacy delivery state, then retains core IDs across restarts", () => {
     const directory = mkdtempSync(join(tmpdir(), "core-migration-"));
     directories.push(directory);

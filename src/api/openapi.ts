@@ -959,6 +959,12 @@ export function getAlertCenterOpenApi() {
             acknowledgedAt: { type: "string", format: "date-time" },
             acknowledgedBy: { type: "string" },
             clearedAt: { type: "string", format: "date-time" },
+            clearReason: {
+              type: "string",
+              enum: ["condition", "acknowledged", "displaced"],
+              description:
+                "Reason supplied by core on a terminal alert. Displacement does not confirm recovery.",
+            },
             data: { type: "object", additionalProperties: true },
           },
           additionalProperties: true,
@@ -979,7 +985,7 @@ export function getAlertCenterOpenApi() {
             coreResolutionConfirmed: {
               type: "boolean",
               description:
-                "False for an unclassified core removal; it must not be reported as recovery.",
+                "False for displacement or an unclassified core removal without independent confirmation; neither must be reported as recovery.",
             },
             messageSample: { $ref: "#/components/schemas/MessageSample" },
             id: { type: "string" },

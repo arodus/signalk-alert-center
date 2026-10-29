@@ -12,7 +12,7 @@ The integration targets SignalK/signalk-server PRs
 [3010](https://github.com/SignalK/signalk-server/pull/3010),
 [3011](https://github.com/SignalK/signalk-server/pull/3011) and
 [3012](https://github.com/SignalK/signalk-server/pull/3012), at cumulative commit
-`ae7f8684514c96cbca9208a3da3c1e8440840021` in
+`33f487c7135db583a26b394ce04509b7b6c512ac` in
 `hatlabs/signalk-server`, branch `feat/alerts-plugin-surface`. This remains a
 development API; it is not a promise of compatibility with an eventual release.
 The narrow compatibility types in `src/signalk/core-alerts.ts` follow that
@@ -100,7 +100,7 @@ stored transactionally. A native alert belongs to that rule only when its core
 `$source` is `signalk-alert-rules` and its `data.rule` identifies the slug. This
 uses the producer's published identity contract rather than guessing from paths.
 The adapter is tested with rules commit
-`ae6a2ee2595314ff0f6021e827d87759a0470db5`.
+`5f6fbb9d32e8e47e614ab11fab81b2bcae90424e`.
 
 Every instance of a wildcard rule shares its delivery settings. Each keeps its
 own core ID, local occurrence, history and delivery attempts. Newly discovered
@@ -125,16 +125,39 @@ and its stored history should be discarded. Definitions already recorded by an
 earlier development build under a native path are retained; no historical
 reparenting or automatic policy transfer is performed.
 
-## Deferred removal classification
+## Terminal removal reasons
 
-The pending question for Matti remains outside this migration. A terminal
-`normal` snapshot alone does not distinguish normal lifecycle completion from
-displacement. Alert Center records an unclassified removal and sends no automatic
-recovery for it. This includes genuine caution clears and clear-after-acknowledge
-transitions until classification is implemented. An observed condition return
-(`rtn-unacknowledged`) or a successful terminal acknowledgment through Alert
-Center supplies independent confirmation. Core history replay/removal-reason
-lookups are not implemented here.
+Terminal deltas now carry `clearReason`: `condition` and `acknowledged` confirm
+lifecycle completion and permit recovery delivery. `displaced` means a more
+urgent alert took the slot in core's active set; it never confirms recovery,
+even though the terminal snapshot has `condition: false` and a `clearedAt`.
+Alert Center retains the reason in its source payload and history, labels the
+occurrence as displaced, cancels pending acknowledgment/recovery actions and
+repeats, and preserves queued initial remote delivery. An initial notification
+sent after displacement explains that recovery is unconfirmed. Reasons and
+pending work survive restart without another database migration.
+
+Missing or unknown reasons remain unclassified unless an observed condition
+return (`rtn-unacknowledged`) or a successful terminal acknowledgment through
+Alert Center supplies independent confirmation. This also covers removals
+missed while Alert Center was stopped. Core history replay/removal-reason
+lookups remain deferred; absence from the active list does not prove recovery.
+
+## Message units
+
+Alert Rules owns the text it generates. Alert Center preserves that text in the
+dashboard, history and every delivery service, including Wyoming speech, without
+sampling or converting numbers in it again. This prevents a temperature difference
+or another intentionally SI value from being interpreted as an absolute reading.
+Legacy zone messages and other notification producers retain the existing
+metadata-based conversion.
+
+The tested rules commit includes hatlabs/signalk-alert-rules#195. On a compatible
+server it formats messages using the admin's unit preset, with documented SI
+fallbacks (including object fields and unsupported conversions). That is one
+producer-formatted message for all recipients, not recipient-specific conversion.
+Changing the preset affects subsequent rule messages; it does not rewrite retained
+history or queued delivery snapshots.
 
 ## Verification
 
@@ -162,8 +185,10 @@ The test verifies the exact upstream commit, creates its own temporary config an
 database, starts the real server on a temporary loopback port and sends only to
 local mock notifiers. It covers canonical deltas, silence expiry, condition
 return, acknowledgment, grouped momentary alerts, independent notifier success
-and retries, process restart and unclassified removals. It stops the server and
+and retries, process restart, terminal removal reasons and displacement at the
+real active-set cap. It stops the server and
 removes its temporary data on completion. It also creates a real wildcard rule,
 saves delivery settings before it fires, feeds isolated sensor values, verifies
 first delivery and a new instance after restart, and acknowledges a returned
-rule alert. It does not change `~/.signalk`.
+rule alert. A temperature rule checks upstream display units and preservation
+of a literal temperature difference through delivery. It does not change `~/.signalk`.

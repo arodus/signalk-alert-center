@@ -13,6 +13,7 @@ export function captureMessageSample(
   if (!message || !isZoneMessage(message)) return undefined;
   const core =
     entry.kind === "core" && isCoreAlert(entry.value) ? entry.value : undefined;
+  if (core?.$source === "signalk-alert-rules") return undefined;
   const path = core
     ? core.references?.[0]
     : entry.path.replace(/^notifications\./, "");

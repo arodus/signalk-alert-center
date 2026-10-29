@@ -30,6 +30,11 @@ export interface NotificationTransport {
 export function renderAlert(alert: AlertRecord): RenderedAlert {
   const unknownRemoval =
     alert.coreAlert?.state === "normal" && !alert.coreResolutionConfirmed;
+  const removal = unknownRemoval
+    ? alert.coreAlert?.clearReason === "displaced"
+      ? " Displaced from the core active set by a more urgent alert; recovery is not confirmed."
+      : " Removed from the core active set; the reason is unconfirmed."
+    : "";
   if (unknownRemoval) alert = { ...alert, clearedAt: undefined };
   const title = `${alert.currentSeverity.toUpperCase()}: ${alert.path}`;
   const duration = alert.clearedAt
@@ -40,7 +45,7 @@ export function renderAlert(alert: AlertRecord): RenderedAlert {
     : `First seen at ${alert.firstSeenAt.toISOString()}.`;
   return {
     title,
-    body: `${alert.message ?? alert.path}\n${lifecycle}${unknownRemoval ? " Removed from the core active set; the reason is unconfirmed." : ""}\nMaximum severity: ${alert.maxSeverity}.`,
+    body: `${alert.message ?? alert.path}\n${lifecycle}${removal}\nMaximum severity: ${alert.maxSeverity}.`,
     severity: alert.maxSeverity,
     occurredAt: alert.firstSeenAt,
     clearedAt: alert.clearedAt,
