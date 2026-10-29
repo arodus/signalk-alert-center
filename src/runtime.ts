@@ -1,3 +1,15 @@
+import { ruleDefinition } from "./signalk/alert-rules";
+import {
+  CoreAlert,
+  coreAlertsApi,
+  coreAlertEntry,
+  coreConditionActive,
+  coreNeedsAttention,
+  extractCoreAlertEntries,
+  isSelfAlert,
+  normalizeCoreAlert,
+  isCoreAlert,
+} from "./signalk/core-alerts";
 import { QuietHoursClock } from "./suppression/quiet-hours";
 import { SuppressionStore, SuppressionReason } from "./suppression/store";
 import { publishSnooze, registerSnoozePuts } from "./signalk/snooze";
@@ -137,6 +149,7 @@ export class AlertCenterRuntime {
   private internet?: InternetAvailabilityMonitor;
   private policy?: AlertPolicyResolver;
   private unsubscribe?: () => void;
+  private coreStartupSnapshot?: CoreAlert[];
   private activationTimer?: ReturnType<typeof setTimeout>;
   private deliveryTimer?: ReturnType<typeof setTimeout>;
   private zoneRefreshTimer?: ReturnType<typeof setInterval>;
@@ -288,6 +301,9 @@ export class AlertCenterRuntime {
         : { state: "healthy" as const, reasons: [] as string[] };
     const snooze = this.snoozeStatus();
     return {
+      alertSources: coreAlertsApi(this.app)
+        ? ["notifications", "alerts"]
+        : ["notifications"],
       health,
       snooze,
       quietHours: this.suppression?.getQuietHoursControl() ?? {
@@ -479,6 +495,30 @@ export class AlertCenterRuntime {
       };
     if (delivery) {
       const alert = this.database?.getAlert(delivery.alertId);
+      if (
+        alert?.coreAlert &&
+        this.config.notifiers?.some(
+          (service) =>
+            service.name === delivery.transportInstanceId &&
+            service.type === "wyoming",
+        ) &&
+        ((delivery.operation === "resolve" && !alert.coreResolutionConfirmed) ||
+          alert.coreAlert.silenced ||
+          (delivery.operation !== "resolve" &&
+            !coreNeedsAttention(alert.coreAlert)))
+      ) {
+        return {
+          reason:
+            (delivery.operation === "resolve" &&
+              !alert.coreResolutionConfirmed) ||
+            alert.coreAlert.state === "acknowledged" ||
+            alert.coreAlert.state === "normal"
+              ? "core_inactive"
+              : "core_silence",
+          startedAt: alert.coreAlert.stateChangedAt,
+          endsAt: alert.coreAlert.silencedUntil ?? "9999-12-31T23:59:59.999Z",
+        };
+      }
       return this.serviceQuietReason(
         delivery.transportInstanceId,
         alert?.currentState === "active"
@@ -605,9 +645,14 @@ export class AlertCenterRuntime {
   }
 
   private canWakeForAlert(id: string): boolean {
-    if (this.suppressionReason() || !this.database) return false;
+    if (this.reconcilingStartup || this.suppressionReason() || !this.database)
+      return false;
     const alert = this.database.getAlert(id);
-    if (alert.currentState !== "active") return false;
+    if (
+      alert.currentState !== "active" ||
+      (alert.coreAlert && !coreConditionActive(alert.coreAlert))
+    )
+      return false;
     const targets = this.database.db
       .prepare(
         "SELECT transport_instance_id, minimum_severity FROM occurrence_notifier_thresholds WHERE alert_id=?",
@@ -729,12 +774,13 @@ export class AlertCenterRuntime {
           "Installed Wyoming cannot cancel queued or playing audio; new announcements are blocked.",
         );
       const result = this.wyomingApi.cancelAnnouncement(snapshot.id);
-      if (result && delivery)
+      if (result && delivery && reason.reason !== "core_inactive")
         this.suppression?.hold(delivery, reason, new Date(), true);
       if (!result || ["queued", "playing"].includes(result.state))
         throw new Error("Wyoming has not confirmed audio cancellation.");
       if (delivery) {
-        this.suppression?.hold(delivery, reason, new Date(), true);
+        if (reason.reason !== "core_inactive")
+          this.suppression?.hold(delivery, reason, new Date(), true);
         const playback = this.database?.getWyomingPlayback(snapshot.id);
         if (playback)
           this.recordWyomingAnnouncement(delivery.id, playback.kind, result);
@@ -749,6 +795,10 @@ export class AlertCenterRuntime {
   private reconcileSuppression(): void {
     if (!this.database || !this.suppression) return;
     this.recordSnoozeEffectiveness();
+    for (const delivery of this.suppression.pending()) {
+      if (this.suppressionReason(delivery)?.reason === "core_inactive")
+        this.database.suppressCoreAudio(delivery.id);
+    }
     this.suppression.reconcile(
       (delivery) => this.suppressionReason(delivery),
       new Date(),
@@ -900,7 +950,7 @@ export class AlertCenterRuntime {
   }
 
   private scheduleNextWake(): void {
-    if (this.stopping) return;
+    if (this.stopping || this.reconcilingStartup) return;
     this.connectivity?.cancelScheduledWake();
     if (!this.hasInternetStateProvider()) return;
     const nextWake = this.suppressionReason()
@@ -914,7 +964,7 @@ export class AlertCenterRuntime {
   private scheduleNextActivation(): void {
     if (this.activationTimer) clearTimeout(this.activationTimer);
     this.activationTimer = undefined;
-    if (this.stopping) return;
+    if (this.stopping || this.reconcilingStartup) return;
     const dueAt = this.database?.nextActivationDueAt();
     if (!dueAt) return;
     const delay = Math.min(
@@ -1025,7 +1075,10 @@ export class AlertCenterRuntime {
     now: Date,
     schedule = true,
   ): void {
-    if (occurrence.currentState === "cleared") {
+    if (
+      occurrence.currentState === "cleared" ||
+      (occurrence.coreAlert && !coreConditionActive(occurrence.coreAlert))
+    ) {
       this.db().clearWakeDue(occurrence.id);
       if (schedule) this.scheduleNextWake();
       return;
@@ -1051,12 +1104,15 @@ export class AlertCenterRuntime {
     receivedAt = new Date(),
     schedule = true,
   ): AlertRecord | undefined {
-    const normalized = normalizeNotification(
-      entry.path,
-      entry.value,
-      entry.source,
-      entry.sourceTimestamp,
-    );
+    const normalized =
+      entry.kind === "core" && isCoreAlert(entry.value)
+        ? normalizeCoreAlert(entry.value)
+        : normalizeNotification(
+            entry.path,
+            entry.value,
+            entry.source,
+            entry.sourceTimestamp,
+          );
     normalized.messageSample = entry.messageSample;
     const serviceHealth = isServiceHealthPath(normalized.path);
     const serviceHealthSource = serviceHealth
@@ -1064,9 +1120,9 @@ export class AlertCenterRuntime {
           (notifier) => serviceHealthPath(notifier.name) === normalized.path,
         )
       : undefined;
-    const policy = this.policies().forPath(
-      normalized.path,
-      normalized.severity,
+    const definitionId = this.policies().ensureDefinitionForAlert(normalized);
+    const policy = this.policies().forDefinition(
+      this.db().getDefinition(definitionId),
     );
     const configuredNotifiers = new Map(
       (this.config.notifiers ?? []).map((notifier) => [
@@ -1096,7 +1152,7 @@ export class AlertCenterRuntime {
       policy.enabled ? notifierIds : [],
       receivedAt,
       {
-        definitionId: this.policies().ensureDefinitionForPath(normalized.path),
+        definitionId,
         activationDelaySeconds: serviceHealth
           ? 0
           : policy.activationDelaySeconds,
@@ -1107,7 +1163,11 @@ export class AlertCenterRuntime {
             ? policy.connectivity
             : { mode: "queue" },
         minimumSeverity: serviceHealth ? "normal" : policy.minimumSeverity,
-        oneTime: serviceHealth ? false : policy.oneTime,
+        oneTime: normalized.coreAlert
+          ? normalized.coreAlert.latching
+          : serviceHealth
+            ? false
+            : policy.oneTime,
         notifierRepeatIntervals: Object.fromEntries(
           notifierIds.map((id) => [
             id,
@@ -1153,6 +1213,39 @@ export class AlertCenterRuntime {
     if (!this.database || generation !== this.runtimeGeneration) return;
     const startedAt = Date.now();
     this.seedDefinitions();
+    const coreApi = coreAlertsApi(this.app);
+    if (coreApi) {
+      // list() is authoritative: the model retains terminal snapshots at alerts.*.
+      const active = this.coreStartupSnapshot ?? [];
+      const activeIds = new Set(active.map((alert) => alert.id));
+      for (const alert of active)
+        this.ingestEntry(coreAlertEntry(alert), new Date(), false);
+      const missing = this.db()
+        .db.prepare(
+          "SELECT id FROM alert_occurrences WHERE core_alert_id IS NOT NULL AND current_state='active'",
+        )
+        .all();
+      for (const row of missing) {
+        const previous = this.db().getAlert(String(row.id));
+        if (!previous.coreAlert || activeIds.has(previous.coreAlert.id))
+          continue;
+        this.ingestEntry(
+          coreAlertEntry({
+            ...previous.coreAlert,
+            state: "normal",
+            condition: false,
+            stateChangedAt: new Date().toISOString(),
+          }),
+          new Date(),
+          false,
+        );
+        this.db().recordOccurrenceEvent(
+          previous.id,
+          "core_missing_on_startup",
+          { reason: "unclassified" },
+        );
+      }
+    }
     const entries = iterateSnapshotNotificationEntries(
       this.app.getPath(`${this.app.selfContext}.notifications`),
     );
@@ -1165,9 +1258,22 @@ export class AlertCenterRuntime {
         await new Promise<void>((resolve) => setImmediate(resolve));
     }
     if (!this.database || generation !== this.runtimeGeneration) return;
+    // Apply queued transitions before activation/wake/send. A condition may have
+    // ended after the snapshot while its persisted activation deadline elapsed.
+    while (this.ingestionQueue.depth > 0) {
+      const queued = this.ingestionQueue.take(
+        this.config.ingestion?.batchSize ?? DEFAULT_INGESTION_BATCH_SIZE,
+      );
+      for (const entry of queued) this.ingestEntry(entry, new Date(), false);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (!this.database || generation !== this.runtimeGeneration) return;
+    }
+    snapshotEntries += this.coreStartupSnapshot?.length ?? 0;
+    this.coreStartupSnapshot = undefined;
     const queuedCount = this.ingestionQueue.stats().received;
     this.reconcilingStartup = false;
-    if (snapshotEntries > 0) this.afterIngestionBatch();
+    this.database.processDueActivations();
+    if (snapshotEntries > 0 || queuedCount > 0) this.afterIngestionBatch();
     else {
       this.scheduleNextWake();
       this.scheduleNextActivation();
@@ -1363,6 +1469,63 @@ export class AlertCenterRuntime {
   ): Promise<Pick<ActionResult, "upstream" | "message">> {
     if (!occurrence.notificationId) return { upstream: "not_requested" };
     try {
+      if (occurrence.coreAlert) {
+        const api = coreAlertsApi(this.app);
+        if (!api)
+          return {
+            upstream: "unsupported",
+            message: "The server does not expose the core alerts API",
+          };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const operation =
+            action === "acknowledge"
+              ? api.acknowledge(occurrence.coreAlert.id)
+              : api.silence(occurrence.coreAlert.id);
+          const result = await Promise.race([
+            operation,
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("UPSTREAM_ACTION_TIMEOUT")),
+                UPSTREAM_ACTION_TIMEOUT_MS,
+              );
+            }),
+          ]);
+          const terminal = "cleared" in result && result.cleared;
+          const snapshot = "alert" in result ? result.alert : result;
+          if (snapshot) this.ingestEntry(coreAlertEntry(snapshot));
+          else if (terminal) {
+            const now = new Date();
+            const normalized = normalizeCoreAlert({
+              ...occurrence.coreAlert,
+              state: "normal",
+              clearReason: "acknowledged",
+              condition: false,
+              silenced: false,
+              silencedUntil: undefined,
+              stateChangedAt: now.toISOString(),
+              acknowledgedAt: now.toISOString(),
+            });
+            normalized.coreResolutionConfirmed = true;
+            const updated = this.db().ingest(normalized, [], now);
+            if (updated) this.applyConnectivityPolicy(updated, now);
+            this.afterIngestionBatch();
+          }
+          const confirmed =
+            terminal ||
+            (action === "acknowledge"
+              ? snapshot?.state === "acknowledged"
+              : snapshot?.silenced);
+          return confirmed
+            ? { upstream: "applied" }
+            : {
+                upstream: "failed",
+                message: `Signal K did not confirm ${action}`,
+              };
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
       const notificationId = occurrence.notificationId as NotificationId;
       const alarm = this.app.notifications.getId(notificationId) as
         | {
@@ -1441,7 +1604,10 @@ export class AlertCenterRuntime {
       },
       getDefinition: (id) => this.getDefinition(id),
       updatePolicy: (id: string, patch: AlertPolicyPatch) => {
-        const current = this.getDefinition(id);
+        const discovered = patch.rule ? ruleDefinition(patch.rule) : undefined;
+        const stored = this.getDefinition(id);
+        const current =
+          stored ?? (discovered ? this.definitionView(discovered) : undefined);
         if (!current) return undefined;
         const previousOverrides = new Set(current.policy.overriddenFields);
         const changedFields: AlertPolicyField[] = [];
@@ -1473,6 +1639,7 @@ export class AlertCenterRuntime {
           ? [...patch.overrideFields]
           : [...new Set([...previousOverrides, ...changedFields])];
         if (overrideFields.length === 0) {
+          if (discovered) this.db().upsertDefinition(discovered);
           this.db().clearPolicy(id);
           const inherited = this.getDefinition(id);
           this.debug(
@@ -1481,29 +1648,36 @@ export class AlertCenterRuntime {
           this.emitChange("policy");
           return inherited;
         }
-        this.db().setPolicy(id, {
-          enabled: patch.enabled ?? current.policy.enabled,
-          oneTime: patch.oneTime ?? current.policy.oneTime,
-          minimumSeverity:
-            patch.minimumSeverity ?? current.policy.minimumSeverity,
-          activationDelaySeconds:
-            patch.activationDelaySeconds ??
-            current.policy.activationDelaySeconds,
-          connectivity: patch.connectivity ?? current.policy.connectivity,
-          notifierIds: patch.notifierIds ?? current.policy.notifierIds,
-          notifierRepeatOverrides:
-            patch.notifierRepeatOverrides ??
-            current.policy.notifierRepeatOverrides,
-          soundEnabled: patch.soundEnabled ?? current.policy.soundEnabled,
-          soundId: patch.soundId ?? current.policy.soundId,
-          speechEnabled: patch.speechEnabled ?? current.policy.speechEnabled,
-          speechMinimumSeverity:
-            patch.speechMinimumSeverity ?? current.policy.speechMinimumSeverity,
-          speechTemplate: patch.speechTemplate ?? current.policy.speechTemplate,
-          speechAnnounceClear:
-            patch.speechAnnounceClear ?? current.policy.speechAnnounceClear,
-          overrideFields,
-        });
+        this.db().setPolicy(
+          id,
+          {
+            enabled: patch.enabled ?? current.policy.enabled,
+            oneTime: patch.oneTime ?? current.policy.oneTime,
+            minimumSeverity:
+              patch.minimumSeverity ?? current.policy.minimumSeverity,
+            activationDelaySeconds:
+              patch.activationDelaySeconds ??
+              current.policy.activationDelaySeconds,
+            connectivity: patch.connectivity ?? current.policy.connectivity,
+            notifierIds: patch.notifierIds ?? current.policy.notifierIds,
+            notifierRepeatOverrides:
+              patch.notifierRepeatOverrides ??
+              current.policy.notifierRepeatOverrides,
+            soundEnabled: patch.soundEnabled ?? current.policy.soundEnabled,
+            soundId: patch.soundId ?? current.policy.soundId,
+            speechEnabled: patch.speechEnabled ?? current.policy.speechEnabled,
+            speechMinimumSeverity:
+              patch.speechMinimumSeverity ??
+              current.policy.speechMinimumSeverity,
+            speechTemplate:
+              patch.speechTemplate ?? current.policy.speechTemplate,
+            speechAnnounceClear:
+              patch.speechAnnounceClear ?? current.policy.speechAnnounceClear,
+            overrideFields,
+          },
+          new Date(),
+          discovered,
+        );
         const updated = this.getDefinition(id);
         this.debug(`Updated alert policy: definitionId=${id}`);
         this.emitChange("policy");
@@ -1614,7 +1788,7 @@ export class AlertCenterRuntime {
         if (!occurrence) return false;
         if (occurrence.currentState !== "active") return "inactive";
         const upstream = await this.upstreamAction(occurrence, "acknowledge");
-        this.db().acknowledgeAlert(id);
+        if (!occurrence.coreAlert) this.db().acknowledgeAlert(id);
         this.requestDeliveryRun();
         this.db().recordOccurrenceEvent(
           id,
@@ -1627,14 +1801,20 @@ export class AlertCenterRuntime {
           `Acknowledged occurrence: occurrenceId=${id}, upstream=${upstream.upstream}`,
         );
         this.emitChange("occurrence");
-        return { status: "acknowledged", ...upstream };
+        return {
+          status:
+            occurrence.coreAlert && upstream.upstream !== "applied"
+              ? "failed"
+              : "acknowledged",
+          ...upstream,
+        };
       },
       silenceOccurrence: async (id) => {
         const occurrence = this.getOccurrence(id);
         if (!occurrence) return false;
         if (occurrence.currentState !== "active") return "inactive";
         const upstream = await this.upstreamAction(occurrence, "silence");
-        this.db().silenceAlert(id);
+        if (!occurrence.coreAlert) this.db().silenceAlert(id);
         this.db().recordOccurrenceEvent(
           id,
           `upstream_silence_${upstream.upstream}`,
@@ -1646,7 +1826,13 @@ export class AlertCenterRuntime {
           `Silenced occurrence: occurrenceId=${id}, upstream=${upstream.upstream}`,
         );
         this.emitChange("occurrence");
-        return { status: "silenced", ...upstream };
+        return {
+          status:
+            occurrence.coreAlert && upstream.upstream !== "applied"
+              ? "failed"
+              : "silenced",
+          ...upstream,
+        };
       },
     };
   }
@@ -1928,18 +2114,25 @@ export class AlertCenterRuntime {
     publishSnooze(this.app, this.suppression.getSnooze());
     publishQuietHoursControl(this.app, this.suppression.getQuietHoursControl());
     this.scheduleNextWake();
-    this.database.processDueActivations();
     this.scheduleNextActivation();
 
     const handler = (delta: unknown): void => {
       if (generation !== this.runtimeGeneration || this.stopping) return;
       const navigationState = extractNavigationState(delta);
       if (navigationState) this.updateNavigationState(navigationState);
-      const entries = extractNotificationEntries(delta);
+      const entries = [
+        ...extractNotificationEntries(delta),
+        ...(coreAlertsApi(this.app)
+          ? extractCoreAlertEntries(delta, this.app.selfContext)
+          : []),
+      ];
       this.enqueueNotifications(entries);
     };
     const subscriptions = [
       { path: "notifications.*" as Path, policy: "instant" as const },
+      ...(coreAlertsApi(this.app)
+        ? [{ path: "alerts.*" as Path, policy: "instant" as const }]
+        : []),
       ...(options.snooze?.onlyWhenAnchoredOrMoored
         ? [{ path: "navigation.state" as Path, policy: "instant" as const }]
         : []),
@@ -1974,6 +2167,13 @@ export class AlertCenterRuntime {
       handler,
     );
     this.unsubscribe = () => unsubscribes.forEach((stop) => stop());
+    this.coreStartupSnapshot = coreAlertsApi(this.app)
+      ?.list()
+      .filter(
+        (alert) =>
+          isCoreAlert(alert) && isSelfAlert(alert, this.app.selfContext),
+      )
+      .map((alert) => structuredClone(alert));
 
     // Return control to Signal K before scanning the model. Deltas received
     // after subscribing are queued and applied after the snapshot so an older
@@ -2052,6 +2252,7 @@ export class AlertCenterRuntime {
       },
     );
     registerAlertCenterRoutes(compatible, {
+      defaultPolicy: () => this.policies().defaultPolicy(),
       repository: () => (this.database ? repository : undefined),
       snooze: () => this.suppression?.getSnooze(),
       setSnooze: (seconds) => {

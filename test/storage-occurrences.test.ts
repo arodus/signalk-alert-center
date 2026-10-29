@@ -69,7 +69,7 @@ describe("occurrence storage", () => {
     expect(db.migrationApplied).toBe(false);
     expect(db.getAlert(before!.id).messageSample).toEqual(sample);
     expect(db.db.prepare("PRAGMA user_version").get()).toEqual({
-      user_version: 3,
+      user_version: 4,
     });
   });
 
@@ -118,7 +118,7 @@ describe("occurrence storage", () => {
   it("creates the complete current schema directly", () => {
     const db = database();
 
-    expect(db.schemaVersion()).toBe(3);
+    expect(db.schemaVersion()).toBe(4);
     const occurrenceColumns = db.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all()
@@ -508,7 +508,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(3);
+    expect(db.schemaVersion()).toBe(4);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);

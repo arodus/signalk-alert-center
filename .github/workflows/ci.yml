@@ -68,3 +68,37 @@ jobs:
           path: test-results/
           retention-days: 7
       - run: npm run test:restart
+
+  core-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/checkout@v4
+        with:
+          repository: hatlabs/signalk-server
+          ref: 33f487c7135db583a26b394ce04509b7b6c512ac
+          path: .core-server
+      # The upstream development branch has no lockfile. Hardware addons are
+      # unnecessary: acceptance uses only loopback HTTP and local SQLite.
+      - run: npm install --ignore-scripts --no-audit --no-fund
+        working-directory: .core-server
+      - run: npm run build:all
+        working-directory: .core-server
+      - uses: actions/checkout@v4
+        with:
+          repository: hatlabs/signalk-alert-rules
+          ref: 5f6fbb9d32e8e47e614ab11fab81b2bcae90424e
+          path: .alert-rules
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: .alert-rules
+      - run: npm run build
+        working-directory: .alert-rules
+      - run: npm run test:core
+        env:
+          SIGNALK_ALERT_RULES_DIR: ${{ github.workspace }}/.alert-rules
+          SIGNALK_CORE_SERVER_DIR: ${{ github.workspace }}/.core-server

@@ -5,6 +5,32 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Core alerts migration
+
+- Recommend Signal K Alert Rules as the companion plugin for creating alert rules.
+- List every Alert Rules rule in the dashboard, including never-fired, disabled
+  and invalid rules, and configure its delivery before the first occurrence.
+  Wildcard instances share the rule's saved delivery settings while retaining
+  separate alert history. Settings survive restart and apply with the dashboard
+  closed. Rule conditions and thresholds remain in the linked Alert Rules app.
+
+- Consume the proposed Signal K core alerts API alongside legacy notifications,
+  preserving core IDs, grouped momentary alerts, condition/acknowledgment state,
+  source status and durable per-service delivery. Native acknowledgment and
+  silence use the core API; Wyoming follows core silence and attention state.
+- Preserve existing history and pending deliveries through database schema
+  version 4. Native `alerts.*` paths have separate delivery policies from legacy
+  notification paths. See [migration notes](docs/core-alerts-migration.md) for the
+  pinned development server and testing instructions.
+- Use core terminal removal reasons to send recovery for completed conditions and
+  acknowledgments, while marking displaced alerts without claiming recovery.
+  Queued initial deliveries and history remain durable. Missing or unknown reasons
+  remain unclassified unless recovery was independently confirmed.
+- Preserve Alert Rules' message units in the dashboard and all delivery services,
+  including speech. The updated rules plugin formats messages in the admin's units;
+  Alert Center no longer reinterprets differences or SI fallback values in that text.
+  Legacy notification unit conversion remains available.
+
 ## [0.5.0] - 2026-10-20
 
 ### Connectivity

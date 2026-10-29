@@ -1,3 +1,8 @@
+import {
+  isRuleDescriptor,
+  RuleDescriptor,
+  ruleDefinitionId,
+} from "../signalk/alert-rules";
 import { SnoozeState, snoozeSeconds } from "../suppression/store";
 import { AlertPolicyField, alertPolicyFields, Severity } from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
@@ -15,7 +20,7 @@ export interface DefinitionQuery {
   limit: number;
   cursor?: string;
   zone?: string;
-  sourceType?: "zone" | "recognized";
+  sourceType?: "zone" | "recognized" | "rule";
   enabled?: boolean;
 }
 export interface OccurrenceQuery {
@@ -48,6 +53,7 @@ export interface DeliveryQuery {
   cursor?: string;
 }
 export interface AlertPolicyPatch {
+  rule?: RuleDescriptor;
   overrideFields?: AlertPolicyField[];
   enabled?: boolean;
   oneTime?: boolean;
@@ -65,7 +71,7 @@ export interface AlertPolicyPatch {
     { mode: "queue" | "wake" } | { mode: "wake_after"; delaySeconds: number };
 }
 export interface ActionResult {
-  status: "acknowledged" | "silenced";
+  status: "acknowledged" | "silenced" | "failed";
   upstream?:
     "applied" | "unsupported" | "failed" | "timed_out" | "not_requested";
   message?: string;
@@ -145,6 +151,7 @@ export interface AlertCenterChange {
   occurredAt: string;
 }
 export interface AlertCenterDependencies {
+  defaultPolicy?: () => unknown;
   snooze?: () => SnoozeState | undefined;
   setSnooze?: (seconds: number) => SnoozeState;
   repository: () => AlertCenterRepository | undefined;
@@ -292,6 +299,7 @@ function parseDefinitions(request: RequestLike): DefinitionQuery {
     sourceType: enumParam(q.sourceType, "sourceType", [
       "zone",
       "recognized",
+      "rule",
     ] as const),
     enabled: boolParam(q.enabled, "enabled"),
   };
@@ -348,6 +356,7 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
     throw new ApiError(400, "INVALID_BODY", "Request body must be an object");
   const value = body as Record<string, unknown>;
   const allowed = new Set([
+    "rule",
     "enabled",
     "oneTime",
     "notifierIds",
@@ -369,6 +378,15 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       fields: extra,
     });
   const patch: AlertPolicyPatch = {};
+  if (value.rule !== undefined) {
+    if (!isRuleDescriptor(value.rule))
+      throw new ApiError(
+        400,
+        "INVALID_BODY",
+        "rule must contain a valid slug, name and optional alertPath",
+      );
+    patch.rule = value.rule;
+  }
   if (value.overrideFields !== undefined) {
     if (
       !Array.isArray(value.overrideFields) ||
@@ -538,7 +556,7 @@ function parsePolicy(body: unknown): AlertPolicyPatch {
       };
     else throw new ApiError(400, "INVALID_BODY", "connectivity is invalid");
   }
-  if (!Object.keys(patch).length)
+  if (!Object.keys(patch).some((key) => key !== "rule"))
     throw new ApiError(
       400,
       "INVALID_BODY",
@@ -552,6 +570,17 @@ export function registerAlertCenterRoutes(
   dependencies: AlertCenterDependencies,
 ): void {
   const repo = () => repository(dependencies.repository);
+  if (dependencies.defaultPolicy)
+    addRoute(
+      router,
+      "get",
+      "/policy-defaults",
+      "readonly",
+      wrap((_req, res) => {
+        repo();
+        res.json(dependencies.defaultPolicy!());
+      }),
+    );
   if (dependencies.snooze && dependencies.setSnooze) {
     addRoute(
       router,
@@ -794,6 +823,12 @@ export function registerAlertCenterRoutes(
     "readwrite",
     wrap(async (req, res) => {
       const patch = parsePolicy(req.body);
+      if (patch.rule && req.params?.id !== ruleDefinitionId(patch.rule.slug))
+        throw new ApiError(
+          400,
+          "INVALID_BODY",
+          "Rule identity does not match the definition ID",
+        );
       if (
         (patch.notifierIds || patch.notifierRepeatOverrides) &&
         dependencies.listNotifiers

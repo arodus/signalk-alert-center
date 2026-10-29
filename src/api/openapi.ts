@@ -45,6 +45,18 @@ export function getAlertCenterOpenApi() {
     openapi: "3.0.3",
     info: { title: "Signal K Alert Center", version: "1.0.0" },
     paths: {
+      "/policy-defaults": {
+        get: {
+          summary:
+            "Get effective global delivery defaults for never-fired rules",
+          responses: {
+            "200": response("Default policy", {
+              $ref: "#/components/schemas/Policy",
+            }),
+            ...errors,
+          },
+        },
+      },
       "/alerts": {
         get: {
           summary: "List the legacy alert-definition catalog",
@@ -242,7 +254,7 @@ export function getAlertCenterOpenApi() {
             {
               name: "sourceType",
               in: "query",
-              schema: { type: "string", enum: ["zone", "recognized"] },
+              schema: { type: "string", enum: ["zone", "recognized", "rule"] },
             },
             { name: "enabled", in: "query", schema: { type: "boolean" } },
           ],
@@ -585,6 +597,10 @@ export function getAlertCenterOpenApi() {
             quietHours: {
               $ref: "#/components/schemas/QuietHoursControl",
             },
+            alertSources: {
+              type: "array",
+              items: { type: "string", enum: ["notifications", "alerts"] },
+            },
             suppressionEvents: {
               type: "array",
               maxItems: 100,
@@ -750,11 +766,50 @@ export function getAlertCenterOpenApi() {
             "speechAnnounceClear",
           ],
         },
+        RuleDescriptor: {
+          type: "object",
+          required: ["slug", "name"],
+          additionalProperties: false,
+          description:
+            "Delivery-policy identity from signalk-alert-rules. Does not create or modify the upstream rule. The definition ID must be rule:signalk-alert-rules:<slug>.",
+          properties: {
+            slug: {
+              type: "string",
+              maxLength: 64,
+              pattern: "^[a-z0-9]+(-[a-z0-9]+)*$",
+            },
+            name: { type: "string", minLength: 1, maxLength: 200 },
+            alertPath: {
+              type: "string",
+              minLength: 1,
+              maxLength: 255,
+              description:
+                "Path without alerts., possibly with wildcard segments. Omitted when the rule has no valid alert path.",
+            },
+          },
+        },
         PolicyPatch: {
           type: "object",
           minProperties: 1,
+          anyOf: [
+            "overrideFields",
+            "enabled",
+            "oneTime",
+            "notifierIds",
+            "notifierRepeatOverrides",
+            "activationDelaySeconds",
+            "minimumSeverity",
+            "soundEnabled",
+            "soundId",
+            "speechEnabled",
+            "speechMinimumSeverity",
+            "speechTemplate",
+            "speechAnnounceClear",
+            "connectivity",
+          ].map((field) => ({ required: [field] })),
           additionalProperties: false,
           properties: {
+            rule: { $ref: "#/components/schemas/RuleDescriptor" },
             overrideFields: {
               type: "array",
               items: { $ref: "#/components/schemas/AlertPolicyField" },
@@ -830,9 +885,13 @@ export function getAlertCenterOpenApi() {
             description: { type: "string" },
             sourceType: {
               type: "string",
-              enum: ["zone", "recognized"],
+              enum: ["zone", "recognized", "rule"],
             },
-            pathPattern: { type: "string" },
+            pathPattern: {
+              type: "string",
+              description: "May be empty for a rule whose path is unavailable.",
+            },
+            metadata: { type: "object", additionalProperties: true },
             zone: { type: "string" },
             oneTime: { type: "boolean" },
             lastFiredAt: { type: "string", format: "date-time" },
@@ -854,6 +913,62 @@ export function getAlertCenterOpenApi() {
           },
           additionalProperties: false,
         },
+        CoreAlert: {
+          type: "object",
+          description:
+            "Canonical Signal K core alert snapshot, retaining its identity, condition, attention state, source and references.",
+          required: [
+            "id",
+            "path",
+            "state",
+            "priority",
+            "condition",
+            "latching",
+            "silenced",
+            "stale",
+          ],
+          properties: {
+            id: { type: "string" },
+            path: { type: "string" },
+            $source: { type: "string" },
+            state: {
+              type: "string",
+              enum: [
+                "unacknowledged",
+                "acknowledged",
+                "rtn-unacknowledged",
+                "normal",
+              ],
+            },
+            priority: {
+              type: "string",
+              enum: ["caution", "warning", "alarm", "emergency"],
+            },
+            condition: { type: "boolean" },
+            latching: { type: "boolean" },
+            silenced: { type: "boolean" },
+            stale: { type: "boolean" },
+            sourceOnline: { type: "boolean" },
+            context: { type: "string" },
+            message: { type: "string" },
+            references: { type: "array", items: { type: "string" } },
+            raisedAt: { type: "string", format: "date-time" },
+            stateChangedAt: { type: "string", format: "date-time" },
+            silencedUntil: { type: "string", format: "date-time" },
+            lastSourceUpdate: { type: "string", format: "date-time" },
+            acknowledgedAt: { type: "string", format: "date-time" },
+            acknowledgedBy: { type: "string" },
+            clearedAt: { type: "string", format: "date-time" },
+            clearReason: {
+              type: "string",
+              enum: ["condition", "acknowledged", "displaced"],
+              description:
+                "Reason supplied by core on a terminal alert. Displacement does not confirm recovery.",
+            },
+            data: { type: "object", additionalProperties: true },
+          },
+          additionalProperties: true,
+        },
         Occurrence: {
           type: "object",
           required: [
@@ -866,6 +981,12 @@ export function getAlertCenterOpenApi() {
             "startedAt",
           ],
           properties: {
+            coreAlert: { $ref: "#/components/schemas/CoreAlert" },
+            coreResolutionConfirmed: {
+              type: "boolean",
+              description:
+                "False for displacement or an unclassified core removal without independent confirmation; neither must be reported as recovery.",
+            },
             messageSample: { $ref: "#/components/schemas/MessageSample" },
             id: { type: "string" },
             definitionId: { type: "string" },
@@ -1143,7 +1264,7 @@ export function getAlertCenterOpenApi() {
           properties: {
             status: {
               type: "string",
-              enum: ["acknowledged", "silenced"],
+              enum: ["acknowledged", "silenced", "failed"],
             },
             upstream: {
               type: "string",

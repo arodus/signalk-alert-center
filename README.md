@@ -1,5 +1,14 @@
 # Signal K Alert Center
 
+Development builds also integrate with the proposed Signal K core alerts API.
+See [core alerts migration](docs/core-alerts-migration.md) for the tested PR
+branch, preserved legacy behavior, upgrade details and removal-reason handling.
+
+Alert Rules definitions are listed before they fire. Configure delivery once
+per rule; wildcard instances share that policy while keeping separate history.
+The dashboard uses your existing Signal K login to read rules, and saved delivery
+settings continue to work when the dashboard is closed.
+
 One place for your boat's alerts, history, and notification delivery. See live
 readings and configured Signal K zones, keep history across restarts, and queue
 notifications while offline for delivery when connectivity returns.

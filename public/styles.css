@@ -749,7 +749,7 @@ h2 {
 }
 .detail-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 16px 0 20px;
 }
@@ -765,6 +765,7 @@ h2 {
 }
 .detail-grid dd {
   margin: 5px 0 0;
+  overflow-wrap: anywhere;
 }
 .event-list {
   display: grid;
@@ -821,6 +822,8 @@ h2 {
   background: #edf2fa;
 }
 .recent-occurrence > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 3px;
 }
