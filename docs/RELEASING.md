@@ -59,10 +59,22 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The tag starts `.github/workflows/release.yml`. The workflow reruns the complete
-CI suite, verifies that the annotated tag matches `package.json`, confirms the
-commit belongs to `main`, builds from a clean checkout, inspects the package,
-stamps the reviewed tarball with the exact release commit as npm `gitHead`,
+The tag starts `.github/workflows/release.yml`. It verifies that the annotated
+tag matches `package.json` and the release notes, confirms the commit belongs to
+`main`, and requires successful `main` push runs of both `ci.yml` and
+`signalk-ci.yml` for that exact commit. It checks the latest run and its current
+attempt; PR checks, another commit's checks, or older successful runs cannot
+replace a missing, pending, failed, or cancelled main run. If verification is
+blocked, finish or repair main CI, then rerun the release workflow.
+
+The check uses GitHub's [workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow)
+with read-only Actions access. Tag builds do not repeat the platform matrix,
+unit/integration, acceptance/security, browser, or restart suites already covered
+by main CI. They still build from a clean checkout, inspect the package, run the
+packed-plugin installation smoke test, and validate the tag and release notes.
+
+The workflow then stamps the reviewed tarball with the exact release commit as
+npm `gitHead`,
 publishes it through npm trusted publishing, verifies the published commit
 metadata, and creates the matching GitHub Release. The Signal K Plugin Registry
 uses `gitHead` to associate the npm version with its canonical plugin CI run. Do
