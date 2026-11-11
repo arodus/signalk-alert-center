@@ -53,6 +53,7 @@ export type NotifierConfig =
       sounds?: Partial<Record<Severity, string>>;
     });
 export interface PluginConfig {
+  ignoredPaths?: string[];
   storage?: { path?: string };
   maintenance?: { resetDatabase?: boolean };
   snooze?: { onlyWhenAnchoredOrMoored?: boolean };
@@ -135,6 +136,19 @@ export function migrateLegacyRepeatConfig(
 }
 
 export function validateConfig(config: PluginConfig): void {
+  if (
+    config.ignoredPaths !== undefined &&
+    (!Array.isArray(config.ignoredPaths) ||
+      config.ignoredPaths.some(
+        (path) =>
+          typeof path !== "string" ||
+          !path.trim() ||
+          path.trim() === "notifications.",
+      ))
+  )
+    throw new Error(
+      "ignoredPaths must be a list of non-empty notification path patterns",
+    );
   if (
     config.snooze?.onlyWhenAnchoredOrMoored !== undefined &&
     typeof config.snooze.onlyWhenAnchoredOrMoored !== "boolean"

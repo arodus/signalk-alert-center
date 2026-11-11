@@ -276,6 +276,7 @@ The Signal K plugin configuration contains settings shared by all alerts:
 - defaults inherited by newly discovered alerts;
 - optional internet-connection control;
 - retention and delivery limits;
+- notification paths to leave out of discovery and history;
 - the database reset action.
 
 ![Global defaults inherited by newly discovered alerts](./docs/screenshots/plugin-defaults.png)
@@ -318,6 +319,36 @@ control disabled if another system manages the switch.
 After Alert Center turns a configured connection on, it waits for
 `network.internet.state` to become `online` or `metered`. The boot timeout and
 local state-recheck interval remain configurable in Alert Center.
+
+## Notification paths to leave out
+
+Under **Storage & advanced → Notification paths to leave out**, enter one
+pattern per line. By default, Alert Center ignores per-target collision alarms:
+
+```json
+{
+  "ignoredPaths": ["navigation.closestApproach.*"]
+}
+```
+
+Patterns match the whole notification path, with or without the leading
+`notifications.`. Matching is case-sensitive. Only `*` is special: it matches
+one or more characters, including dots between nested path segments. For example,
+the default matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
+and `navigation.closestApproach.radar:bridge:1`. An exact path matches only itself.
+Clear the list (or set `ignoredPaths: []`) to track all notification paths.
+
+Matching updates and clears are skipped before queueing or creating definitions,
+history, deliveries, or connectivity requests. The same filter applies to startup
+snapshots and zone discovery. Other Signal K apps still receive these alerts.
+
+This default also applies after upgrading if `ignoredPaths` has never been set.
+Existing definitions, history, per-alert settings, and queued delivery work are
+preserved. Existing occurrences stop receiving updates and clears while their
+path is ignored; ignoring a path does not cancel pending deliveries or wake work.
+Inactive definitions learned from notifications can still be forgotten in Alert
+Center. Removing a pattern resumes tracking, including the current snapshot on
+plugin restart; updates missed while ignored are not backfilled.
 
 ## Notification ingestion load
 

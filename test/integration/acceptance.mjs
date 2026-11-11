@@ -647,4 +647,110 @@ assert.equal(
 );
 await putQuietHoursEnabled(true);
 
+// Ignored paths stay out of the durable catalog across live ingestion and restart.
+const ignoredApi = `${signalkUrl}/plugins/signalk-alert-center`;
+const ignoredPlugin = (await json(`${signalkUrl}/skServer/plugins`)).find(
+  (plugin) => plugin.id === "signalk-alert-center",
+);
+const ignoredConfigUrl = `${signalkUrl}/skServer/plugins/signalk-alert-center/config`;
+const saveIgnoredConfig = (configuration) =>
+  json(ignoredConfigUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...ignoredPlugin.data, configuration }),
+  });
+const raiseIgnoredFixture = (path) =>
+  json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      path,
+      source: "ignored-paths.acceptance",
+      message: path,
+    }),
+  });
+const collisionPath =
+  "notifications.navigation.closestApproach.urn:mrn:imo:mmsi:244954000";
+const customIgnoredPath = "notifications.test.ignored.radar.bridge.1";
+const allowedPath = "notifications.test.allowed.voltage";
+try {
+  const { ignoredPaths: _removed, ...defaultConfig } =
+    ignoredPlugin.data.configuration;
+  await saveIgnoredConfig(defaultConfig);
+  await eventually(
+    () => json(`${ignoredApi}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "default ignore startup",
+  );
+  await raiseIgnoredFixture(collisionPath);
+  await raiseIgnoredFixture(allowedPath);
+  await eventually(
+    () => json(`${ignoredApi}/occurrences?source=ignored-paths.acceptance`),
+    (page) => page.items.some((item) => item.path === allowedPath),
+    "allowed notification persisted",
+  );
+  assert.equal(
+    (
+      await fetch(
+        `${ignoredApi}/definitions/${encodeURIComponent(`path:${collisionPath}`)}`,
+      )
+    ).status,
+    404,
+  );
+
+  const customConfig = {
+    ...defaultConfig,
+    ignoredPaths: ["navigation.closestApproach.*", "test.ignored.*"],
+  };
+  await saveIgnoredConfig(customConfig);
+  await eventually(
+    () => json(`${ignoredApi}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "custom ignore startup",
+  );
+  await raiseIgnoredFixture(customIgnoredPath);
+  await raiseIgnoredFixture(`${allowedPath}.second`);
+  await eventually(
+    () => json(`${ignoredApi}/occurrences?source=ignored-paths.acceptance`),
+    (page) => page.items.some((item) => item.path === `${allowedPath}.second`),
+    "custom ignore barrier",
+  );
+  // Both ignored notifications now exist in Signal K's snapshot.
+  await saveIgnoredConfig(customConfig);
+  await eventually(
+    () => json(`${ignoredApi}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "ignored snapshot reconciliation",
+  );
+  for (const path of [collisionPath, customIgnoredPath])
+    assert.equal(
+      (
+        await fetch(
+          `${ignoredApi}/definitions/${encodeURIComponent(`path:${path}`)}`,
+        )
+      ).status,
+      404,
+    );
+  const occurrences = await json(
+    `${ignoredApi}/occurrences?source=ignored-paths.acceptance`,
+  );
+  assert.equal(
+    occurrences.items.some((item) =>
+      [collisionPath, customIgnoredPath].includes(item.path),
+    ),
+    false,
+  );
+
+  await saveIgnoredConfig({ ...defaultConfig, ignoredPaths: [] });
+  await eventually(
+    () => json(`${ignoredApi}/occurrences?source=ignored-paths.acceptance`),
+    (page) =>
+      page.items.some((item) => item.path === collisionPath) &&
+      page.items.some((item) => item.path === customIgnoredPath),
+    "empty list resumes snapshot ingestion",
+  );
+} finally {
+  await saveIgnoredConfig(ignoredPlugin.data.configuration);
+}
+
 console.log("Docker acceptance smoke test passed");
