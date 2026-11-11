@@ -79,6 +79,37 @@ pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
+### Access and permissions
+
+Reading alerts and history follows Signal K's read-only access settings, including
+anonymous access when the server permits it. With security enabled:
+
+- **Acknowledge / Silence** require a readwrite or admin login and ACL `put`
+  permission on the occurrence's exact notification path in `vessels.self`.
+  For example, `notifications.electrical.*` permits electrical alerts without
+  granting control of navigation alerts. An admin login does not bypass this ACL.
+- **Alert settings, policy resets, forgetting definitions, delivery deletion or
+  retry, service tests, and global snooze buttons** require an admin login.
+- Existing Signal K PUT controls for snooze and quiet hours continue to use the
+  server's normal PUT permissions on their `digital.alertCenter.*` paths.
+
+If you use ACLs, grant `put` on the specific paths your crew should control.
+A permission on the literal `notifications` path (used by the server's v2
+Notifications API) does not also match `notifications.electrical.*`; use explicit
+path patterns for Alert Center. Without configured ACLs, readwrite users retain
+acknowledge/silence access. With server security disabled, actions remain
+available through Signal K's permissive security strategy. An unexpectedly
+missing permission checker blocks acknowledge/silence instead of allowing them.
+
+Anonymous and read-only visitors get a clean view without action buttons or
+settings controls. Readwrite users see acknowledge/silence controls; admins also
+see settings, service tests, delivery maintenance, and snooze controls. Everyone
+with read access can still see active snooze status, alerts, history, and delivery
+details. Access is refreshed from Signal K's login status; an unavailable status
+keeps the view read-only. Individual path ACL denials are reported when an action
+is attempted, and the server enforces all permissions independently of the UI.
+Rejected requests do not change alert state, history, policies, or delivery work.
+
 ### Per-alert settings
 
 Select an alert, then choose **Alert settings**. Settings are inherited from the
