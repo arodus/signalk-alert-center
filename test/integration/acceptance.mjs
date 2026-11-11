@@ -117,6 +117,7 @@ const definition = definitionPage.items.find(
     item.pathPattern ===
     "notifications.environment.inside.refrigerator.temperature",
 );
+assert.equal(definition.name, "Refrigerator temperature");
 const updatedDefinition = await json(
   `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}/policy`,
   {

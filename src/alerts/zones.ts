@@ -9,6 +9,7 @@ export interface ConfiguredZonePath {
   path: string;
   zones: ZoneThreshold[];
   units?: string;
+  displayName?: string;
   description?: string;
 }
 
@@ -57,6 +58,8 @@ export function listConfiguredZones(app: {
         path,
         zones,
         units: typeof meta.units === "string" ? meta.units : undefined,
+        displayName:
+          typeof meta.displayName === "string" ? meta.displayName : undefined,
         description:
           typeof meta.description === "string" ? meta.description : undefined,
       });

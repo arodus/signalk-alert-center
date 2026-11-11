@@ -1,5 +1,31 @@
 import { expect, test } from "@playwright/test";
 
+test("uses the zone display name instead of its schema description", async ({
+  page,
+}) => {
+  await page.goto("/signalk-alert-center/");
+  const row = page.locator("#definition-list tbody tr").filter({
+    has: page.locator(
+      '.cell-title[title="notifications.environment.inside.refrigerator.temperature"]',
+    ),
+  });
+  await expect(row.locator(".cell-title")).toHaveText(
+    "Refrigerator temperature",
+  );
+  await expect(page.locator("#definition-list")).not.toContainText(
+    "Data should be of type number.",
+  );
+  await row.click();
+  await expect(page.locator("#drawer-title")).toHaveText(
+    "Refrigerator temperature",
+  );
+  await page.screenshot({
+    path: `test-results/zone-display-name-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
 test("shows every definition, sorts zones above inactive alerts, and filters zones plus active alerts", async ({
   page,
 }) => {

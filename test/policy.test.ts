@@ -5,26 +5,33 @@ import { AlertDatabase } from "../src/storage/db";
 
 describe("AlertPolicyResolver", () => {
   it.each([undefined, "", " \t\n "])(
-    "uses the zone path when its description is blank (%j)",
-    (description) => {
+    "uses the zone path when its display name is blank (%j), never its description",
+    (displayName) => {
       const database = new AlertDatabase();
       try {
         const resolver = new AlertPolicyResolver(database, {});
         const path = "environment.refrigerator.temperature";
         const id = pathDefinitionId(`notifications.${path}`);
-        const zone = { path, zones: [{ state: "alert" }], description };
+        const zone = {
+          path,
+          zones: [{ state: "alert" }],
+          displayName,
+          description: "Data should be of type number.",
+        };
         database.upsertDefinition({
           id,
           sourceType: "zone",
           pathPattern: `notifications.${path}`,
-          name: "",
+          name: zone.description,
         });
         resolver.seedDefinitions([zone]);
         expect(database.getDefinition(id).name).toBe(path);
         resolver.seedDefinitions([
-          { ...zone, description: " Fridge temperature " },
+          { ...zone, displayName: " Fridge temperature " },
         ]);
         expect(database.getDefinition(id).name).toBe("Fridge temperature");
+        resolver.seedDefinitions([zone]);
+        expect(database.getDefinition(id).name).toBe(path);
       } finally {
         database.close();
       }
