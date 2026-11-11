@@ -133,7 +133,7 @@ export interface RouterLike {
     level: "readonly" | "readwrite",
   ) => Pick<RouterLike, "get" | "post" | "patch" | "delete">;
 }
-interface RequestLike {
+export interface RequestLike {
   params?: Record<string, string | undefined>;
   query?: Record<string, unknown>;
   body?: unknown;
@@ -144,7 +144,14 @@ export interface AlertCenterChange {
   reason: string;
   occurredAt: string;
 }
+/** Undefined means the occurrence does not exist; false means ACL denied. */
+export type OccurrenceWriteAuthorization = (
+  request: RequestLike,
+  id: string,
+) => MaybePromise<boolean | undefined>;
+
 export interface AlertCenterDependencies {
+  canChangeOccurrence: OccurrenceWriteAuthorization;
   snooze?: () => SnoozeState | undefined;
   setSnooze?: (seconds: number) => SnoozeState;
   repository: () => AlertCenterRepository | undefined;
@@ -212,14 +219,32 @@ const wrap =
         );
       });
 
+async function requireOccurrenceWrite(
+  authorize: OccurrenceWriteAuthorization,
+  request: RequestLike,
+  id: string,
+  action: "acknowledge" | "silence",
+): Promise<void> {
+  const allowed = await authorize(request, id);
+  if (allowed === undefined)
+    throw new ApiError(404, "NOT_FOUND", "Alert occurrence was not found");
+  if (allowed !== true)
+    throw new ApiError(
+      403,
+      "FORBIDDEN",
+      `You do not have permission to ${action} this alert. Ask a Signal K administrator to grant access to this notification path.`,
+    );
+}
+
 function addRoute(
   router: RouterLike,
   method: "get" | "post" | "patch" | "delete",
   path: string,
-  access: "readonly" | "readwrite",
+  access: "readonly" | "readwrite" | "admin",
   handler: Handler,
 ): void {
-  const target = router.access?.(access) ?? router;
+  const target =
+    access === "admin" ? router : (router.access?.(access) ?? router);
   const registrar = target[method];
   if (!registrar)
     throw new Error(`Router does not support ${method.toUpperCase()}`);
@@ -570,7 +595,7 @@ export function registerAlertCenterRoutes(
         router,
         method,
         "/snooze",
-        "readwrite",
+        "admin",
         wrap((req, res) => {
           if (!dependencies.snooze!())
             throw new ApiError(503, "NOT_STARTED", "Plugin is not started");
@@ -678,7 +703,7 @@ export function registerAlertCenterRoutes(
       router,
       "post",
       "/notifiers/:id/test",
-      "readwrite",
+      "admin",
       wrap(async (req, res) => {
         const body = req.body;
         if (
@@ -749,7 +774,7 @@ export function registerAlertCenterRoutes(
     router,
     "delete",
     "/definitions/:id/policy",
-    "readwrite",
+    "admin",
     wrap(async (req, res) => {
       const result = await repo().resetPolicy(req.params?.id ?? "");
       if (result === undefined)
@@ -761,7 +786,7 @@ export function registerAlertCenterRoutes(
     router,
     "delete",
     "/definitions/:id",
-    "readwrite",
+    "admin",
     wrap(async (req, res) => {
       const result = await repo().deleteDefinition(req.params?.id ?? "");
       if (result === "not_found")
@@ -791,7 +816,7 @@ export function registerAlertCenterRoutes(
     router,
     "patch",
     "/definitions/:id/policy",
-    "readwrite",
+    "admin",
     wrap(async (req, res) => {
       const patch = parsePolicy(req.body);
       if (
@@ -896,7 +921,7 @@ export function registerAlertCenterRoutes(
     router,
     "delete",
     "/deliveries",
-    "readwrite",
+    "admin",
     wrap(async (_req, res) => {
       const count = await repo().deleteFailedDeliveries();
       res.json({ status: "deleted", count });
@@ -932,7 +957,7 @@ export function registerAlertCenterRoutes(
     router,
     "post",
     "/deliveries/:id/retry",
-    "readwrite",
+    "admin",
     wrap(async (req, res) => {
       const result = await repo().retryDelivery(req.params?.id ?? "");
       if (result === "not_found")
@@ -950,7 +975,7 @@ export function registerAlertCenterRoutes(
     router,
     "delete",
     "/deliveries/:id",
-    "readwrite",
+    "admin",
     wrap(async (req, res) => {
       const result = await repo().deleteFailedDelivery(req.params?.id ?? "");
       if (result === "not_found")
@@ -975,7 +1000,14 @@ export function registerAlertCenterRoutes(
       `/occurrences/:id/${action}`,
       "readwrite",
       wrap(async (req, res) => {
-        const result = await actions[action](req.params?.id ?? "");
+        const id = req.params?.id ?? "";
+        await requireOccurrenceWrite(
+          dependencies.canChangeOccurrence,
+          req,
+          id,
+          action,
+        );
+        const result = await actions[action](id);
         if (result === "inactive")
           throw new ApiError(
             409,
@@ -1002,6 +1034,7 @@ export function registerRoutes(
   catalog: () => unknown,
   acknowledgeAlert: (id: string) => MaybePromise<boolean>,
   silenceAlert: (id: string) => MaybePromise<boolean>,
+  canChangeOccurrence: OccurrenceWriteAuthorization,
 ): void {
   addRoute(router, "get", "/status", "readonly", (_req, res) =>
     res.json(status()),
@@ -1019,8 +1052,9 @@ export function registerRoutes(
       `/alerts/:id/${action}`,
       "readwrite",
       wrap(async (req, res) => {
-        const id = req.params?.id;
-        if (!id || !(await callback(id)))
+        const id = req.params?.id ?? "";
+        await requireOccurrenceWrite(canChangeOccurrence, req, id, action);
+        if (!(await callback(id)))
           throw new ApiError(404, "NOT_FOUND", "Alert was not found");
         res.json({ status: `${action}d` });
       }),
@@ -1029,7 +1063,7 @@ export function registerRoutes(
     router,
     "post",
     "/retry",
-    "readwrite",
+    "admin",
     wrap(async (_req, res) => {
       const current = database();
       if (!current)

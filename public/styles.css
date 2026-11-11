@@ -1458,3 +1458,9 @@ dialog input[type="checkbox"] {
   display: block;
   margin: 8px 0;
 }
+
+/* Start read-only until Signal K confirms the current session's role. */
+html:not([data-access="admin"]) [data-required-access="admin"],
+html[data-access="readonly"] [data-required-access="readwrite"] {
+  display: none !important;
+}

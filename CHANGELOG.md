@@ -10,6 +10,21 @@ Versioning while it remains pre-1.0.
 - Group each alert setting with its own consistently placed Customize / Use global
   default button. Keep connection wake delay inside its connection setting, with a
   responsive layout for narrow screens.
+### Fixes
+
+- Enforce Signal K path ACLs before acknowledging or silencing alerts through
+  either API route. A restricted readwrite or admin login can no longer bypass
+  notification permissions through Alert Center. ACL users must grant `put` on
+  the allowed `notifications.*` paths; a literal `notifications` permission does
+  not cover child paths.
+- Require admin access for alert settings, definition and policy removal,
+  delivery deletion/retry, service tests, and global snooze buttons. Read-only
+  views and existing ACL-controlled Signal K PUT controls remain available.
+- Hide action and settings controls for anonymous and read-only dashboard
+  visitors. Readwrite users retain alert actions, while admin controls appear
+  only for admins. Snooze status, alert history, and delivery details remain
+  visible to readers. Permission errors explain missing access without asking an
+  already signed-in user to sign in again.
 
 ## [0.5.0] - 2026-10-20
 

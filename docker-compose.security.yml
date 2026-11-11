@@ -1,0 +1,18 @@
+# Test-only override: exercise the real Signal K security strategy and ACLs.
+services:
+  signalk:
+    environment:
+      SIGNALK_DISABLE_SECURITY: "0"
+    ports: !reset []
+    volumes:
+      - ./test/integration/security.mjs:/tests/security.mjs:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - node /tests/security.mjs setup && exec /home/node/docker-entrypoint.sh
+  notifier-mock:
+    ports: !reset []
+  acceptance:
+    volumes:
+      - ./test/integration/security.mjs:/tests/security.mjs:ro
+    command: ["node", "/tests/security.mjs"]
