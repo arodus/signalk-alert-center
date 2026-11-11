@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-11
+
 ### Features
 
 - Add **Notification paths to leave out** in plugin settings. Per-target
@@ -21,6 +23,24 @@ Versioning while it remains pre-1.0.
   data path when no display name is set. Schema descriptions such as “Data should
   be of type number.” no longer appear as alert names. Existing names are corrected
   on startup or the next zone refresh without changing history or delivery settings.
+
+### Upgrading and compatibility
+
+- No database migration or dependency upgrade is required. Existing history,
+  alert settings, and queued deliveries are preserved.
+- Installations without an explicit ignored-path list now leave out per-target
+  collision alarms by default. Clear **Notification paths to leave out** in
+  plugin settings to keep tracking those paths. Ignoring an already-active
+  occurrence leaves it stored but stops subsequent updates and clears.
+- Rollback to 0.6.0 does not require restoring the database. That version ignores
+  the new path-filter setting, resumes tracking all notification paths, and uses
+  the previous zone-name behavior.
+
+### Release automation
+
+- Verify successful CI runs on the exact tagged main commit before publishing,
+  reusing those checks instead of repeating the full test matrix for the tag.
+  The release still builds, inspects, and smoke-tests the published package.
 
 ## [0.6.0] - 2026-11-11
 
