@@ -5,6 +5,12 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Alert settings
+
+- Group each alert setting with its own consistently placed Customize / Use global
+  default button. Keep connection wake delay inside
+  its connection setting, with a responsive layout for narrow screens.
+
 ### Core alerts migration
 
 - Recommend Signal K Alert Rules as the companion plugin for creating alert rules.

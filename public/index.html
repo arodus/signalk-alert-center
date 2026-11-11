@@ -499,8 +499,8 @@
               >Using global defaults</strong
             >
             <small id="policy-inheritance-help" class="field-help"
-              >Customize only the settings that should differ for this
-              alert.</small
+              >Choose Customize beside a setting to change it for this alert.
+              Use global default restores that setting’s inherited value.</small
             >
           </div>
           <button
@@ -511,144 +511,289 @@
             Use global defaults
           </button>
         </div>
-        <label class="form-field" data-policy-field="activationDelaySeconds"
-          ><span
-            >Wait before sending (seconds)
-            <small class="field-help"
-              >The alert must remain active for this many seconds before any
-              notification is sent.</small
-            ></span
-          ><input
+        <div
+          class="policy-setting"
+          data-policy-field="activationDelaySeconds"
+          role="group"
+          aria-labelledby="policy-activationDelaySeconds-title"
+        >
+          <div class="policy-field-header">
+            <label
+              for="activation-delay"
+              id="policy-activationDelaySeconds-title"
+              class="policy-field-title"
+              >Wait before sending (seconds)</label
+            >
+          </div>
+          <p class="field-help" id="policy-activationDelaySeconds-help">
+            The alert must remain active for this many seconds before any
+            notification is sent.
+          </p>
+          <input
             id="activation-delay"
+            aria-describedby="policy-activationDelaySeconds-help"
             type="number"
             min="0"
             max="604800"
             required
-        /></label>
-        <label class="form-field" data-policy-field="minimumSeverity"
-          ><span
-            >Lowest severity sent
-            <small class="field-help"
-              >Ignore this alert until it reaches the selected Signal K
-              severity.</small
-            ></span
-          ><select id="minimum-severity">
+          />
+        </div>
+        <div
+          class="policy-setting"
+          data-policy-field="minimumSeverity"
+          role="group"
+          aria-labelledby="policy-minimumSeverity-title"
+        >
+          <div class="policy-field-header">
+            <label
+              for="minimum-severity"
+              id="policy-minimumSeverity-title"
+              class="policy-field-title"
+              >Lowest severity sent</label
+            >
+          </div>
+          <p class="field-help" id="policy-minimumSeverity-help">
+            Ignore this alert until it reaches the selected Signal K severity.
+          </p>
+          <select
+            id="minimum-severity"
+            aria-describedby="policy-minimumSeverity-help"
+          >
             <option>normal</option>
             <option>alert</option>
             <option>warn</option>
             <option>alarm</option>
             <option>emergency</option>
-          </select></label
+          </select>
+        </div>
+        <div
+          class="policy-setting"
+          data-policy-field="notifierIds"
+          role="group"
+          aria-labelledby="policy-notifierIds-title"
         >
-        <fieldset data-policy-field="notifierIds">
-          <legend>Notification services</legend>
+          <div class="policy-field-header">
+            <span id="policy-notifierIds-title" class="policy-field-title"
+              >Notification services</span
+            >
+          </div>
           <p class="field-help">
             Select the services that should receive this alert. Each service
             inherits its global repeat interval unless you enter an override;
             use 0 to send this alert only once through that service.
           </p>
           <div id="notifier-options"></div>
-        </fieldset>
-        <div class="form-field" data-policy-field="soundEnabled">
-          <label class="check-label"
-            ><input id="sound-enabled" type="checkbox" /> Play a notification
-            sound</label
-          >
-          <small class="field-help"
-            >Uses the selected Wyoming service's sound for the current alert
-            severity.</small
-          >
         </div>
-        <label class="form-field" data-policy-field="soundId"
-          ><span
-            >Custom sound ID
-            <small class="field-help"
-              >Override the per-severity sound for this alert with a built-in or
-              uploaded signalk-wyoming sound ID.</small
-            ></span
-          ><input
+        <div
+          class="policy-setting"
+          data-policy-field="soundEnabled"
+          role="group"
+          aria-labelledby="policy-soundEnabled-title"
+        >
+          <div class="policy-field-header">
+            <label
+              id="policy-soundEnabled-title"
+              class="policy-field-title check-label"
+              ><input
+                id="sound-enabled"
+                aria-describedby="policy-soundEnabled-help"
+                type="checkbox"
+              />
+              Play a notification sound</label
+            >
+          </div>
+          <p class="field-help" id="policy-soundEnabled-help">
+            Uses the selected Wyoming service's sound for the current alert
+            severity.
+          </p>
+        </div>
+        <div
+          class="policy-setting"
+          data-policy-field="soundId"
+          role="group"
+          aria-labelledby="policy-soundId-title"
+        >
+          <div class="policy-field-header">
+            <label
+              for="sound-id"
+              id="policy-soundId-title"
+              class="policy-field-title"
+              >Custom sound ID</label
+            >
+          </div>
+          <p class="field-help" id="policy-soundId-help">
+            Override the per-severity sound for this alert with a built-in or
+            uploaded signalk-wyoming sound ID.
+          </p>
+          <input
             id="sound-id"
+            aria-describedby="policy-soundId-help"
             type="text"
             maxlength="64"
             pattern="[a-z0-9][a-z0-9_-]{0,63}"
             placeholder="Uses severity sound"
-        /></label>
-        <div class="form-field" data-policy-field="speechEnabled">
-          <label class="check-label"
-            ><input id="speech-enabled" type="checkbox" /> Speak alert text
-            after the sound</label
-          >
-          <small class="field-help"
-            >Sound and speech are independent. When both are enabled, the sound
-            is always queued first.</small
-          >
+          />
         </div>
-        <label class="form-field" data-policy-field="speechMinimumSeverity"
-          ><span
-            >Lowest severity spoken
-            <small class="field-help"
-              >Applies only when speech is enabled for a selected Signal K
-              Wyoming audio service. Its global severity floor can still require
-              a higher level.</small
-            ></span
-          ><select id="speech-minimum-severity">
+        <div
+          class="policy-setting"
+          data-policy-field="speechEnabled"
+          role="group"
+          aria-labelledby="policy-speechEnabled-title"
+        >
+          <div class="policy-field-header">
+            <label
+              id="policy-speechEnabled-title"
+              class="policy-field-title check-label"
+              ><input
+                id="speech-enabled"
+                aria-describedby="policy-speechEnabled-help"
+                type="checkbox"
+              />
+              Speak alert text after the sound</label
+            >
+          </div>
+          <p class="field-help" id="policy-speechEnabled-help">
+            Sound and speech are independent. When both are enabled, the sound
+            is always queued first.
+          </p>
+        </div>
+        <div
+          class="policy-setting"
+          data-policy-field="speechMinimumSeverity"
+          role="group"
+          aria-labelledby="policy-speechMinimumSeverity-title"
+        >
+          <div class="policy-field-header">
+            <label
+              for="speech-minimum-severity"
+              id="policy-speechMinimumSeverity-title"
+              class="policy-field-title"
+              >Lowest severity spoken</label
+            >
+          </div>
+          <p class="field-help" id="policy-speechMinimumSeverity-help">
+            Applies only when speech is enabled for a selected Signal K Wyoming
+            audio service. Its global severity floor can still require a higher
+            level.
+          </p>
+          <select
+            id="speech-minimum-severity"
+            aria-describedby="policy-speechMinimumSeverity-help"
+          >
             <option>normal</option>
             <option>alert</option>
             <option>warn</option>
             <option>alarm</option>
             <option>emergency</option>
-          </select></label
-        >
-        <label class="form-field" data-policy-field="speechTemplate"
-          ><span
-            >Spoken alert text
-            <small class="field-help"
-              >Passed to signalk-wyoming when the alert fires. Available:
-              {name}, {severity}, {message}, {path}, and {state}.</small
-            ></span
-          ><input id="speech-template" type="text" maxlength="500" required
-        /></label>
-        <div class="form-field" data-policy-field="speechAnnounceClear">
-          <label class="check-label"
-            ><input id="speech-announce-clear" type="checkbox" /> Announce when
-            this alert clears</label
-          >
-          <small class="field-help"
-            >The clear announcement is queued only after the original Wyoming
-            announcement was accepted.</small
-          >
+          </select>
         </div>
-        <label class="form-field" data-policy-field="connectivity"
-          ><span
-            >Internet connection behavior
-            <small class="field-help"
-              >Queue waits for an existing connection. Wake requests the
-              configured connection immediately or after a delay.</small
-            ></span
-          ><select id="connectivity-mode">
+        <div
+          class="policy-setting"
+          data-policy-field="speechTemplate"
+          role="group"
+          aria-labelledby="policy-speechTemplate-title"
+        >
+          <div class="policy-field-header">
+            <label
+              for="speech-template"
+              id="policy-speechTemplate-title"
+              class="policy-field-title"
+              >Spoken alert text</label
+            >
+          </div>
+          <p class="field-help" id="policy-speechTemplate-help">
+            Passed to signalk-wyoming when the alert fires. Available: {name},
+            {severity}, {message}, {path}, and {state}.
+          </p>
+          <input
+            id="speech-template"
+            aria-describedby="policy-speechTemplate-help"
+            type="text"
+            maxlength="500"
+            required
+          />
+        </div>
+        <div
+          class="policy-setting"
+          data-policy-field="speechAnnounceClear"
+          role="group"
+          aria-labelledby="policy-speechAnnounceClear-title"
+        >
+          <div class="policy-field-header">
+            <label
+              id="policy-speechAnnounceClear-title"
+              class="policy-field-title check-label"
+              ><input
+                id="speech-announce-clear"
+                aria-describedby="policy-speechAnnounceClear-help"
+                type="checkbox"
+              />
+              Announce when this alert clears</label
+            >
+          </div>
+          <p class="field-help" id="policy-speechAnnounceClear-help">
+            The clear announcement is queued only after the original Wyoming
+            announcement was accepted.
+          </p>
+        </div>
+        <div
+          class="policy-setting"
+          data-policy-field="connectivity"
+          role="group"
+          aria-labelledby="policy-connectivity-title"
+        >
+          <div class="policy-field-header">
+            <label
+              for="connectivity-mode"
+              id="policy-connectivity-title"
+              class="policy-field-title"
+              >Internet connection behavior</label
+            >
+          </div>
+          <p class="field-help" id="policy-connectivity-help">
+            Queue waits for an existing connection. Wake requests the configured
+            connection immediately or after a delay.
+          </p>
+          <select
+            id="connectivity-mode"
+            aria-describedby="policy-connectivity-help"
+          >
             <option value="queue">Queue only</option>
             <option value="wake">Wake immediately</option>
             <option value="wake_after">Wake after delay</option>
-          </select></label
+          </select>
+          <label id="wake-delay-field" class="form-field" hidden
+            ><span
+              >Wait before waking the connection
+              <small class="field-help"
+                >Only wake the configured connection if the alert is still
+                active after this many seconds.</small
+              ></span
+            ><input id="wake-delay" type="number" min="0" max="604800"
+          /></label>
+        </div>
+        <div
+          class="policy-setting"
+          data-policy-field="enabled"
+          role="group"
+          aria-labelledby="policy-enabled-title"
         >
-        <label id="wake-delay-field" class="form-field" hidden
-          ><span
-            >Wait before waking the connection
-            <small class="field-help"
-              >Only wake the configured connection if the alert is still active
-              after this many seconds.</small
-            ></span
-          ><input id="wake-delay" type="number" min="0" max="604800"
-        /></label>
-        <div class="form-field" data-policy-field="enabled">
-          <label class="check-label"
-            ><input id="policy-enabled" type="checkbox" /> Deliver
-            notifications</label
-          >
-          <small class="field-help"
-            >Turn this off to keep tracking the alert without creating new ntfy,
-            PagerDuty, Discord, or Wyoming audio deliveries.</small
-          >
+          <div class="policy-field-header">
+            <label
+              id="policy-enabled-title"
+              class="policy-field-title check-label"
+              ><input
+                id="policy-enabled"
+                aria-describedby="policy-enabled-help"
+                type="checkbox"
+              />
+              Deliver notifications</label
+            >
+          </div>
+          <p class="field-help" id="policy-enabled-help">
+            Turn this off to keep tracking the alert without creating new ntfy,
+            PagerDuty, Discord, or Wyoming audio deliveries.
+          </p>
         </div>
         <p id="policy-result" class="form-result" role="status"></p>
         <div class="dialog-actions">

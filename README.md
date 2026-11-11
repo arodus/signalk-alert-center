@@ -91,8 +91,10 @@ pretend the underlying condition has cleared.
 ### Per-alert settings
 
 Select an alert, then choose **Alert settings**. Settings are inherited from the
-global defaults until you override them for that alert. Changes apply to future
-occurrences.
+global defaults until you override them for that alert. Choose **Customize** in a
+setting’s header to edit it, or **Use global default** to restore its inherited
+value.
+Changes apply to future occurrences.
 
 You can configure:
 
