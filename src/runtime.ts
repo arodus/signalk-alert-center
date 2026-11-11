@@ -70,6 +70,7 @@ import {
   SignalKNotificationInput,
 } from "./signalk/notifications";
 import { BoundedIngestionQueue } from "./signalk/ingestion-queue";
+import { ignoredPathMatcher } from "./signalk/ignored-paths";
 import {
   isServiceHealthPath,
   serviceHealthMessage,
@@ -148,6 +149,7 @@ export class AlertCenterRuntime {
     DEFAULT_INGESTION_QUEUE_LIMIT,
   );
   private ingestionImmediate?: ReturnType<typeof setImmediate>;
+  private isIgnoredPath = ignoredPathMatcher();
   private startupImmediate?: ReturnType<typeof setImmediate>;
   private deliveryImmediate?: ReturnType<typeof setImmediate>;
   private deliveryRun?: Promise<void>;
@@ -934,6 +936,7 @@ export class AlertCenterRuntime {
   private enqueueNotifications(entries: SignalKNotificationInput[]): void {
     let rejected = 0;
     for (const entry of entries) {
+      if (this.isIgnoredPath(entry.path)) continue;
       const sampled = {
         ...entry,
         messageSample: captureMessageSample(this.app, entry),
@@ -998,7 +1001,11 @@ export class AlertCenterRuntime {
   }
 
   private seedDefinitions(): void {
-    this.policies().seedDefinitions(listConfiguredZones(this.app));
+    this.policies().seedDefinitions(
+      listConfiguredZones(this.app).filter(
+        (zone) => !this.isIgnoredPath(`notifications.${zone.path}`),
+      ),
+    );
   }
 
   private runRetention(now = new Date()): void {
@@ -1053,6 +1060,7 @@ export class AlertCenterRuntime {
     receivedAt = new Date(),
     schedule = true,
   ): AlertRecord | undefined {
+    if (this.isIgnoredPath(entry.path)) return undefined;
     const normalized = normalizeNotification(
       entry.path,
       entry.value,
@@ -1666,6 +1674,7 @@ export class AlertCenterRuntime {
       `Starting: configuredServices=${options.notifiers?.length ?? 0}, deliveryBatchSize=${options.delivery?.batchSize ?? 50}, deliveryConcurrency=${options.delivery?.concurrency ?? 4}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
     );
     this.config = options;
+    this.isIgnoredPath = ignoredPathMatcher(options.ignoredPaths);
     this.navigationState = undefined;
     this.lastSnoozeEffectiveness = undefined;
     if (options.snooze?.onlyWhenAnchoredOrMoored) {

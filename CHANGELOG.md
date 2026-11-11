@@ -5,6 +5,16 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Features
+
+- Add **Notification paths to leave out** in plugin settings. Per-target
+  `navigation.closestApproach.*` collision alarms are ignored by default,
+  including after upgrading when no explicit list is saved. Edit the wildcard
+  patterns or clear the list to track all paths. Matching live updates, startup
+  snapshots, and zone definitions are skipped. Existing history, settings, and
+  queued delivery work are preserved; ignored occurrences no longer receive
+  updates or clears.
+
 ## [0.6.0] - 2026-11-11
 
 ### Alert settings
