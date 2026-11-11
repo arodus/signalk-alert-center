@@ -98,7 +98,10 @@ function fixture(
       return { items: [{ id: "bilge" }] };
     },
     getDefinition: (id) => (id === "bilge" ? { id } : undefined),
-    updatePolicy: (id, policy) => (id === "bilge" ? { id, policy } : undefined),
+    updatePolicy: (id, policy) =>
+      id === "bilge" || id === "rule:signalk-alert-rules:battery-low"
+        ? { id, policy }
+        : undefined,
     resetPolicy: (id) => (id === "bilge" ? { id, reset: true } : undefined),
     deleteDefinition: (id) =>
       id === "bilge" ? "deleted" : id === "active" ? "active" : "not_found",
@@ -157,6 +160,7 @@ function fixture(
   registerAlertCenterRoutes(router, {
     canChangeOccurrence,
     repository: () => repository,
+    defaultPolicy: () => ({ provenance: "default", notifierIds: [] }),
     listNotifiers: () => [{ id: "ntfy-main", type: "ntfy" }],
     testNotifier: (id, operation) =>
       id === "ntfy-main"
@@ -214,7 +218,7 @@ describe("alert-center routes", () => {
     const { access, routeAccess } = fixture();
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
-    expect(access.filter((value) => value === "readonly")).toHaveLength(11);
+    expect(access.filter((value) => value === "readonly")).toHaveLength(12);
     expect(access.filter((value) => value === "readwrite")).toHaveLength(2);
     for (const [route, level] of routeAccess) {
       if (route.startsWith("GET ")) expect(level).toBe("readonly");
@@ -630,6 +634,44 @@ it("registers snooze mutations with admin access and validates requests", async 
   expect(valid.body).toMatchObject({ active: true });
 });
 
+it("validates rule policy identity and fields before creating a never-fired definition", async () => {
+  const { invoke } = fixture();
+  const rule = {
+    slug: "battery-low",
+    name: "Battery low",
+    alertPath: "electrical.batteries.*.voltageLow",
+  };
+  const request = {
+    params: { id: "rule:signalk-alert-rules:battery-low" },
+    body: { rule, notifierIds: ["ntfy-main"] },
+  };
+  const result = await invoke("PATCH", "/definitions/:id/policy", request);
+  expect(result.statusCode).toBe(200);
+  expect(result.body).toMatchObject({
+    policy: { rule, notifierIds: ["ntfy-main"] },
+  });
+  for (const invalid of [
+    { ...request, params: { id: "bilge" } },
+    { ...request, body: { rule } },
+    {
+      ...request,
+      body: { rule: { ...rule, slug: "../wrong" }, enabled: true },
+    },
+    {
+      ...request,
+      body: { rule: { ...rule, alertPath: "battery.**" }, enabled: true },
+    },
+    { ...request, body: { rule: { ...rule, name: " " }, enabled: true } },
+    { ...request, body: { rule, notifierIds: ["missing"] } },
+  ])
+    expect(
+      (await invoke("PATCH", "/definitions/:id/policy", invalid)).statusCode,
+    ).toBe(400);
+  expect((await invoke("GET", "/policy-defaults")).body).toMatchObject({
+    provenance: "default",
+  });
+});
+
 describe("occurrence authorization", () => {
   for (const action of ["acknowledge", "silence"] as const) {
     it(`denies ${action} before invoking any occurrence mutation`, async () => {
@@ -648,7 +690,7 @@ describe("occurrence authorization", () => {
       expect(response.body).toMatchObject({
         error: {
           code: "FORBIDDEN",
-          message: `You do not have permission to ${action} this alert. Ask a Signal K administrator to grant access to this notification path.`,
+          message: `You do not have permission to ${action} this alert. Ask a Signal K administrator to grant access to this alert path.`,
         },
       });
       expect(authorize).toHaveBeenCalledWith(request, "active");

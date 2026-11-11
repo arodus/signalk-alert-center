@@ -1,6 +1,7 @@
 import { MessageSample } from "../alerts/types";
 
 export interface SignalKNotificationInput {
+  kind?: "core";
   path: string;
   value: unknown;
   source?: string;

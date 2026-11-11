@@ -122,9 +122,13 @@ authorization support denies actions; disabled security is represented by the
 server's dummy strategy. Admin routes use Signal K's default plugin-router
 protection, without `router.access()`. No custom ACL matcher is used.
 
-The pending core-alert migration must preserve these guards and explicitly
-validate the `alerts.*` permission namespace before merging. The released
-implementation authorizes legacy notification paths.
+Core actions use the same guard on their stored `alerts.<path>` in `vessels.self`.
+The pinned server mirrors core alerts in that namespace; its in-process plugin
+API receives no HTTP request, so it cannot enforce the caller's permissions.
+`npm run test:core` runs both security-disabled lifecycle acceptance and a fresh
+security-enabled server with scoped core/legacy grants, restricted admins,
+denied-write state checks, and readwrite access with no configured ACLs.
+See [core migration notes](docs/core-alerts-migration.md) for the pinned sources.
 
 Never point automated tests at real notification services or vessel hardware.
 

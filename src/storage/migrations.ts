@@ -254,7 +254,7 @@ export function migrateMessageSamples(database: DatabaseSync): boolean {
   const version = Number(
     (database.prepare("PRAGMA user_version").get() as Row).user_version,
   );
-  if (version > 3)
+  if (version > 4)
     throw new Error("Alert Center database was created by a newer version");
   if (version >= 2) return false;
   let changed = false;
@@ -275,5 +275,31 @@ export function migrateSuppression(database: DatabaseSync): boolean {
   );
   if (version >= 3) return false;
   database.exec("PRAGMA user_version = 3");
+  return true;
+}
+
+/** Version 4: core identity and confirmed resolution survive plugin restarts.
+ * Runs inside the schema transaction; legacy rows and pending deliveries stay intact.
+ */
+export function migrateCoreAlerts(database: DatabaseSync): boolean {
+  const version = Number(
+    (database.prepare("PRAGMA user_version").get() as Row).user_version,
+  );
+  if (version >= 4) return false;
+  if (!columns(database, "alert_occurrences").has("core_alert_id"))
+    database.exec(
+      "ALTER TABLE alert_occurrences ADD COLUMN core_alert_id TEXT",
+    );
+  if (!columns(database, "alert_occurrences").has("core_resolution_confirmed"))
+    database.exec(
+      "ALTER TABLE alert_occurrences ADD COLUMN core_resolution_confirmed INTEGER NOT NULL DEFAULT 0",
+    );
+  if (!columns(database, "alert_occurrences").has("core_reannounce_pending"))
+    database.exec(
+      "ALTER TABLE alert_occurrences ADD COLUMN core_reannounce_pending INTEGER NOT NULL DEFAULT 0",
+    );
+  database.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS occurrences_core_id ON alert_occurrences(core_alert_id) WHERE core_alert_id IS NOT NULL; PRAGMA user_version = 4",
+  );
   return true;
 }

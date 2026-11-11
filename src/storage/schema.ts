@@ -1,5 +1,5 @@
 /** Initial Signal K Alert Center schema. */
-export const currentSchemaVersion = 3;
+export const currentSchemaVersion = 4;
 
 export const schema = `
 CREATE TABLE IF NOT EXISTS notification_controls (key TEXT PRIMARY KEY, value TEXT NOT NULL);

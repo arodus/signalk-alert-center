@@ -1,3 +1,8 @@
+import {
+  coreAlertSignature,
+  coreConditionActive,
+  isCoreAlert,
+} from "../signalk/core-alerts";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -23,11 +28,20 @@ import {
 } from "../alerts/types";
 import { currentSchemaVersion, schema } from "./schema";
 import {
+  migrateCoreAlerts,
   migrateLegacyRepeatSchema,
   migrateMessageSamples,
   migrateSuppression,
   migrateWyomingPlaybackSchema,
 } from "./migrations";
+
+// Preserve causal order within a core alert/notifier without blocking other targets.
+const coreDeliveryReady = `NOT EXISTS (
+  SELECT 1 FROM alert_occurrences o JOIN deliveries earlier ON earlier.alert_id=o.id
+  WHERE o.id=d.alert_id AND o.core_alert_id IS NOT NULL
+    AND earlier.transport_instance_id=d.transport_instance_id AND earlier.rowid<d.rowid
+    AND earlier.state NOT IN ('delivered','failed_terminal','suppressed')
+)`;
 
 type Row = Record<string, unknown>;
 
@@ -311,12 +325,14 @@ export class AlertDatabase {
       const soundMigrationApplied = soundMigrationResults.some(Boolean);
       const samplesMigrationApplied = migrateMessageSamples(this.db);
       const suppressionMigrationApplied = migrateSuppression(this.db);
+      const coreMigrationApplied = migrateCoreAlerts(this.db);
       this.db.exec("COMMIT");
       this.migrationApplied =
         repeatMigrationApplied ||
         playbackMigrationApplied ||
         samplesMigrationApplied ||
         suppressionMigrationApplied ||
+        coreMigrationApplied ||
         soundMigrationApplied;
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -759,10 +775,12 @@ export class AlertDatabase {
     definitionId: string,
     policy: Omit<AlertPolicyRecord, "definitionId" | "updatedAt">,
     now = new Date(),
+    definition?: AlertDefinitionRecord,
   ): AlertPolicyRecord {
     const timestamp = now.toISOString();
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (definition) this.upsertDefinition(definition, now);
       this.db
         .prepare(
           `INSERT INTO alert_policies
@@ -995,10 +1013,83 @@ export class AlertDatabase {
       this.ensureDefinition(alert, definitionId, now);
       let active = this.db
         .prepare(
-          "SELECT * FROM alert_occurrences WHERE source_key=? AND current_state='active'",
+          alert.coreAlert
+            ? "SELECT * FROM alert_occurrences WHERE core_alert_id=?"
+            : "SELECT * FROM alert_occurrences WHERE source_key=? AND current_state='active'",
         )
-        .get(alert.sourceKey) as Row | undefined;
+        .get(alert.coreAlert?.id ?? alert.sourceKey) as Row | undefined;
 
+      const previousCore = active?.core_alert_id
+        ? json(active.source_payload_json)
+        : undefined;
+      const core = alert.coreAlert;
+      const reannounced =
+        core &&
+        isCoreAlert(previousCore) &&
+        core.state === "unacknowledged" &&
+        (previousCore.state === "rtn-unacknowledged" ||
+          (core.latching &&
+            core.stateChangedAt !== previousCore.stateChangedAt));
+      const conditionEnded = core
+        ? !coreConditionActive(core)
+        : alert.state === "cleared";
+      const resolutionConfirmed =
+        core &&
+        core.clearReason !== "displaced" &&
+        (alert.coreResolutionConfirmed ||
+          core.state === "rtn-unacknowledged" ||
+          (core.state === "normal" &&
+            Boolean(active?.core_resolution_confirmed)));
+      // The core never reopens a terminal ID. Ignore stale queued snapshots.
+      if (
+        core &&
+        active &&
+        active.current_state === "cleared" &&
+        core.state !== "normal"
+      ) {
+        this.db.exec("COMMIT");
+        return this.getAlert(String(active.id));
+      }
+      if (
+        core &&
+        active &&
+        isCoreAlert(previousCore) &&
+        coreAlertSignature(core) === coreAlertSignature(previousCore) &&
+        Boolean(resolutionConfirmed) ===
+          Boolean(active.core_resolution_confirmed)
+      ) {
+        this.db
+          .prepare(
+            "UPDATE alert_occurrences SET last_seen_at=?, source_payload_json=? WHERE id=?",
+          )
+          .run(timestamp, payload, active.id);
+        this.db.exec("COMMIT");
+        return this.getAlert(String(active.id));
+      }
+      const persistCore = (id: string): void => {
+        if (!core) return;
+        const clearedAt = resolutionConfirmed
+          ? (core.clearedAt ?? core.stateChangedAt)
+          : null;
+        this.db
+          .prepare(
+            `UPDATE alert_occurrences SET core_alert_id=?, core_resolution_confirmed=?,
+          source=?, started_at=?, acknowledged_at=?, silenced_at=?, cleared_at=? WHERE id=?`,
+          )
+          .run(
+            core.id,
+            Number(Boolean(resolutionConfirmed)),
+            core.$source,
+            core.raisedAt,
+            core.acknowledgedAt ??
+              (core.state === "normal"
+                ? (active?.acknowledged_at ?? null)
+                : null),
+            core.silenced ? (active?.silenced_at ?? timestamp) : null,
+            clearedAt,
+            id,
+          );
+      };
       let id: string;
       if (active) {
         id = String(active.id);
@@ -1019,7 +1110,8 @@ export class AlertDatabase {
             ? String(active.max_severity)
             : alert.severity;
         const clearing = alert.state === "cleared";
-        const suppression = clearing && active.activation_state === "pending";
+        const suppression =
+          conditionEnded && active.activation_state === "pending";
         this.db
           .prepare(
             `UPDATE alert_occurrences SET
@@ -1049,6 +1141,56 @@ export class AlertDatabase {
             timestamp,
             id,
           );
+        persistCore(id);
+        if (
+          core?.clearReason === "displaced" ||
+          reannounced ||
+          (core?.state === "unacknowledged" &&
+            isCoreAlert(previousCore) &&
+            previousCore.state === "acknowledged")
+        ) {
+          const pendingActions = this.db
+            .prepare(
+              "SELECT id FROM deliveries WHERE alert_id=? AND operation IN ('resolve','acknowledge') AND state IN ('pending','paused','waiting_connectivity','failed_retryable')",
+            )
+            .all(id) as Row[];
+          this.db
+            .prepare(
+              "UPDATE deliveries SET state='suppressed', updated_at=? WHERE alert_id=? AND operation IN ('resolve','acknowledge') AND state IN ('pending','paused','waiting_connectivity','failed_retryable')",
+            )
+            .run(timestamp, id);
+          this.db
+            .prepare(
+              "DELETE FROM delivery_holds WHERE delivery_id IN (SELECT id FROM deliveries WHERE alert_id=? AND operation IN ('resolve','acknowledge') AND state='suppressed')",
+            )
+            .run(id);
+          if (pendingActions.length)
+            this.addEvent(id, "core_actions_superseded", now, {
+              deliveryIds: pendingActions.map((row) => row.id),
+            });
+          const snapshotDelay = Number(active.activation_delay_seconds);
+          if (reannounced && snapshotDelay > 0) {
+            const dueAt = new Date(
+              now.getTime() + snapshotDelay * 1000,
+            ).toISOString();
+            this.db
+              .prepare(
+                "UPDATE alert_occurrences SET activation_state='pending', activation_due_at=?, core_reannounce_pending=1 WHERE id=?",
+              )
+              .run(dueAt, id);
+            this.db
+              .prepare(
+                "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=?",
+              )
+              .run(id);
+            active = { ...active, activation_state: "pending" };
+            this.addEvent(id, "activation_pending", now, {
+              reason: "core_reannounced",
+              dueAt,
+            });
+          }
+        }
+        if (core) this.addEvent(id, "core_updated", now, core);
         if (!clearing && previousSeverity !== alert.severity) {
           this.addEvent(id, "severity_changed", now, {
             from: previousSeverity,
@@ -1062,14 +1204,24 @@ export class AlertDatabase {
           });
         }
         if (
+          !core &&
           !clearing &&
           previousSeverity === alert.severity &&
           previousMessage === alert.message
         )
           this.addEvent(id, "updated", now, alert.sourcePayload);
         if (suppression) this.addEvent(id, "suppressed_before_activation", now);
-        if (clearing) {
-          this.addEvent(id, "cleared", now, alert.sourcePayload);
+        if (conditionEnded) {
+          this.addEvent(
+            id,
+            core
+              ? clearing
+                ? "core_removed"
+                : "condition_returned"
+              : "cleared",
+            now,
+            alert.sourcePayload,
+          );
           this.db
             .prepare(
               "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=?",
@@ -1086,11 +1238,12 @@ export class AlertDatabase {
           this.addEvent(id, "acknowledged", now);
           this.createActionDeliveryIntents(id, "acknowledge", now);
         }
-        if (clearing) this.createActionDeliveryIntents(id, "resolve", now);
+        if (clearing || resolutionConfirmed)
+          this.createActionDeliveryIntents(id, "resolve", now);
 
-        if (!clearing) {
+        if (!conditionEnded) {
           if (
-            previousSeverity !== alert.severity &&
+            (previousSeverity !== alert.severity || reannounced) &&
             active.activation_state === "eligible"
           )
             this.createStateChangeDeliveryIntents(id, now);
@@ -1144,16 +1297,18 @@ export class AlertDatabase {
           }
         }
       } else {
-        if (alert.state === "cleared") {
+        if (alert.state === "cleared" && !core) {
           this.db.exec("COMMIT");
           return undefined;
         }
         id = randomUUID();
         const count = this.db
           .prepare(
-            "SELECT COUNT(*) AS count FROM alert_occurrences WHERE source_key=?",
+            core
+              ? "SELECT COUNT(*) AS count FROM alert_occurrences WHERE definition_id=? AND core_alert_id IS NOT NULL"
+              : "SELECT COUNT(*) AS count FROM alert_occurrences WHERE source_key=?",
           )
-          .get(alert.sourceKey) as Row;
+          .get(core ? definitionId : alert.sourceKey) as Row;
         const occurrenceNumber = Number(count.count) + 1;
         const activeState = alert.state === "active";
         const eligibleTransportIds = transportIds.filter(
@@ -1165,6 +1320,7 @@ export class AlertDatabase {
         );
         const qualifies =
           activeState &&
+          (!conditionEnded || delaySeconds === 0) &&
           eligibleTransportIds.length > 0 &&
           severityRank(alert.severity) >= severityRank(minimumSeverity);
         const activationState = qualifies
@@ -1274,6 +1430,7 @@ export class AlertDatabase {
               options.notifierMinimumSeverities?.[transportId] ?? "normal",
             );
         }
+        persistCore(id);
         if (activationState === "eligible") this.createDeliveryIntents(id, now);
       }
       const result = this.getAlert(id);
@@ -1411,6 +1568,12 @@ export class AlertDatabase {
   ): void {
     const timestamp = now.toISOString();
     const alert = this.getAlert(alertId);
+    if (
+      operation === "resolve" &&
+      alert.coreAlert &&
+      !alert.coreResolutionConfirmed
+    )
+      return;
     const rows = this.db
       .prepare(
         `SELECT n.transport_instance_id, MAX(trigger_delivery.cycle) AS trigger_cycle
@@ -1441,7 +1604,9 @@ export class AlertDatabase {
         alertId,
         String(row.transport_instance_id),
         operation,
-        operation === "acknowledge" ? Number(row.trigger_cycle) : 1,
+        operation === "acknowledge" || alert.coreAlert
+          ? Number(row.trigger_cycle)
+          : 1,
         alert.currentState,
         alert.currentSeverity,
         alert.message ?? null,
@@ -1457,7 +1622,7 @@ export class AlertDatabase {
     try {
       const rows = this.db
         .prepare(
-          `SELECT id FROM alert_occurrences
+          `SELECT id, core_reannounce_pending FROM alert_occurrences
            WHERE activation_state='pending' AND current_state='active'
              AND activation_due_at <= ? ORDER BY activation_due_at, id`,
         )
@@ -1470,6 +1635,13 @@ export class AlertDatabase {
           )
           .run(now.toISOString(), id);
         this.addEvent(id, "activation_eligible", now);
+        if (row.core_reannounce_pending)
+          this.createStateChangeDeliveryIntents(id, now);
+        this.db
+          .prepare(
+            "UPDATE alert_occurrences SET core_reannounce_pending=0 WHERE id=?",
+          )
+          .run(id);
         this.createDeliveryIntents(id, now);
       }
       const result = rows.map((row) => this.getAlert(String(row.id)));
@@ -1693,11 +1865,20 @@ export class AlertDatabase {
     if (!row) throw new Error(`Unknown alert occurrence: ${id}`);
     const lifetime = this.db
       .prepare(
-        "SELECT COUNT(*) AS count, MAX(started_at) AS last_fired_at FROM alert_occurrences WHERE source_key=? AND current_state IN ('active','cleared')",
+        row.core_alert_id
+          ? "SELECT COUNT(*) AS count, MAX(started_at) AS last_fired_at FROM alert_occurrences WHERE definition_id=? AND core_alert_id IS NOT NULL"
+          : "SELECT COUNT(*) AS count, MAX(started_at) AS last_fired_at FROM alert_occurrences WHERE source_key=? AND current_state IN ('active','cleared')",
       )
-      .get(row.source_key) as Row;
+      .get(row.core_alert_id ? row.definition_id : row.source_key) as Row;
     return {
       id: String(row.id),
+      coreAlert:
+        row.core_alert_id && isCoreAlert(json(row.source_payload_json))
+          ? (json(row.source_payload_json) as AlertRecord["coreAlert"])
+          : undefined,
+      coreResolutionConfirmed: row.core_alert_id
+        ? Boolean(row.core_resolution_confirmed)
+        : undefined,
       definitionId: String(row.definition_id),
       occurrenceNumber: Number(row.occurrence_number),
       sourceKey: String(row.source_key),
@@ -1738,6 +1919,34 @@ export class AlertDatabase {
       speechMinimumSeverity:
         row.speech_minimum_severity as AlertRecord["speechMinimumSeverity"],
     };
+  }
+
+  suppressCoreAudio(deliveryId: string, now = new Date()): void {
+    const delivery = this.getDelivery(deliveryId);
+    if (!delivery) return;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(
+          "UPDATE deliveries SET state='suppressed', updated_at=? WHERE id=? AND state IN ('pending','paused','waiting_connectivity','failed_retryable')",
+        )
+        .run(now.toISOString(), deliveryId);
+      this.db
+        .prepare("DELETE FROM delivery_holds WHERE delivery_id=?")
+        .run(deliveryId);
+      this.db
+        .prepare(
+          "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=? AND transport_instance_id=?",
+        )
+        .run(delivery.alertId, delivery.transportInstanceId);
+      this.addEvent(delivery.alertId, "core_audio_suppressed", now, {
+        deliveryId,
+      });
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   acknowledgeAlert(id: string, now = new Date()): void {
@@ -1799,7 +2008,7 @@ export class AlertDatabase {
       this.db
         .prepare(
           `SELECT 1 FROM alert_occurrences
-           WHERE current_state='active'
+           WHERE current_state='active' AND core_resolution_confirmed=0
              AND activation_state <> 'suppressed'
              AND json_extract(connectivity_json, '$.mode') IN ('wake', 'wake_after')
            LIMIT 1`,
@@ -1819,13 +2028,13 @@ export class AlertDatabase {
       .prepare(
         `SELECT MIN(due_at) AS due_at FROM (
            SELECT COALESCE(next_attempt_at, created_at) AS due_at
-           FROM deliveries
-           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed', 'waiting_connectivity')
+           FROM deliveries AS d
+           WHERE ${coreDeliveryReady} AND state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed', 'waiting_connectivity')
            UNION ALL
            SELECT n.next_repeat_at AS due_at
            FROM occurrence_notifiers n
            JOIN alert_occurrences o ON o.id=n.alert_id
-           WHERE n.next_repeat_at IS NOT NULL AND o.current_state='active'
+           WHERE n.next_repeat_at IS NOT NULL AND o.current_state='active' AND o.core_resolution_confirmed=0
          )`,
       )
       .get() as Row;
@@ -1844,7 +2053,7 @@ export class AlertDatabase {
            JOIN alert_occurrences o ON o.id=n.alert_id
            WHERE n.next_repeat_at IS NOT NULL
              AND n.next_repeat_at <= ?
-             AND o.current_state='active'
+             AND o.current_state='active' AND o.core_resolution_confirmed=0
            ORDER BY n.next_repeat_at, n.rowid`,
         )
         .all(timestamp) as Row[];
@@ -2056,10 +2265,10 @@ export class AlertDatabase {
     return (
       this.db
         .prepare(
-          `SELECT * FROM deliveries
-           WHERE state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed', 'waiting_connectivity')
+          `SELECT d.* FROM deliveries AS d
+           WHERE ${coreDeliveryReady} AND state NOT IN ('delivered', 'failed_terminal', 'sending', 'paused', 'suppressed', 'waiting_connectivity')
              AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-           ORDER BY COALESCE(next_attempt_at, created_at), rowid
+           ORDER BY COALESCE(next_attempt_at, created_at), d.rowid
            LIMIT ?`,
         )
         .all(now.toISOString(), Math.max(1, Math.min(200, limit))) as Row[]
@@ -2102,8 +2311,9 @@ export class AlertDatabase {
     try {
       const result = this.db
         .prepare(
-          `UPDATE deliveries SET state='sending', attempt_count=attempt_count+1,
+          `UPDATE deliveries AS d SET state='sending', attempt_count=attempt_count+1,
            last_attempt_at=?, updated_at=? WHERE id=?
+           AND ${coreDeliveryReady}
            AND state IN ('pending', 'waiting_connectivity', 'failed_retryable')
            AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`,
         )
@@ -2163,7 +2373,7 @@ export class AlertDatabase {
       const row = this.db
         .prepare(
           `SELECT d.attempt_count, d.alert_id, d.transport_instance_id,
-                  d.operation, o.current_state, o.acknowledged_at,
+                  d.operation, o.current_state, o.acknowledged_at, o.core_resolution_confirmed,
                   n.repeat_after_seconds
            FROM deliveries d
            JOIN alert_occurrences o ON o.id=d.alert_id
@@ -2216,7 +2426,7 @@ export class AlertDatabase {
             "acknowledge",
             now,
           );
-        if (row.current_state === "cleared")
+        if (row.current_state === "cleared" || row.core_resolution_confirmed)
           this.createActionDeliveryIntents(
             String(row.alert_id),
             "resolve",
@@ -2227,6 +2437,7 @@ export class AlertDatabase {
         outcome === "delivered" &&
         (row.operation === "notify" || row.operation === "trigger") &&
         row.current_state === "active" &&
+        !row.core_resolution_confirmed &&
         Number(row.repeat_after_seconds ?? 0) > 0
       ) {
         const nextRepeatAt = new Date(

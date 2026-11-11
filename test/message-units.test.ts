@@ -1,3 +1,4 @@
+import { coreFixture } from "./fixtures/core-alert";
 import { describe, expect, it, vi } from "vitest";
 import { convertAlertMessage } from "../src/alerts/message-units";
 import { AlertDatabase } from "../src/storage/db";
@@ -72,99 +73,132 @@ describe("outgoing message units", () => {
     ).toBe("0 m ≤ 3 m < 10 m");
   });
 
-  it("converts queued snapshots for every actual transport without altering history", async () => {
-    const database = new AlertDatabase();
-    const bodies: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url, options) => {
-        bodies.push(String(options.body));
-        return new Response('{"ok":true,"status":1}', { status: 200 });
-      }),
-    );
-    const announce = vi.fn(async () => ({
-      id: "announcement",
-      state: "played",
-      targets: {},
-    }));
-    const transports = new Map<string, NotificationTransport>([
-      [
-        "ntfy",
-        new NtfyTransport({ server: "https://example.invalid", topic: "test" }),
-      ],
-      ["discord", new DiscordTransport("https://example.invalid")],
-      ["telegram", new TelegramTransport({ botToken: "test", chatId: "test" })],
-      [
-        "pushover",
-        new PushoverTransport({ applicationToken: "test", userKey: "test" }),
-      ],
-      ["pagerduty", new PagerDutyTransport("test")],
-      [
-        "wyoming",
-        new WyomingTransport({ api: () => ({ version: 1, announce }) }),
-      ],
-    ]);
-    const now = new Date("2026-01-01T00:00:00Z");
-    try {
-      const alert = database.ingest(
-        {
-          sourceKey: "notifications.environment.refrigerator.temperature",
-          path: "notifications.environment.refrigerator.temperature",
-          state: "active",
-          severity: "alarm",
-          message: "273.15 < value < 373.15",
-          messageSample: {
-            message: "273.15 < value < 373.15",
-            value: 283.15,
-            units: "K",
-            capturedAt: now.toISOString(),
-          },
-          sourcePayload: {
-            method: ["sound"],
-            message: "273.15 < value < 373.15",
-          },
-        },
-        [...transports.keys()],
-        now,
-        { soundEnabled: false, speechEnabled: true },
-      )!;
-      database.ingest(
-        {
-          sourceKey: alert.sourceKey,
-          path: alert.path,
-          state: "active",
-          severity: "alarm",
-          message: alert.message,
-          messageSample: { ...alert.messageSample!, value: 293.15 },
-          sourcePayload: alert.sourcePayload,
-        },
-        [...transports.keys()],
-        new Date(now.getTime() + 1000),
+  it.each([
+    {
+      rule: false,
+      message: "273.15 < value < 373.15",
+      expected: "0 °C ≤ 10 °C < 100 °C",
+    },
+    {
+      rule: true,
+      message: "273.15 < value < 373.15",
+      expected: "273.15 < value < 373.15",
+    },
+    {
+      rule: true,
+      message: "Difference 5 K; coolant 95 °C; roll 0.4 rad",
+      expected: "Difference 5 K; coolant 95 °C; roll 0.4 rad",
+    },
+  ])(
+    "formats legacy messages but preserves rule=$rule text '$message' for every transport",
+    async ({ rule, message, expected }) => {
+      const database = new AlertDatabase();
+      const bodies: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, options) => {
+          bodies.push(String(options.body));
+          return new Response('{"ok":true,"status":1}', { status: 200 });
+        }),
       );
-      const scheduler = new DeliveryScheduler(database, transports, undefined, {
-        unitMetadata: () => ({ units: "K" }),
-      });
-      await scheduler.runOnce(now);
-      expect(bodies).toHaveLength(5);
-      for (const body of bodies) {
-        expect(body).toContain("0 °C ≤ 10 °C < 100 °C");
-        expect(body).not.toContain("283.15");
+      const announce = vi.fn(async () => ({
+        id: "announcement",
+        state: "played",
+        targets: {},
+      }));
+      const transports = new Map<string, NotificationTransport>([
+        [
+          "ntfy",
+          new NtfyTransport({
+            server: "https://example.invalid",
+            topic: "test",
+          }),
+        ],
+        ["discord", new DiscordTransport("https://example.invalid")],
+        [
+          "telegram",
+          new TelegramTransport({ botToken: "test", chatId: "test" }),
+        ],
+        [
+          "pushover",
+          new PushoverTransport({ applicationToken: "test", userKey: "test" }),
+        ],
+        ["pagerduty", new PagerDutyTransport("test")],
+        [
+          "wyoming",
+          new WyomingTransport({ api: () => ({ version: 1, announce }) }),
+        ],
+      ]);
+      const now = new Date("2026-01-01T00:00:00Z");
+      const coreAlert = rule
+        ? coreFixture({
+            $source: "signalk-alert-rules",
+            message,
+            raisedAt: now.toISOString(),
+            stateChangedAt: now.toISOString(),
+            references: ["environment.refrigerator.temperature"],
+          })
+        : undefined;
+      try {
+        const alert = database.ingest(
+          {
+            sourceKey: "notifications.environment.refrigerator.temperature",
+            path: "notifications.environment.refrigerator.temperature",
+            state: "active",
+            severity: "alarm",
+            message,
+            coreAlert,
+            messageSample: {
+              message,
+              value: 283.15,
+              units: "K",
+              capturedAt: now.toISOString(),
+            },
+            sourcePayload: coreAlert ?? { method: ["sound"], message },
+          },
+          [...transports.keys()],
+          now,
+          { soundEnabled: false, speechEnabled: true },
+        )!;
+        database.ingest(
+          {
+            sourceKey: alert.sourceKey,
+            path: alert.path,
+            state: "active",
+            severity: "alarm",
+            message: alert.message,
+            coreAlert,
+            messageSample: { ...alert.messageSample!, value: 293.15 },
+            sourcePayload: alert.sourcePayload,
+          },
+          [...transports.keys()],
+          new Date(now.getTime() + 1000),
+        );
+        const unitMetadata = vi.fn(() => ({ units: "K" }));
+        const scheduler = new DeliveryScheduler(
+          database,
+          transports,
+          undefined,
+          { unitMetadata },
+        );
+        await scheduler.runOnce(now);
+        expect(bodies).toHaveLength(5);
+        for (const body of bodies) {
+          expect(body).toContain(expected);
+        }
+        expect(JSON.stringify(announce.mock.calls)).toContain(expected);
+        if (rule) expect(unitMetadata).not.toHaveBeenCalled();
+        expect(database.getAlert(alert.id).message).toBe(message);
+        expect(
+          database.listDeliveries().every((item) => item.state === "delivered"),
+        ).toBe(true);
+        expect(database.listDeliveries()[0].alertSnapshot?.message).toBe(
+          message,
+        );
+      } finally {
+        database.close();
+        vi.unstubAllGlobals();
       }
-      expect(JSON.stringify(announce.mock.calls)).toContain(
-        "0 °C ≤ 10 °C < 100 °C",
-      );
-      expect(database.getAlert(alert.id).message).toBe(
-        "273.15 < value < 373.15",
-      );
-      expect(
-        database.listDeliveries().every((item) => item.state === "delivered"),
-      ).toBe(true);
-      expect(database.listDeliveries()[0].alertSnapshot?.message).toBe(
-        "273.15 < value < 373.15",
-      );
-    } finally {
-      database.close();
-      vi.unstubAllGlobals();
-    }
-  });
+    },
+  );
 });

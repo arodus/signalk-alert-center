@@ -1,5 +1,14 @@
 # Signal K Alert Center
 
+Development builds also integrate with the proposed Signal K core alerts API.
+See [core alerts migration](docs/core-alerts-migration.md) for the tested PR
+branch, preserved legacy behavior, upgrade details and removal-reason handling.
+
+Alert Rules definitions are listed before they fire. Configure delivery once
+per rule; wildcard instances share that policy while keeping separate history.
+The dashboard uses your existing Signal K login to read rules, and saved delivery
+settings continue to work when the dashboard is closed.
+
 One place for your boat's alerts, history, and notification delivery. See live
 readings and configured Signal K zones, keep history across restarts, and queue
 notifications while offline for delivery when connectivity returns.
@@ -85,9 +94,11 @@ Reading alerts and history follows Signal K's read-only access settings, includi
 anonymous access when the server permits it. With security enabled:
 
 - **Acknowledge / Silence** require a readwrite or admin login and ACL `put`
-  permission on the occurrence's exact notification path in `vessels.self`.
+  permission on the occurrence's exact alert path in `vessels.self`.
   For example, `notifications.electrical.*` permits electrical alerts without
-  granting control of navigation alerts. An admin login does not bypass this ACL.
+  granting control of navigation alerts. Core alerts require their separate
+  `alerts.*` paths, such as `alerts.electrical.*`. An admin login does not bypass
+  this ACL.
 - **Alert settings, policy resets, forgetting definitions, delivery deletion or
   retry, service tests, and global snooze buttons** require an admin login.
 - Existing Signal K PUT controls for snooze and quiet hours continue to use the
@@ -96,8 +107,9 @@ anonymous access when the server permits it. With security enabled:
 If you use ACLs, grant `put` on the specific paths your crew should control.
 A permission on the literal `notifications` path (used by the server's v2
 Notifications API) does not also match `notifications.electrical.*`; use explicit
-path patterns for Alert Center. Without configured ACLs, readwrite users retain
-acknowledge/silence access. With server security disabled, actions remain
+path patterns for Alert Center. Likewise, a literal `alerts` grant or a legacy
+`notifications.*` grant does not authorize core `alerts.*` actions. Without
+configured ACLs, readwrite users retain acknowledge/silence access. With server security disabled, actions remain
 available through Signal K's permissive security strategy. An unexpectedly
 missing permission checker blocks acknowledge/silence instead of allowing them.
 

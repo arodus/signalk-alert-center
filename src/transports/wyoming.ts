@@ -1,3 +1,4 @@
+import { coreNeedsAttention } from "../signalk/core-alerts";
 import {
   AlertRecord,
   DeliveryRecord,
@@ -256,7 +257,18 @@ export class WyomingTransport implements NotificationTransport {
     if (delivery.operation === "acknowledge") return { kind: "success" };
     const payload = alert.sourcePayload as
       { method?: unknown } | null | undefined;
-    if (!Array.isArray(payload?.method) || !payload.method.includes("sound"))
+    if (
+      alert.coreAlert &&
+      ((delivery.operation === "resolve" && !alert.coreResolutionConfirmed) ||
+        alert.coreAlert.silenced ||
+        (delivery.operation !== "resolve" &&
+          !coreNeedsAttention(alert.coreAlert)))
+    )
+      return { kind: "success", remoteId: "suppressed:core-state" };
+    if (
+      !alert.coreAlert &&
+      (!Array.isArray(payload?.method) || !payload.method.includes("sound"))
+    )
       return { kind: "success", remoteId: "suppressed:method" };
     const name =
       this.options.definitionName?.(alert.definitionId) ?? alert.path;

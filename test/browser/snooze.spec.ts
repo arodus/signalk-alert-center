@@ -80,4 +80,6 @@ test("clearly marks snooze as bypassed while underway", async ({
     ),
   ).toBe(true);
   await request.delete(`${api}/snooze`);
+  // Queue updates can still be reading status when the page fixture closes.
+  await page.unrouteAll({ behavior: "wait" });
 });
