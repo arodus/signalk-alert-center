@@ -41,7 +41,7 @@ test("uses the zone display name instead of its schema description", async ({
   });
 });
 
-test("prefers display names, then occurrence or zone messages, then paths", async ({
+test("uses display names or paths as headings and keeps messages below", async ({
   page,
 }) => {
   const description = "Data should be of type number.";
@@ -137,20 +137,37 @@ test("prefers display names, then occurrence or zone messages, then paths", asyn
   });
   await page.goto("/signalk-alert-center/");
   const expected = [
-    ["depth-active", "Depth from surface"],
-    ["bilge-one", "Bilge pump running"],
-    ["bilge-two", "Backup bilge pump running"],
+    [
+      "depth-active",
+      "Depth from surface",
+      "Shallow water",
+      "Depth from surface",
+    ],
+    [
+      "bilge-one",
+      "bilge › pump",
+      "Bilge pump running",
+      "notifications.bilge.pump",
+    ],
+    [
+      "bilge-two",
+      "bilge › pump",
+      "Backup bilge pump running",
+      "notifications.bilge.pump",
+    ],
   ];
-  for (const [id, title] of expected) {
+  for (const [id, title, message, detailTitle] of expected) {
     const row = page.locator(`tr[data-occurrence-id="${id}"]`);
     await expect(row.locator(".cell-title")).toHaveText(title);
+    await expect(row.locator(".alert-summary")).toContainText(message);
     await row.click();
-    await expect(page.locator("#drawer-title")).toHaveText(title);
+    await expect(page.locator("#drawer-title")).toHaveText(detailTitle);
+    await expect(page.locator("#drawer-body > p").first()).toHaveText(message);
     await page.locator("#drawer-close").click();
   }
   await expect(
     page.locator('tr[data-definition-id="zone"] .cell-title'),
-  ).toHaveText("Bilge water high");
+  ).toHaveText("bilge.highWater");
   await expect(
     page.locator('tr[data-definition-id="unnamed"] .cell-title'),
   ).toHaveText("test › unnamed");

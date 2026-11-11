@@ -315,26 +315,10 @@ function definitionFor(occurrence) {
     (definition) => definition.id === occurrence.definitionId,
   );
 }
-function alertName(definition, occurrence) {
-  const path = definition.pathPattern;
-  const name =
-    definition.metadata?.displayName?.trim() || definition.name?.trim();
-  if (name && name !== path && name !== path.replace(/^notifications\./, ""))
-    return name;
-  occurrence ??= state.occurrences.find(
-    (item) => item.definitionId === definition.id,
-  );
-  const message = displayedMessage(occurrence)?.trim();
-  if (message) return message;
-  const zone = definitionZones(definition).find(
-    (item) =>
-      item.message?.trim() &&
-      (occurrence
-        ? item.state === occurrence.currentSeverity
-        : !["normal", "nominal"].includes(item.state)),
-  );
-  if (zone) return zone.message.trim();
-  return (name || path)
+function alertName(definition) {
+  const name = definition.name ?? definition.pathPattern;
+  if (name !== definition.pathPattern) return name;
+  return name
     .replace(/^notifications\./, "")
     .split(".")
     .map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2"))
@@ -602,9 +586,7 @@ function renderDefinitions() {
           : 0) ||
         Number(definitionZones(right.definition).length > 0) -
           Number(definitionZones(left.definition).length > 0) ||
-        alertName(left.definition, left.latest).localeCompare(
-          alertName(right.definition, right.latest),
-        ),
+        alertName(left.definition).localeCompare(alertName(right.definition)),
     );
   $("#list-summary").textContent =
     `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
@@ -631,9 +613,8 @@ function renderDefinitions() {
                 : hasHistory
                   ? "No active alert has been recorded"
                   : "No alert has been recorded for this definition";
-            const title = alertName(item, latest);
-            return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(title)}">
-            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(title)}</strong><span class="cell-detail compact-detail alert-summary" data-live-occurrence="${active ? escapeHtml(latest.id) : ""}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
+            return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
+            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-live-occurrence="${active ? escapeHtml(latest.id) : ""}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
             <td data-label="Age" class="live-age" title="Time since the sensor reading">${escapeHtml(liveAgeText(item))}</td>
             <td data-label="Last triggered" class="last-triggered-cell">${item.lastFiredAt ? `<time datetime="${escapeHtml(item.lastFiredAt)}">${escapeHtml(formatDate(item.lastFiredAt))}</time>` : '<span class="muted">Never</span>'}</td>
@@ -695,13 +676,10 @@ function renderDeliveries(deliveries) {
             const alert = delivery.alert ?? {};
             const service = delivery.service ?? {};
             const alertTitle = alert.path
-              ? alertName(
-                  {
-                    name: alert.name ?? alert.path,
-                    pathPattern: alert.path,
-                  },
-                  alert,
-                )
+              ? alertName({
+                  name: alert.name ?? alert.path,
+                  pathPattern: alert.path,
+                })
               : "Unknown alert";
             const failed = ["failed_retryable", "failed_terminal"].includes(
               delivery.state,
@@ -772,13 +750,10 @@ function renderAlertHistory() {
         <thead><tr><th>Alert</th><th>Update</th><th>Severity</th><th>Time</th></tr></thead>
         <tbody>${state.alertHistory
           .map((event) => {
-            const title = alertName(
-              {
-                name: event.name ?? event.path,
-                pathPattern: event.path,
-              },
-              event,
-            );
+            const title = alertName({
+              name: event.name ?? event.path,
+              pathPattern: event.path,
+            });
             const message =
               event.eventType === "severity_changed" && event.payload
                 ? `${event.payload.from ?? "unknown"} → ${event.payload.to ?? event.severity}`
@@ -1063,10 +1038,7 @@ function renderDeliveryDetail(delivery) {
   const alert = delivery.alert ?? {};
   const service = delivery.service ?? {};
   const alertTitle = alert.path
-    ? alertName(
-        { name: alert.name ?? alert.path, pathPattern: alert.path },
-        alert,
-      )
+    ? alertName({ name: alert.name ?? alert.path, pathPattern: alert.path })
     : "Delivery details";
   const retryable = ["failed_retryable", "failed_terminal"].includes(
     delivery.state,
@@ -1153,7 +1125,7 @@ function bindRecentOccurrenceLinks() {
 async function openDefinition(id) {
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
-  elements.drawerTitle.textContent = alertName(definition);
+  elements.drawerTitle.textContent = definition.name ?? definition.pathPattern;
   elements.drawerBody.innerHTML = '<div class="empty">Loading alert…</div>';
   elements.backdrop.hidden = false;
   elements.drawer.classList.add("is-open");
@@ -1194,10 +1166,7 @@ async function openOccurrence(id) {
     state.selectedOccurrence = id;
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
-    elements.drawerTitle.textContent = alertName(
-      definition ?? { pathPattern: occurrence.path },
-      occurrence,
-    );
+    elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
     elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
@@ -1369,13 +1338,7 @@ function openPolicy(id) {
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
   const policy = definition.policy ?? {};
-  $("#policy-title").textContent = alertName(
-    definition,
-    state.occurrences.find(
-      (item) =>
-        item.id === state.selectedOccurrence && item.definitionId === id,
-    ),
-  );
+  $("#policy-title").textContent = definition.name ?? definition.pathPattern;
   $("#policy-definition-id").value = id;
   state.policyDefaults = policy.defaults ?? policy;
   setPolicyControlValues(policy);
