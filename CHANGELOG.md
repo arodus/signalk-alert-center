@@ -7,8 +7,9 @@ Versioning while it remains pre-1.0.
 
 ### Fixes
 
-- Use Signal K display names for configured zone alerts, falling back to the
-  data path when no display name is set. Schema descriptions such as “Data should
+- Use Signal K display names for configured zone alerts. When no display name is
+  set, the dashboard falls back to the notification or zone message, then the
+  data path. Schema descriptions such as “Data should
   be of type number.” no longer appear as alert names. Existing names are corrected
   on startup or the next zone refresh without changing history or delivery settings.
 
