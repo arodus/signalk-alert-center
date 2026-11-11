@@ -10,6 +10,7 @@ Versioning while it remains pre-1.0.
 - Group each alert setting with its own consistently placed Customize / Use global
   default button. Keep connection wake delay inside its connection setting, with a
   responsive layout for narrow screens.
+
 ### Fixes
 
 - Enforce Signal K path ACLs before acknowledging or silencing alerts through
