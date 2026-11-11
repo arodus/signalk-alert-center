@@ -98,6 +98,38 @@ npm run test:acceptance
 docker compose -f docker-compose.acceptance.yml down -v --remove-orphans
 ```
 
+Run the security-enabled suite on a fresh acceptance volume:
+
+```sh
+npm run test:security
+docker compose -f docker-compose.acceptance.yml -f docker-compose.security.yml down -v --remove-orphans
+```
+
+This override exposes no host ports and uses synthetic accounts, a test-only
+signing key, the real Signal K security strategy, and local mock delivery. It
+covers anonymous/read-only reads, denied writes (including ACL-restricted admins),
+path-scoped crew actions through both route families, admin maintenance, and
+unchanged durable state after denied requests. CI runs both acceptance modes with
+a fresh volume between them.
+
+Alert action routes call the server's `securityStrategy.shouldAllowPut` with the
+original request, `vessels.self`, null source, and the stored occurrence path,
+before any mutation. This follows the server Notifications API authorization
+convention, with deliberately finer path granularity than its literal
+`notifications` resource. The strategy is exposed on the plugin app but is not
+yet in `@signalk/server-api`, so a small typed adapter isolates that gap. Missing
+authorization support denies actions; disabled security is represented by the
+server's dummy strategy. Admin routes use Signal K's default plugin-router
+protection, without `router.access()`. No custom ACL matcher is used.
+
+Core actions use the same guard on their stored `alerts.<path>` in `vessels.self`.
+The pinned server mirrors core alerts in that namespace; its in-process plugin
+API receives no HTTP request, so it cannot enforce the caller's permissions.
+`npm run test:core` runs both security-disabled lifecycle acceptance and a fresh
+security-enabled server with scoped core/legacy grants, restricted admins,
+denied-write state checks, and readwrite access with no configured ACLs.
+See [core migration notes](docs/core-alerts-migration.md) for the pinned sources.
+
 Never point automated tests at real notification services or vessel hardware.
 
 ## Tests

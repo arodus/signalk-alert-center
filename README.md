@@ -88,11 +88,47 @@ pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
+### Access and permissions
+
+Reading alerts and history follows Signal K's read-only access settings, including
+anonymous access when the server permits it. With security enabled:
+
+- **Acknowledge / Silence** require a readwrite or admin login and ACL `put`
+  permission on the occurrence's exact alert path in `vessels.self`.
+  For example, `notifications.electrical.*` permits electrical alerts without
+  granting control of navigation alerts. Core alerts require their separate
+  `alerts.*` paths, such as `alerts.electrical.*`. An admin login does not bypass
+  this ACL.
+- **Alert settings, policy resets, forgetting definitions, delivery deletion or
+  retry, service tests, and global snooze buttons** require an admin login.
+- Existing Signal K PUT controls for snooze and quiet hours continue to use the
+  server's normal PUT permissions on their `digital.alertCenter.*` paths.
+
+If you use ACLs, grant `put` on the specific paths your crew should control.
+A permission on the literal `notifications` path (used by the server's v2
+Notifications API) does not also match `notifications.electrical.*`; use explicit
+path patterns for Alert Center. Likewise, a literal `alerts` grant or a legacy
+`notifications.*` grant does not authorize core `alerts.*` actions. Without
+configured ACLs, readwrite users retain acknowledge/silence access. With server security disabled, actions remain
+available through Signal K's permissive security strategy. An unexpectedly
+missing permission checker blocks acknowledge/silence instead of allowing them.
+
+Anonymous and read-only visitors get a clean view without action buttons or
+settings controls. Readwrite users see acknowledge/silence controls; admins also
+see settings, service tests, delivery maintenance, and snooze controls. Everyone
+with read access can still see active snooze status, alerts, history, and delivery
+details. Access is refreshed from Signal K's login status; an unavailable status
+keeps the view read-only. Individual path ACL denials are reported when an action
+is attempted, and the server enforces all permissions independently of the UI.
+Rejected requests do not change alert state, history, policies, or delivery work.
+
 ### Per-alert settings
 
 Select an alert, then choose **Alert settings**. Settings are inherited from the
-global defaults until you override them for that alert. Changes apply to future
-occurrences.
+global defaults until you override them for that alert. Choose **Customize** in a
+setting’s header to edit it, or **Use global default** to restore its inherited
+value.
+Changes apply to future occurrences.
 
 You can configure:
 
@@ -237,7 +273,7 @@ npm ci
 npm run build
 npm pack
 cd ~/.signalk
-npm install /path/to/signalk-alert-center-0.5.0.tgz
+npm install /path/to/signalk-alert-center-0.6.0.tgz
 ```
 
 Restart Signal K after installation. Docker installations should run the final
@@ -252,6 +288,7 @@ The Signal K plugin configuration contains settings shared by all alerts:
 - defaults inherited by newly discovered alerts;
 - optional internet-connection control;
 - retention and delivery limits;
+- notification paths to leave out of discovery and history;
 - the database reset action.
 
 ![Global defaults inherited by newly discovered alerts](./docs/screenshots/plugin-defaults.png)
@@ -294,6 +331,36 @@ control disabled if another system manages the switch.
 After Alert Center turns a configured connection on, it waits for
 `network.internet.state` to become `online` or `metered`. The boot timeout and
 local state-recheck interval remain configurable in Alert Center.
+
+## Notification paths to leave out
+
+Under **Storage & advanced → Notification paths to leave out**, enter one
+pattern per line. By default, Alert Center ignores per-target collision alarms:
+
+```json
+{
+  "ignoredPaths": ["navigation.closestApproach.*"]
+}
+```
+
+Patterns match the whole notification path, with or without the leading
+`notifications.`. Matching is case-sensitive. Only `*` is special: it matches
+one or more characters, including dots between nested path segments. For example,
+the default matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
+and `navigation.closestApproach.radar:bridge:1`. An exact path matches only itself.
+Clear the list (or set `ignoredPaths: []`) to track all notification paths.
+
+Matching updates and clears are skipped before queueing or creating definitions,
+history, deliveries, or connectivity requests. The same filter applies to startup
+snapshots and zone discovery. Other Signal K apps still receive these alerts.
+
+This default also applies after upgrading if `ignoredPaths` has never been set.
+Existing definitions, history, per-alert settings, and queued delivery work are
+preserved. Existing occurrences stop receiving updates and clears while their
+path is ignored; ignoring a path does not cancel pending deliveries or wake work.
+Inactive definitions learned from notifications can still be forgotten in Alert
+Center. Removing a pattern resumes tracking, including the current snapshot on
+plugin restart; updates missed while ignored are not backfilled.
 
 ## Notification ingestion load
 

@@ -218,3 +218,118 @@ test("preserves rule-authored units and explains displacement without implying r
     "-268.15",
   );
 });
+
+for (const role of ["anonymous", "readonly", "readwrite"]) {
+  test(`core ${role} view respects permissions and retains lifecycle details`, async ({
+    page,
+  }) => {
+    const definition = {
+      id: "rule:signalk-alert-rules:bilge",
+      name: "Bilge water",
+      pathPattern: "alerts.bilge.highWater",
+      sourceType: "rule",
+      metadata: { rule: { provider: "signalk-alert-rules", slug: "bilge" } },
+      fireCount: 1,
+    };
+    const occurrence = {
+      id: "core-acl-ui",
+      definitionId: definition.id,
+      path: definition.pathPattern,
+      source: "signalk-alert-rules",
+      sourceKey: "core:core-1",
+      state: "active",
+      currentSeverity: "alarm",
+      maxSeverity: "alarm",
+      occurrenceNumber: 1,
+      message: "Bilge water high",
+      startedAt: "2026-10-25T08:00:00Z",
+      deliveries: [],
+      coreAlert: coreFixture(),
+    };
+    await page.route("**/loginStatus", (route) =>
+      route.fulfill({
+        json: {
+          status: role === "anonymous" ? "notLoggedIn" : "loggedIn",
+          authenticationRequired: true,
+          userLevel: role,
+        },
+      }),
+    );
+    await page.route("**/plugins/signalk-alert-rules/rules", (route) =>
+      route.fulfill({ status: 404 }),
+    );
+    await page.route("**/plugins/signalk-alert-center/definitions?*", (route) =>
+      route.fulfill({ json: { items: [definition] } }),
+    );
+    await page.route("**/plugins/signalk-alert-center/occurrences?*", (route) =>
+      route.fulfill({ json: { items: [occurrence] } }),
+    );
+    await page.route(
+      "**/plugins/signalk-alert-center/occurrences/core-acl-ui",
+      (route) => route.fulfill({ json: occurrence }),
+    );
+    await page.route(
+      "**/plugins/signalk-alert-center/occurrences/core-acl-ui/events?*",
+      (route) => route.fulfill({ json: { items: [] } }),
+    );
+    const denial =
+      "You do not have permission to acknowledge this alert. Ask a Signal K administrator to grant access to this alert path.";
+    await page.route(
+      "**/plugins/signalk-alert-center/occurrences/core-acl-ui/acknowledge",
+      (route) =>
+        route.fulfill({
+          status: 403,
+          json: { error: { code: "FORBIDDEN", message: denial } },
+        }),
+    );
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.url().includes("/plugins/signalk-alert-center/") &&
+        request.method() !== "GET"
+      )
+        writes.push(request.url());
+    });
+    await page.goto("/signalk-alert-center/");
+    const writer = role === "readwrite";
+    const row = page.locator('[data-occurrence-id="core-acl-ui"]');
+    await expect(row.locator(".action-cell")).toBeVisible({ visible: writer });
+    await expect(page.locator("#snooze-open")).toBeHidden();
+    await row.locator(".cell-title").click();
+    const drawer = page.locator("#drawer-body");
+    await expect(drawer).toContainText("Core alert ID");
+    await expect(drawer).toContainText("Bilge water high");
+    await expect(drawer.locator(".drawer-settings")).toBeHidden();
+    await expect(
+      drawer.getByRole("link", { name: "Open rule in Alert Rules" }),
+    ).toBeHidden();
+    await expect(
+      drawer.getByRole("button", { name: "Acknowledge", exact: true }),
+    ).toBeVisible({ visible: writer });
+    await expect(
+      drawer.getByRole("button", { name: "Silence", exact: true }),
+    ).toBeVisible({ visible: writer });
+    if (writer) {
+      await drawer
+        .getByRole("button", { name: "Acknowledge", exact: true })
+        .click();
+      await expect(page.locator("#drawer-result")).toHaveText(denial);
+      await expect(page.locator("#drawer-result")).toBeInViewport();
+      await expect(page.locator("#drawer-result")).not.toContainText("sign in");
+      await expect(
+        drawer.getByRole("button", { name: "Acknowledge", exact: true }),
+      ).toBeEnabled();
+      expect(writes).toHaveLength(1);
+    } else expect(writes).toHaveLength(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/core-${role}-${test.info().project.name}.png`,
+      fullPage: true,
+      animations: "disabled",
+    });
+  });
+}

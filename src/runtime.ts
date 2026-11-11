@@ -10,6 +10,7 @@ import {
   normalizeCoreAlert,
   isCoreAlert,
 } from "./signalk/core-alerts";
+import { mayWritePath } from "./signalk/permissions";
 import { QuietHoursClock } from "./suppression/quiet-hours";
 import { SuppressionStore, SuppressionReason } from "./suppression/store";
 import { publishSnooze, registerSnoozePuts } from "./signalk/snooze";
@@ -45,6 +46,7 @@ import {
   DefinitionQuery,
   EventQuery,
   OccurrenceQuery,
+  OccurrenceWriteAuthorization,
   RouterLike,
   registerAlertCenterRoutes,
   registerRoutes,
@@ -80,6 +82,7 @@ import {
   SignalKNotificationInput,
 } from "./signalk/notifications";
 import { BoundedIngestionQueue } from "./signalk/ingestion-queue";
+import { ignoredPathMatcher } from "./signalk/ignored-paths";
 import {
   isServiceHealthPath,
   serviceHealthMessage,
@@ -159,6 +162,7 @@ export class AlertCenterRuntime {
     DEFAULT_INGESTION_QUEUE_LIMIT,
   );
   private ingestionImmediate?: ReturnType<typeof setImmediate>;
+  private isIgnoredPath = ignoredPathMatcher();
   private startupImmediate?: ReturnType<typeof setImmediate>;
   private deliveryImmediate?: ReturnType<typeof setImmediate>;
   private deliveryRun?: Promise<void>;
@@ -982,6 +986,7 @@ export class AlertCenterRuntime {
   private enqueueNotifications(entries: SignalKNotificationInput[]): void {
     let rejected = 0;
     for (const entry of entries) {
+      if (this.isIgnoredPath(entry.path)) continue;
       const sampled = {
         ...entry,
         messageSample: captureMessageSample(this.app, entry),
@@ -1046,7 +1051,11 @@ export class AlertCenterRuntime {
   }
 
   private seedDefinitions(): void {
-    this.policies().seedDefinitions(listConfiguredZones(this.app));
+    this.policies().seedDefinitions(
+      listConfiguredZones(this.app).filter(
+        (zone) => !this.isIgnoredPath(`notifications.${zone.path}`),
+      ),
+    );
   }
 
   private runRetention(now = new Date()): void {
@@ -1104,6 +1113,7 @@ export class AlertCenterRuntime {
     receivedAt = new Date(),
     schedule = true,
   ): AlertRecord | undefined {
+    if (this.isIgnoredPath(entry.path)) return undefined;
     const normalized =
       entry.kind === "core" && isCoreAlert(entry.value)
         ? normalizeCoreAlert(entry.value)
@@ -1850,6 +1860,7 @@ export class AlertCenterRuntime {
       `Starting: configuredServices=${options.notifiers?.length ?? 0}, deliveryBatchSize=${options.delivery?.batchSize ?? 50}, deliveryConcurrency=${options.delivery?.concurrency ?? 4}, connectivity=${options.connectivity?.enabled ? "enabled" : "disabled"}`,
     );
     this.config = options;
+    this.isIgnoredPath = ignoredPathMatcher(options.ignoredPaths);
     this.navigationState = undefined;
     this.lastSnoozeEffectiveness = undefined;
     if (options.snooze?.onlyWhenAnchoredOrMoored) {
@@ -2233,6 +2244,14 @@ export class AlertCenterRuntime {
   registerWithRouter(router: PluginRouter): void {
     const compatible = router as unknown as RouterLike;
     const repository = this.repository();
+    const canChangeOccurrence: OccurrenceWriteAuthorization = (request, id) => {
+      const occurrence = this.getOccurrence(id);
+      // Core occurrences use their canonical alerts.* path; legacy ones use
+      // notifications.*. Never substitute a request-supplied path or core ID.
+      return occurrence
+        ? mayWritePath(this.app, request, occurrence.path)
+        : undefined;
+    };
     registerRoutes(
       compatible,
       () => this.database,
@@ -2250,9 +2269,11 @@ export class AlertCenterRuntime {
         const result = await repository.silenceOccurrence(id);
         return Boolean(result && result !== "inactive");
       },
+      canChangeOccurrence,
     );
     registerAlertCenterRoutes(compatible, {
       defaultPolicy: () => this.policies().defaultPolicy(),
+      canChangeOccurrence,
       repository: () => (this.database ? repository : undefined),
       snooze: () => this.suppression?.getSnooze(),
       setSnooze: (seconds) => {

@@ -327,3 +327,79 @@ it("stores never-fired rule settings and snapshots them independently for each i
     db.listDefinitions().filter((row) => row.sourceType === "rule"),
   ).toHaveLength(1);
 });
+
+for (const prefix of ["occurrences", "alerts"]) {
+  for (const action of ["acknowledge", "silence"] as const) {
+    for (const authorization of ["denied", "missing", "allowed"] as const) {
+      it(`${authorization} core ${action} through /${prefix} checks the exact stored path before effects`, async () => {
+        const { runtime, db, alerts, app } = setup([coreFixture()]);
+        await vi.waitFor(() =>
+          expect(runtime.status().reconciliation.state).toBe("complete"),
+        );
+        const shouldAllowPut = vi.fn(() => authorization === "allowed");
+        if (authorization !== "missing")
+          Object.assign(app, { securityStrategy: { shouldAllowPut } });
+        const handlers = new Map<string, import("../src/api/routes").Handler>();
+        const router = {
+          get: vi.fn(),
+          patch: vi.fn(),
+          delete: vi.fn(),
+          post: (route: string, handler: import("../src/api/routes").Handler) =>
+            handlers.set(route, handler),
+          access: () => router,
+        };
+        runtime.registerWithRouter(
+          router as unknown as Parameters<typeof runtime.registerWithRouter>[0],
+        );
+        const before = {
+          occurrences: db.listOccurrences(),
+          events: db.listAlertEvents(),
+          deliveries: db.listDeliveries(),
+        };
+        const request = {
+          params: { id: before.occurrences[0].id },
+          // A submitted path must never replace the occurrence's trusted stored path.
+          body: { path: "notifications.allowed" },
+          skPrincipal: { identifier: "crew", permissions: "readwrite" },
+        };
+        let status = 200;
+        const body = await new Promise<unknown>((resolve) => {
+          const response = {
+            status: (code: number) => {
+              status = code;
+              return response;
+            },
+            json: resolve,
+          };
+          handlers.get(`/${prefix}/:id/${action}`)!(request, response);
+        });
+        if (authorization !== "missing")
+          expect(shouldAllowPut).toHaveBeenCalledWith(
+            request,
+            "vessels.self",
+            null,
+            "alerts.bilge.highWater",
+          );
+        if (authorization === "allowed") {
+          expect(status).toBe(200);
+          expect(alerts[action]).toHaveBeenCalledWith("core-1");
+          expect(db.listOccurrences()[0].coreAlert).toMatchObject(
+            action === "acknowledge"
+              ? { state: "acknowledged" }
+              : { silenced: true },
+          );
+        } else {
+          expect(status).toBe(403);
+          expect(body).toMatchObject({ error: { code: "FORBIDDEN" } });
+          expect(alerts.acknowledge).not.toHaveBeenCalled();
+          expect(alerts.silence).not.toHaveBeenCalled();
+          expect({
+            occurrences: db.listOccurrences(),
+            events: db.listAlertEvents(),
+            deliveries: db.listDeliveries(),
+          }).toEqual(before);
+        }
+      });
+    }
+  }
+}

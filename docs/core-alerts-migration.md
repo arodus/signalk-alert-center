@@ -192,3 +192,36 @@ saves delivery settings before it fires, feeds isolated sensor values, verifies
 first delivery and a new instance after restart, and acknowledges a returned
 rule alert. A temperature rule checks upstream display units and preservation
 of a literal temperature difference through delivery. It does not change `~/.signalk`.
+
+## Authorization
+
+Alert Center checks the requesting user through Signal K's
+`securityStrategy.shouldAllowPut(request, "vessels.self", null, occurrence.path)`
+before either acknowledge/silence route can change upstream or durable state.
+Core grants use the concrete `alerts.<path>` (for example,
+`alerts.electrical.batteries.house.low`), not the core ID, producer, referenced
+sensor path, rule wildcard, or a request-body path. A grant on
+`alerts.electrical.*` covers individual matching instances. Legacy
+`notifications.*` grants and bare `alerts` grants do not authorize core actions.
+No configured ACLs retains normal readwrite/admin access; a missing checker
+denies actions. Only self-vessel core alerts are ingested.
+
+This follows the pinned server's [canonical delta namespace](https://github.com/hatlabs/signalk-server/blob/33f487c7135db583a26b394ce04509b7b6c512ac/src/api/alerts/deltas.ts)
+and [PUT security strategy](https://github.com/hatlabs/signalk-server/blob/33f487c7135db583a26b394ce04509b7b6c512ac/src/tokensecurity.ts).
+The [in-process plugin methods](https://github.com/hatlabs/signalk-server/blob/33f487c7135db583a26b394ce04509b7b6c512ac/src/interfaces/plugins.ts)
+receive no HTTP user. Alert Center therefore guards its own routes; this does
+not add authorization to the upstream development server's other API surfaces.
+Core audit attribution remains the plugin, as described above.
+
+Anonymous/readonly users retain core lifecycle details and history without
+mutation controls. Readwrite users see alert actions and actionable 403 errors
+when a path is denied. Alert settings, links to the rule editor, maintenance,
+and dashboard snooze controls are admin-only; active snooze status remains
+visible to readers. Existing `digital.alertCenter.*` PUT controls keep their
+normal Signal K permissions.
+
+`npm run test:core` also launches a fresh security-enabled pinned server. It
+checks both action route families, separate core and legacy grants, wildcard
+instances, restricted admins, unchanged upstream state/history/delivery work
+and mock traffic on denial, admin-only snooze and maintenance, and a restart
+with ACLs removed. Test accounts and notification services are isolated fixtures.

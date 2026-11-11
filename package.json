@@ -1,6 +1,6 @@
 {
   "name": "signalk-alert-center",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "description": "Signal K alerts and history with offline delivery to ntfy, PagerDuty, Discord, Telegram, Pushover, and optional Wyoming sound and speech",
   "author": "Sebastian Karasek",
   "repository": {
@@ -57,6 +57,7 @@
     "test": "vitest run",
     "test:integration": "RUN_DOCKER_INTEGRATION=1 vitest run test/integration.test.ts",
     "test:acceptance": "docker compose -f docker-compose.acceptance.yml up --build --abort-on-container-exit --exit-code-from acceptance",
+    "test:security": "docker compose -f docker-compose.acceptance.yml -f docker-compose.security.yml up --build --abort-on-container-exit --exit-code-from acceptance",
     "test:browser": "node test/browser/run.mjs",
     "test:browser:only": "playwright test",
     "test:restart": "node test/integration/restart.mjs",
@@ -70,7 +71,7 @@
     "package:smoke": "node scripts/smoke-package.mjs",
     "release:check": "npm run format:check && npm run typecheck && npm test && npm run build && npm run package:check && npm run package:smoke",
     "prepack": "npm run build",
-    "test:core": "npm run build && node test/integration/core-alerts.mjs"
+    "test:core": "npm run build && node test/integration/core-alerts.mjs && node test/integration/core-alerts.mjs --security"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",

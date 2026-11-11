@@ -7,6 +7,12 @@ Versioning while it remains pre-1.0.
 
 ### Core alerts migration
 
+- Apply Signal K path permissions to core acknowledge/silence actions as well as
+  legacy notifications. ACL installations must grant `put` on the allowed
+  `alerts.*` paths separately from `notifications.*`. Read-only views remain
+  free of action/settings controls, and denied actions explain missing access.
+  Global snooze and the rule-editor link remain admin-only in the dashboard.
+
 - Recommend Signal K Alert Rules as the companion plugin for creating alert rules.
 - List every Alert Rules rule in the dashboard, including never-fired, disabled
   and invalid rules, and configure its delivery before the first occurrence.
@@ -30,6 +36,84 @@ Versioning while it remains pre-1.0.
   including speech. The updated rules plugin formats messages in the admin's units;
   Alert Center no longer reinterprets differences or SI fallback values in that text.
   Legacy notification unit conversion remains available.
+
+## [0.7.0] - 2026-11-11
+
+### Features
+
+- Add **Notification paths to leave out** in plugin settings. Per-target
+  `navigation.closestApproach.*` collision alarms are ignored by default,
+  including after upgrading when no explicit list is saved. Edit the wildcard
+  patterns or clear the list to track all paths. Matching live updates, startup
+  snapshots, and zone definitions are skipped. Existing history, settings, and
+  queued delivery work are preserved; ignored occurrences no longer receive
+  updates or clears.
+
+### Fixes
+
+- Use Signal K display names for configured zone alerts, falling back to the
+  data path when no display name is set. Schema descriptions such as “Data should
+  be of type number.” no longer appear as alert names. Existing names are corrected
+  on startup or the next zone refresh without changing history or delivery settings.
+
+### Upgrading and compatibility
+
+- No database migration or dependency upgrade is required. Existing history,
+  alert settings, and queued deliveries are preserved.
+- Installations without an explicit ignored-path list now leave out per-target
+  collision alarms by default. Clear **Notification paths to leave out** in
+  plugin settings to keep tracking those paths. Ignoring an already-active
+  occurrence leaves it stored but stops subsequent updates and clears.
+- Rollback to 0.6.0 does not require restoring the database. That version ignores
+  the new path-filter setting, resumes tracking all notification paths, and uses
+  the previous zone-name behavior.
+
+### Release automation
+
+- Verify successful CI runs on the exact tagged main commit before publishing,
+  reusing those checks instead of repeating the full test matrix for the tag.
+  The release still builds, inspects, and smoke-tests the published package.
+
+## [0.6.0] - 2026-11-11
+
+### Alert settings
+
+- Group each alert setting with its own consistently placed Customize / Use global
+  default button. Keep connection wake delay inside its connection setting, with a
+  responsive layout for narrow screens.
+
+### Fixes
+
+- Enforce Signal K path ACLs before acknowledging or silencing alerts through
+  either API route. A restricted readwrite or admin login can no longer bypass
+  notification permissions through Alert Center. ACL users must grant `put` on
+  the allowed `notifications.*` paths; a literal `notifications` permission does
+  not cover child paths.
+- Require admin access for alert settings, definition and policy removal,
+  delivery deletion/retry, service tests, and global snooze buttons. Read-only
+  views and existing ACL-controlled Signal K PUT controls remain available.
+- Hide action and settings controls for anonymous and read-only dashboard
+  visitors. Readwrite users retain alert actions, while admin controls appear
+  only for admins. Snooze status, alert history, and delivery details remain
+  visible to readers. Permission errors explain missing access without asking an
+  already signed-in user to sign in again.
+
+### Upgrading and compatibility
+
+- Access requirements are stricter in this release. Use an admin login for alert
+  settings, delivery maintenance, service tests, and global snooze API requests.
+  Update integrations that previously called these routes as readwrite users.
+- When Signal K ACLs are configured, grant `put` on each notification path that
+  a user may acknowledge or silence, including for admin users. A grant on the
+  literal `notifications` path alone is insufficient. Without configured ACLs,
+  readwrite users retain acknowledge/silence access.
+- Existing Signal K PUT controls for snooze and quiet hours retain their normal
+  path permissions. Dashboard controls reflect login roles; individual path ACL
+  denials are reported when an action is attempted.
+- No database migration, dependency upgrade, or plugin configuration change is
+  required. Alert history, policies, and pending deliveries are preserved.
+- Rollback to 0.5.0 does not require restoring the database, but restores its
+  permissive API behavior and the permission bypass fixed in this release.
 
 ## [0.5.0] - 2026-10-20
 

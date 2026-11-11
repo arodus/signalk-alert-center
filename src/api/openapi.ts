@@ -29,6 +29,10 @@ const errors = {
   "500": response("Internal error", { $ref: "#/components/schemas/Error" }),
   "503": response("Plugin not started", { $ref: "#/components/schemas/Error" }),
 };
+const adminWriteDescription =
+  "Requires Signal K admin access when security is enabled. Readwrite access alone is insufficient.";
+const occurrenceWriteDescription =
+  "Requires Signal K readwrite or admin access and ACL put permission on the occurrence's exact alerts.* (core) or notifications.* (legacy) path in vessels.self. Returns 403 before any upstream or local change when permission is denied or the permission checker is unavailable.";
 const page = (item: string, includeTotal = false) => ({
   type: "object",
   required: ["items", ...(includeTotal ? ["total"] : [])],
@@ -75,6 +79,7 @@ export function getAlertCenterOpenApi() {
           `/alerts/{id}/${action}`,
           {
             post: {
+              description: occurrenceWriteDescription,
               summary: `${action === "acknowledge" ? "Acknowledge" : "Silence"} an occurrence through the legacy route`,
               deprecated: true,
               parameters: [idParameter],
@@ -101,6 +106,7 @@ export function getAlertCenterOpenApi() {
           },
         },
         post: {
+          description: adminWriteDescription,
           summary: "Snooze every service, including emergency alerts",
           requestBody: {
             required: true,
@@ -125,6 +131,7 @@ export function getAlertCenterOpenApi() {
           },
         },
         delete: {
+          description: adminWriteDescription,
           summary: "End snooze and reconcile eligible work",
           responses: {
             "200": response("Snooze ended", {
@@ -158,6 +165,7 @@ export function getAlertCenterOpenApi() {
           },
         },
         delete: {
+          description: adminWriteDescription,
           summary: "Delete all failed delivery intents and their attempts",
           responses: {
             "200": response("Failed deliveries deleted", {
@@ -184,6 +192,7 @@ export function getAlertCenterOpenApi() {
           },
         },
         delete: {
+          description: adminWriteDescription,
           summary: "Delete one failed delivery and its attempt history",
           parameters: [idParameter],
           responses: {
@@ -216,6 +225,7 @@ export function getAlertCenterOpenApi() {
       },
       "/deliveries/{id}/retry": {
         post: {
+          description: adminWriteDescription,
           summary: "Retry one failed delivery",
           parameters: [idParameter],
           responses: {
@@ -233,6 +243,7 @@ export function getAlertCenterOpenApi() {
       },
       "/retry": {
         post: {
+          description: adminWriteDescription,
           summary: "Retry failed delivery intents",
           responses: {
             "200": response("Retry scheduled", {
@@ -279,6 +290,7 @@ export function getAlertCenterOpenApi() {
           },
         },
         delete: {
+          description: adminWriteDescription,
           summary:
             "Permanently remove an inactive stored alert, its policy, and history",
           parameters: [idParameter],
@@ -297,6 +309,7 @@ export function getAlertCenterOpenApi() {
       },
       "/definitions/{id}/policy": {
         patch: {
+          description: adminWriteDescription,
           summary: "Override delivery policy for an alert definition",
           parameters: [idParameter],
           requestBody: {
@@ -311,6 +324,7 @@ export function getAlertCenterOpenApi() {
           },
         },
         delete: {
+          description: adminWriteDescription,
           summary: "Use current global defaults for an alert definition",
           parameters: [idParameter],
           responses: {
@@ -342,8 +356,7 @@ export function getAlertCenterOpenApi() {
       "/notifiers/{id}/test": {
         post: {
           summary: "Run a manual notification-service test",
-          description:
-            "Uses the saved service configuration without creating alert occurrences or delivery history. PagerDuty send tests create a real marked test incident; resolve tests close that same test incident.",
+          description: `${adminWriteDescription} Uses the saved service configuration without creating alert occurrences or delivery history. PagerDuty send tests create a real marked test incident; resolve tests close that same test incident.`,
           parameters: [idParameter],
           requestBody: {
             content: json({
@@ -494,6 +507,7 @@ export function getAlertCenterOpenApi() {
           `/occurrences/{id}/${action}`,
           {
             post: {
+              description: occurrenceWriteDescription,
               summary: `${action[0].toUpperCase()}${action.slice(1)} an occurrence`,
               parameters: [idParameter],
               responses: {

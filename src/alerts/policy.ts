@@ -177,7 +177,7 @@ export class AlertPolicyResolver {
         id: pathDefinitionId(path),
         sourceType: "zone",
         pathPattern: path,
-        name: zone.description?.trim() || zone.path,
+        name: zone.displayName?.trim() || zone.path,
         metadata: zone,
       });
     });

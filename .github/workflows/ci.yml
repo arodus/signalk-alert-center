@@ -47,11 +47,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:acceptance
+      - run: docker compose -f docker-compose.acceptance.yml down -v --remove-orphans
+      - run: npm run test:security
       - if: always()
         run: docker compose -f docker-compose.acceptance.yml down -v --remove-orphans
 
   browser-and-restart:
-    runs-on: ubuntu-latest
+    # Playwright 1.55 supports Ubuntu 24.04, not the newer ubuntu-latest image.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -23,6 +23,7 @@ const state = {
   notifierTestResults: new Map(),
   notifierTestsInFlight: new Set(),
   lastStatus: undefined,
+  authenticated: false,
 };
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -96,6 +97,36 @@ const policyFieldNames = {
   speechAnnounceClear: "clear announcement",
 };
 
+async function loadAccess() {
+  let access = "readonly";
+  let authenticated = false;
+  try {
+    const response = await fetch("/loginStatus", {
+      credentials: "include",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.ok) {
+      const login = await response.json();
+      authenticated = login.status === "loggedIn";
+      if (login.authenticationRequired === false) access = "admin";
+      else if (
+        login.status === "loggedIn" &&
+        ["admin", "readwrite"].includes(login.userLevel)
+      )
+        access = login.userLevel;
+    }
+  } catch {
+    // Keep browsing available, but never infer write access from a failed lookup.
+  }
+  state.authenticated = authenticated;
+  document.documentElement.dataset.access = access;
+  if (access !== "admin") {
+    elements.policyDialog.close();
+    $("#snooze-dialog").close();
+  }
+}
+
 async function api(path, options = {}) {
   const response = await fetch(`${apiBase}${path}`, {
     credentials: "include",
@@ -106,11 +137,18 @@ async function api(path, options = {}) {
     },
     ...options,
   });
-  if (response.status === 401 || response.status === 403) {
-    elements.login.hidden = false;
-    throw new Error("Sign in to Signal K to view or change alerts.");
-  }
   const payload = await response.json().catch(() => undefined);
+  if (response.status === 401 || response.status === 403) {
+    await loadAccess();
+    if (response.status === 401 && !state.authenticated) {
+      elements.login.hidden = false;
+      throw new Error("Sign in to Signal K to view or change alerts.");
+    }
+    throw new Error(
+      payload?.error?.message ??
+        "Your Signal K account does not have permission to perform this action. Ask a Signal K administrator for access.",
+    );
+  }
   if (!response.ok)
     throw new Error(
       payload?.error?.message ?? `Request failed (${response.status})`,
@@ -501,7 +539,7 @@ function occurrenceActions(occurrence) {
   ]
     .map(
       ([action, label, done, at]) =>
-        `<button class="button button-quiet occurrence-action" data-id="${escapeHtml(occurrence.id)}" data-action="${action}" type="button" ${at ? "disabled" : ""}>${at ? done : label}</button>`,
+        `<button class="button button-quiet occurrence-action" data-required-access="readwrite" data-id="${escapeHtml(occurrence.id)}" data-action="${action}" type="button" ${at ? "disabled" : ""}>${at ? done : label}</button>`,
     )
     .join("");
 }
@@ -590,7 +628,7 @@ function renderDefinitions() {
     `${visible.length} shown · ${state.definitions.filter((item) => item.sourceType === "rule").length} rules · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
-            <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>Last triggered</th><th>State</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+            <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>Last triggered</th><th>State</th><th data-required-access="readwrite"><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>${visible
           .map((definition) => {
             const { definition: item, occurrence, active, latest } = definition;
@@ -619,7 +657,7 @@ function renderDefinitions() {
             <td data-label="Age" class="live-age" title="Time since the sensor reading">${escapeHtml(liveAgeText(item))}</td>
             <td data-label="Last triggered" class="last-triggered-cell">${item.lastFiredAt ? `<time datetime="${escapeHtml(item.lastFiredAt)}">${escapeHtml(formatDate(item.lastFiredAt))}</time>` : '<span class="muted">Never</span>'}</td>
             <td data-label="State" class="alert-state-cell ${escapeHtml(latest?.coreAlert ? (active ? latest.currentSeverity : "inactive") : status)}" title="${escapeHtml(statusTitle)}">${escapeHtml(status)}</td>
-            <td data-label="Actions" class="action-cell"><div class="table-actions">${active ? occurrenceActions(occurrence) : ""}</div></td>
+            <td data-label="Actions" class="action-cell" data-required-access="readwrite"><div class="table-actions">${active ? occurrenceActions(occurrence) : ""}</div></td>
           </tr>`;
           })
           .join("")}</tbody></table>`
@@ -718,7 +756,7 @@ function renderDeliveries(deliveries) {
               <td data-label="Service"><strong class="cell-title">${escapeHtml(service.name ?? delivery.transportInstanceId)}</strong><span class="cell-detail">${escapeHtml(service.type ?? "unknown service")} · ${escapeHtml(delivery.operation ?? "notify")}${delivery.cycle > 1 ? ` · repeat ${delivery.cycle - 1}` : ""}</span></td>
               <td data-label="Status">${renderDeliveryStatus(delivery)}${playback ? `<span class="cell-detail">Playback: ${escapeHtml(playback)}</span>` : ""}${delivery.lastErrorCode ? `<span class="cell-detail error-detail">${escapeHtml(delivery.lastErrorCode)}</span>` : ""}</td>
               <td data-label="Timing"><span class="cell-title">${escapeHtml(primaryTime)}</span><span class="cell-detail">${escapeHtml(outcomeTime)}</span>${delivery.lastErrorMessage ? `<span class="cell-detail compact-detail error-detail" title="${escapeHtml(delivery.lastErrorMessage)}">${escapeHtml(delivery.lastErrorMessage)}</span>` : ""}</td>
-              <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail">Can retry or delete</span>' : ""}</td>
+              <td data-label="Attempts"><span class="cell-title">${delivery.attemptCount ?? 0}</span>${failed ? '<span class="cell-detail" data-required-access="admin">Can retry or delete</span>' : ""}</td>
             </tr>`;
           })
           .join("")}</tbody></table>`
@@ -898,6 +936,7 @@ async function load(preserveLoadedHistory = false) {
   elements.error.hidden = true;
   elements.login.hidden = true;
   try {
+    await loadAccess();
     const [
       definitions,
       activeOccurrences,
@@ -1036,6 +1075,14 @@ async function mutateOccurrence(id, action) {
     $("#action-result").textContent = elements.drawerResult.textContent;
   } catch (error) {
     showError(error);
+    elements.drawerResult.textContent = elements.error.textContent;
+    $("#action-result").textContent = elements.error.textContent;
+    const result =
+      state.selectedOccurrence === id &&
+      elements.drawer.classList.contains("is-open")
+        ? elements.drawerResult
+        : $("#action-result");
+    result.scrollIntoView({ block: "nearest" });
   }
 }
 function renderDeliveryAttempts() {
@@ -1143,7 +1190,7 @@ function ruleDetails(definition) {
   const scope = definition.pathPattern.includes("*")
     ? "Delivery settings apply to every instance of this rule. Each instance keeps its own alert history."
     : "Delivery settings apply to this rule, including its first occurrence.";
-  return `<p class="field-help">${escapeHtml(definition.ruleStatus ?? "Rule status unavailable")} · ${scope}</p><p><a href="/admin/#/e/signalk_alert_rules#rule=${encodeURIComponent(rule.slug)}" target="_blank" rel="noopener">Open rule in Alert Rules</a></p>`;
+  return `<p class="field-help">${escapeHtml(definition.ruleStatus ?? "Rule status unavailable")} · ${scope}</p><p data-required-access="admin"><a href="/admin/#/e/signalk_alert_rules#rule=${encodeURIComponent(rule.slug)}" target="_blank" rel="noopener">Open rule in Alert Rules</a></p>`;
 }
 
 async function openDefinition(id) {
@@ -1165,7 +1212,7 @@ async function openDefinition(id) {
     await loadDisplayUnits(definition);
     state.selectedOccurrence = undefined;
     state.selectedDefinition = id;
-    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
+    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
     elements.drawerResult.textContent = "";
     elements.events.innerHTML =
       '<div class="empty">No occurrence timeline.</div>';
@@ -1193,7 +1240,7 @@ async function openOccurrence(id) {
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
     bindOccurrenceActions();
@@ -1299,7 +1346,7 @@ function syncNotifierRepeatControls() {
   const custom =
     document
       .querySelector(
-        '[data-policy-field="notifierIds"] > .policy-override-button',
+        '[data-policy-field="notifierIds"] .policy-override-button',
       )
       ?.getAttribute("aria-pressed") === "true";
   document.querySelectorAll(".notifier-policy-option").forEach((option) => {
@@ -1312,9 +1359,9 @@ function syncNotifierRepeatControls() {
 function setPolicyOverrideState(field, overridden) {
   const host = document.querySelector(`[data-policy-field="${field}"]`);
   if (!host) return;
-  const button = host.querySelector(":scope > .policy-override-button");
+  const button = host.querySelector(".policy-override-button");
   button.setAttribute("aria-pressed", String(overridden));
-  button.textContent = overridden ? "Custom" : "Global default";
+  button.textContent = overridden ? "Use global default" : "Customize";
   button.setAttribute(
     "aria-label",
     `${overridden ? "Use global default for" : "Customize"} ${policyFieldNames[field] ?? field}`,
@@ -1341,14 +1388,14 @@ function initializePolicyOverrideControls() {
       setPolicyOverrideState(field, overridden);
       updateInheritanceSummary();
     });
-    host.prepend(button);
+    host.querySelector(".policy-field-header").append(button);
   });
 }
 
 function selectedOverrideFields() {
   const visible = [...document.querySelectorAll(".policy-override-button")]
     .filter((button) => button.getAttribute("aria-pressed") === "true")
-    .map((button) => button.parentElement.dataset.policyField);
+    .map((button) => button.closest("[data-policy-field]").dataset.policyField);
   return [...new Set([...state.policyHiddenOverrides, ...visible])];
 }
 

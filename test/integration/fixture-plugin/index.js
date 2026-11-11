@@ -175,6 +175,7 @@ module.exports = function fixturePlugin(app) {
                 path: ZONE_PATH,
                 value: {
                   displayName: "Refrigerator temperature",
+                  description: "Data should be of type number.",
                   zones: [
                     { lower: 278.15, upper: 281.15, state: "normal" },
                     { lower: 281.15, state: "alarm" },
