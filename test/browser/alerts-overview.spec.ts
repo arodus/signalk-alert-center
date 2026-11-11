@@ -1,5 +1,184 @@
 import { expect, test } from "@playwright/test";
 
+test("uses the zone display name instead of its schema description", async ({
+  page,
+  request,
+}) => {
+  const path = "notifications.environment.inside.refrigerator.temperature";
+  const source = `fixture.display-name.${test.info().project.name}`;
+  await request.post("/plugins/signalk-test-fixture/raise", {
+    data: { path, source, message: "Warm refrigerator" },
+  });
+  let occurrenceId = "";
+  await expect
+    .poll(async () => {
+      const response = await request.get(
+        `/plugins/signalk-alert-center/occurrences?source=${source}&state=active`,
+      );
+      occurrenceId = (await response.json()).items[0]?.id ?? "";
+      return occurrenceId;
+    })
+    .not.toBe("");
+  await page.goto("/signalk-alert-center/");
+  const row = page.locator(`tr[data-occurrence-id="${occurrenceId}"]`);
+  await expect(row.locator(".cell-title")).toHaveText(
+    "Refrigerator temperature",
+  );
+  await expect(page.locator("#definition-list")).not.toContainText(
+    "Data should be of type number.",
+  );
+  await row.click();
+  await expect(page.locator("#drawer-title")).toHaveText(
+    "Refrigerator temperature",
+  );
+  await page.screenshot({
+    path: `test-results/zone-display-name-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: "disabled",
+  });
+  await request.post("/plugins/signalk-test-fixture/clear", {
+    data: { path, source },
+  });
+});
+
+test("uses display names or paths as headings and keeps messages below", async ({
+  page,
+}) => {
+  const description = "Data should be of type number.";
+  const definitions = [
+    {
+      id: "depth",
+      pathPattern: "notifications.environment.depth.belowSurface",
+      name: "Depth from surface",
+      sourceType: "zone",
+      metadata: {
+        displayName: "Depth from surface",
+        description,
+        zones: [{ state: "alarm", message: "Shallow water" }],
+      },
+    },
+    {
+      id: "bilge",
+      pathPattern: "notifications.bilge.pump",
+      name: "notifications.bilge.pump",
+      sourceType: "recognized",
+      metadata: { description },
+    },
+    {
+      id: "zone",
+      pathPattern: "notifications.bilge.highWater",
+      name: "bilge.highWater",
+      sourceType: "zone",
+      metadata: {
+        displayName: "  ",
+        description,
+        zones: [
+          { state: "normal", message: "Normal water level" },
+          { state: "alarm", message: "Bilge water high" },
+        ],
+      },
+    },
+    {
+      id: "unnamed",
+      pathPattern: "notifications.test.unnamed",
+      name: "notifications.test.unnamed",
+      sourceType: "zone",
+      metadata: { description, zones: [{ state: "alarm", message: "  " }] },
+    },
+  ];
+  const occurrences = [
+    {
+      id: "depth-active",
+      definitionId: "depth",
+      path: definitions[0].pathPattern,
+      message: "Shallow water",
+    },
+    {
+      id: "bilge-one",
+      definitionId: "bilge",
+      path: definitions[1].pathPattern,
+      message: "Bilge pump running",
+    },
+    {
+      id: "bilge-two",
+      definitionId: "bilge",
+      path: definitions[1].pathPattern,
+      message: "Backup bilge pump running",
+    },
+  ].map((item) => ({
+    ...item,
+    state: "active",
+    currentSeverity: "alarm",
+    maxSeverity: "alarm",
+    occurrenceNumber: 1,
+  }));
+  await page.route("**/plugins/signalk-alert-center/definitions?*", (route) =>
+    route.fulfill({ json: { items: definitions } }),
+  );
+  await page.route("**/plugins/signalk-alert-center/occurrences?*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    return route.fulfill({
+      json: {
+        items: params.has("definitionId")
+          ? occurrences.filter(
+              (item) => item.definitionId === params.get("definitionId"),
+            )
+          : params.get("state") === "active"
+            ? occurrences
+            : [],
+      },
+    });
+  });
+  await page.route("**/plugins/signalk-alert-center/occurrences/*", (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").pop();
+    return route.fulfill({
+      json: occurrences.find((item) => item.id === id) ?? { items: [] },
+    });
+  });
+  await page.goto("/signalk-alert-center/");
+  const expected = [
+    [
+      "depth-active",
+      "Depth from surface",
+      "Shallow water",
+      "Depth from surface",
+    ],
+    [
+      "bilge-one",
+      "bilge › pump",
+      "Bilge pump running",
+      "notifications.bilge.pump",
+    ],
+    [
+      "bilge-two",
+      "bilge › pump",
+      "Backup bilge pump running",
+      "notifications.bilge.pump",
+    ],
+  ];
+  for (const [id, title, message, detailTitle] of expected) {
+    const row = page.locator(`tr[data-occurrence-id="${id}"]`);
+    await expect(row.locator(".cell-title")).toHaveText(title);
+    await expect(row.locator(".alert-summary")).toContainText(message);
+    await row.click();
+    await expect(page.locator("#drawer-title")).toHaveText(detailTitle);
+    await expect(page.locator("#drawer-body > p").first()).toHaveText(message);
+    await page.locator("#drawer-close").click();
+  }
+  await expect(
+    page.locator('tr[data-definition-id="zone"] .cell-title'),
+  ).toHaveText("bilge.highWater");
+  await expect(
+    page.locator('tr[data-definition-id="unnamed"] .cell-title'),
+  ).toHaveText("test › unnamed");
+  await expect(page.locator("#definition-list")).not.toContainText(description);
+  await page.screenshot({
+    path: `test-results/alert-name-fallback-${test.info().project.name}.png`,
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
 test("shows every definition, sorts zones above inactive alerts, and filters zones plus active alerts", async ({
   page,
 }) => {

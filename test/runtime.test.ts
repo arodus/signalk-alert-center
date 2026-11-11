@@ -257,7 +257,8 @@ describe("AlertCenterRuntime", () => {
           refrigerator: {
             temperature: {
               meta: {
-                description: "Refrigerator temperature",
+                displayName: "Refrigerator temperature",
+                description: "Data should be of type number.",
                 zones: [{ upper: 281.15, state: "alarm" }],
               },
             },

@@ -15,6 +15,13 @@ Versioning while it remains pre-1.0.
   queued delivery work are preserved; ignored occurrences no longer receive
   updates or clears.
 
+### Fixes
+
+- Use Signal K display names for configured zone alerts, falling back to the
+  data path when no display name is set. Schema descriptions such as “Data should
+  be of type number.” no longer appear as alert names. Existing names are corrected
+  on startup or the next zone refresh without changing history or delivery settings.
+
 ## [0.6.0] - 2026-11-11
 
 ### Alert settings
