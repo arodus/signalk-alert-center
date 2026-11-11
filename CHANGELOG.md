@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-11
+
 ### Alert settings
 
 - Group each alert setting with its own consistently placed Customize / Use global
@@ -26,6 +28,23 @@ Versioning while it remains pre-1.0.
   only for admins. Snooze status, alert history, and delivery details remain
   visible to readers. Permission errors explain missing access without asking an
   already signed-in user to sign in again.
+
+### Upgrading and compatibility
+
+- Access requirements are stricter in this release. Use an admin login for alert
+  settings, delivery maintenance, service tests, and global snooze API requests.
+  Update integrations that previously called these routes as readwrite users.
+- When Signal K ACLs are configured, grant `put` on each notification path that
+  a user may acknowledge or silence, including for admin users. A grant on the
+  literal `notifications` path alone is insufficient. Without configured ACLs,
+  readwrite users retain acknowledge/silence access.
+- Existing Signal K PUT controls for snooze and quiet hours retain their normal
+  path permissions. Dashboard controls reflect login roles; individual path ACL
+  denials are reported when an action is attempted.
+- No database migration, dependency upgrade, or plugin configuration change is
+  required. Alert history, policies, and pending deliveries are preserved.
+- Rollback to 0.5.0 does not require restoring the database, but restores its
+  permissive API behavior and the permission bypass fixed in this release.
 
 ## [0.5.0] - 2026-10-20
 

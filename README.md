@@ -261,7 +261,7 @@ npm ci
 npm run build
 npm pack
 cd ~/.signalk
-npm install /path/to/signalk-alert-center-0.5.0.tgz
+npm install /path/to/signalk-alert-center-0.6.0.tgz
 ```
 
 Restart Signal K after installation. Docker installations should run the final
