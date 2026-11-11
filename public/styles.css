@@ -362,7 +362,9 @@ h2 {
 .filter-row select,
 .filter-row input,
 .form-field input,
-.form-field select {
+.form-field select,
+.policy-setting > input,
+.policy-setting > select {
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 8px 10px;
@@ -946,26 +948,76 @@ dialog .button {
   display: grid;
   gap: 2px;
 }
+.policy-setting {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 0;
+}
+.policy-field-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.policy-field-title {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.policy-field-title.check-label {
+  align-items: flex-start;
+}
+.policy-field-title input {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.policy-setting > .field-help {
+  margin: 0;
+}
+.policy-setting > .form-field {
+  margin: 0;
+}
+.policy-setting > .form-field[hidden] {
+  display: none;
+}
 .policy-override-button {
-  float: right;
-  margin: 0 0 4px 10px;
-  padding: 2px 7px;
+  flex-shrink: 0;
+  padding: 5px 9px;
+  min-height: 32px;
   border: 1px solid #b8c8c6;
   border-radius: 4px;
-  color: #526462;
+  color: var(--primary-dark);
   background: #fff;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   line-height: 1.35;
   cursor: pointer;
 }
-.policy-override-button.is-custom {
-  border-color: var(--primary);
-  color: var(--primary-dark);
-  background: #e7edf8;
+.policy-override-button:hover {
+  background: #edf2fa;
 }
-[data-policy-field]:has(> .policy-override-button[aria-pressed="false"]) {
-  color: #657472;
+.policy-setting:has(.policy-override-button.is-custom) {
+  border-color: var(--primary);
+}
+@media (max-width: 440px) {
+  .policy-field-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .policy-override-button {
+    align-self: flex-end;
+  }
+  .inheritance-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 .notifier-policy-option {
   display: grid;

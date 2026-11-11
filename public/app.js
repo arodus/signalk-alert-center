@@ -1273,7 +1273,7 @@ function syncNotifierRepeatControls() {
   const custom =
     document
       .querySelector(
-        '[data-policy-field="notifierIds"] > .policy-override-button',
+        '[data-policy-field="notifierIds"] .policy-override-button',
       )
       ?.getAttribute("aria-pressed") === "true";
   document.querySelectorAll(".notifier-policy-option").forEach((option) => {
@@ -1286,9 +1286,9 @@ function syncNotifierRepeatControls() {
 function setPolicyOverrideState(field, overridden) {
   const host = document.querySelector(`[data-policy-field="${field}"]`);
   if (!host) return;
-  const button = host.querySelector(":scope > .policy-override-button");
+  const button = host.querySelector(".policy-override-button");
   button.setAttribute("aria-pressed", String(overridden));
-  button.textContent = overridden ? "Custom" : "Global default";
+  button.textContent = overridden ? "Use global default" : "Customize";
   button.setAttribute(
     "aria-label",
     `${overridden ? "Use global default for" : "Customize"} ${policyFieldNames[field] ?? field}`,
@@ -1315,14 +1315,14 @@ function initializePolicyOverrideControls() {
       setPolicyOverrideState(field, overridden);
       updateInheritanceSummary();
     });
-    host.prepend(button);
+    host.querySelector(".policy-field-header").append(button);
   });
 }
 
 function selectedOverrideFields() {
   const visible = [...document.querySelectorAll(".policy-override-button")]
     .filter((button) => button.getAttribute("aria-pressed") === "true")
-    .map((button) => button.parentElement.dataset.policyField);
+    .map((button) => button.closest("[data-policy-field]").dataset.policyField);
   return [...new Set([...state.policyHiddenOverrides, ...visible])];
 }
 
