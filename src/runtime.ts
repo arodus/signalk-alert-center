@@ -1,3 +1,4 @@
+import { mayWritePath } from "./signalk/permissions";
 import { QuietHoursClock } from "./suppression/quiet-hours";
 import { SuppressionStore, SuppressionReason } from "./suppression/store";
 import { publishSnooze, registerSnoozePuts } from "./signalk/snooze";
@@ -33,6 +34,7 @@ import {
   DefinitionQuery,
   EventQuery,
   OccurrenceQuery,
+  OccurrenceWriteAuthorization,
   RouterLike,
   registerAlertCenterRoutes,
   registerRoutes,
@@ -2033,6 +2035,12 @@ export class AlertCenterRuntime {
   registerWithRouter(router: PluginRouter): void {
     const compatible = router as unknown as RouterLike;
     const repository = this.repository();
+    const canChangeOccurrence: OccurrenceWriteAuthorization = (request, id) => {
+      const occurrence = this.getOccurrence(id);
+      return occurrence
+        ? mayWritePath(this.app, request, occurrence.path)
+        : undefined;
+    };
     registerRoutes(
       compatible,
       () => this.database,
@@ -2050,8 +2058,10 @@ export class AlertCenterRuntime {
         const result = await repository.silenceOccurrence(id);
         return Boolean(result && result !== "inactive");
       },
+      canChangeOccurrence,
     );
     registerAlertCenterRoutes(compatible, {
+      canChangeOccurrence,
       repository: () => (this.database ? repository : undefined),
       snooze: () => this.suppression?.getSnooze(),
       setSnooze: (seconds) => {

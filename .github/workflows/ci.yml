@@ -47,6 +47,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:acceptance
+      - run: docker compose -f docker-compose.acceptance.yml down -v --remove-orphans
+      - run: npm run test:security
       - if: always()
         run: docker compose -f docker-compose.acceptance.yml down -v --remove-orphans
 

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AlertCenterRepository,
+  OccurrenceWriteAuthorization,
   registerAlertCenterRoutes,
   registerRoutes,
   RouterLike,
@@ -55,11 +56,18 @@ class FakeResponse {
   }
 }
 
-function fixture() {
+function fixture(
+  canChangeOccurrence: OccurrenceWriteAuthorization = () => true,
+) {
   const handlers = new Map<string, Handler>();
   const access: string[] = [];
-  const registrar = (method: string) => (path: unknown, handler: unknown) =>
-    handlers.set(`${method} ${path}`, handler as Handler);
+  const routeAccess = new Map<string, string>();
+  const registrar =
+    (method: string, level = "admin") =>
+    (path: unknown, handler: unknown) => {
+      handlers.set(`${method} ${path}`, handler as Handler);
+      routeAccess.set(`${method} ${path}`, level);
+    };
   const router: RouterLike = {
     get: registrar("GET"),
     post: registrar("POST"),
@@ -68,10 +76,10 @@ function fixture() {
     access(level) {
       access.push(level);
       return {
-        get: registrar("GET"),
-        post: registrar("POST"),
-        patch: registrar("PATCH"),
-        delete: registrar("DELETE"),
+        get: registrar("GET", level),
+        post: registrar("POST", level),
+        patch: registrar("PATCH", level),
+        delete: registrar("DELETE", level),
       };
     },
   };
@@ -139,12 +147,15 @@ function fixture() {
           ? "not_failed"
           : "not_found",
     deleteFailedDeliveries: () => 3,
-    acknowledgeOccurrence: (id) =>
+    acknowledgeOccurrence: vi.fn((id) =>
       id === "inactive" ? "inactive" : { status: "acknowledged" },
-    silenceOccurrence: (id) =>
+    ),
+    silenceOccurrence: vi.fn((id) =>
       id === "inactive" ? "inactive" : { status: "silenced" },
+    ),
   };
   registerAlertCenterRoutes(router, {
+    canChangeOccurrence,
     repository: () => repository,
     listNotifiers: () => [{ id: "ntfy-main", type: "ntfy" }],
     testNotifier: (id, operation) =>
@@ -184,6 +195,8 @@ function fixture() {
   };
   return {
     access,
+    routeAccess,
+    repository,
     invoke,
     queries,
     emitChange: (revision = 1) =>
@@ -198,11 +211,17 @@ function fixture() {
 
 describe("alert-center routes", () => {
   it("registers reads and mutations with least-privilege Signal K access", () => {
-    const { access } = fixture();
+    const { access, routeAccess } = fixture();
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
     expect(access.filter((value) => value === "readonly")).toHaveLength(11);
-    expect(access.filter((value) => value === "readwrite")).toHaveLength(9);
+    expect(access.filter((value) => value === "readwrite")).toHaveLength(2);
+    for (const [route, level] of routeAccess) {
+      if (route.startsWith("GET ")) expect(level).toBe("readonly");
+      else if (/\/(acknowledge|silence)$/.test(route))
+        expect(level).toBe("readwrite");
+      else expect(level, route).toBe("admin");
+    }
   });
 
   it("runs dedicated service tests and validates their operation", async () => {
@@ -538,6 +557,7 @@ describe("legacy alert routes", () => {
       () => [],
       async (id) => id === "active",
       async () => false,
+      (_request, id) => (id === "active" ? true : undefined),
     );
 
     const invoke = async (path: string, id: string) => {
@@ -557,9 +577,17 @@ describe("legacy alert routes", () => {
   });
 });
 
-it("registers snooze mutations with readwrite access and validates requests", async () => {
+it("registers snooze mutations with admin access and validates requests", async () => {
   const routes = new Map<string, { handler: Handler; access: string }>();
+  const adminRoutes = Object.fromEntries(
+    ["get", "post", "patch", "delete"].map((method) => [
+      method,
+      (path: string, handler: Handler) =>
+        routes.set(`${method} ${path}`, { handler, access: "admin" }),
+    ]),
+  );
   const router = {
+    ...adminRoutes,
     access: (access: string) =>
       Object.fromEntries(
         ["get", "post", "patch", "delete"].map((method) => [
@@ -575,6 +603,7 @@ it("registers snooze mutations with readwrite access and validates requests", as
     endsAt: null as string | null,
   };
   registerAlertCenterRoutes(router, {
+    canChangeOccurrence: () => undefined,
     repository: () => undefined,
     snooze: () => state,
     setSnooze: (seconds) =>
@@ -587,8 +616,8 @@ it("registers snooze mutations with readwrite access and validates requests", as
       }),
   });
   expect(routes.get("get /snooze")?.access).toBe("readonly");
-  expect(routes.get("post /snooze")?.access).toBe("readwrite");
-  expect(routes.get("delete /snooze")?.access).toBe("readwrite");
+  expect(routes.get("post /snooze")?.access).toBe("admin");
+  expect(routes.get("delete /snooze")?.access).toBe("admin");
   const invalid = new FakeResponse();
   routes
     .get("post /snooze")!
@@ -599,4 +628,87 @@ it("registers snooze mutations with readwrite access and validates requests", as
   routes.get("post /snooze")!.handler({ body: { durationSeconds: 60 } }, valid);
   await new Promise((resolve) => setImmediate(resolve));
   expect(valid.body).toMatchObject({ active: true });
+});
+
+describe("occurrence authorization", () => {
+  for (const action of ["acknowledge", "silence"] as const) {
+    it(`denies ${action} before invoking any occurrence mutation`, async () => {
+      const authorize = vi.fn(() => false);
+      const current = fixture(authorize);
+      const request = {
+        params: { id: "active" },
+        skPrincipal: { identifier: "demo" },
+      };
+      const response = await current.invoke(
+        "POST",
+        `/occurrences/:id/${action}`,
+        request,
+      );
+      expect(response.statusCode).toBe(403);
+      expect(response.body).toMatchObject({
+        error: {
+          code: "FORBIDDEN",
+          message: `You do not have permission to ${action} this alert. Ask a Signal K administrator to grant access to this notification path.`,
+        },
+      });
+      expect(authorize).toHaveBeenCalledWith(request, "active");
+      expect(current.repository.acknowledgeOccurrence).not.toHaveBeenCalled();
+      expect(current.repository.silenceOccurrence).not.toHaveBeenCalled();
+    });
+
+    it(`allows ${action} only after authorization resolves`, async () => {
+      const current = fixture(async () => true);
+      const response = await current.invoke(
+        "POST",
+        `/occurrences/:id/${action}`,
+        { params: { id: "active" } },
+      );
+      expect(response.statusCode).toBe(200);
+      expect(current.repository[`${action}Occurrence`]).toHaveBeenCalledWith(
+        "active",
+      );
+    });
+
+    it(`returns 404 for a missing ${action} target without mutation`, async () => {
+      const current = fixture(() => undefined);
+      const response = await current.invoke(
+        "POST",
+        `/occurrences/:id/${action}`,
+        { params: { id: "missing" } },
+      );
+      expect(response.statusCode).toBe(404);
+      expect(current.repository[`${action}Occurrence`]).not.toHaveBeenCalled();
+    });
+
+    it(`denies the legacy ${action} alias before calling its callback`, async () => {
+      const handlers = new Map<string, Handler>();
+      const register = (method: string) => (path: unknown, handler: unknown) =>
+        handlers.set(`${method} ${path}`, handler as Handler);
+      const router: RouterLike = {
+        get: register("GET"),
+        post: register("POST"),
+      };
+      const acknowledge = vi.fn(async () => true);
+      const silence = vi.fn(async () => true);
+      registerRoutes(
+        router,
+        () => undefined,
+        () => ({}),
+        async () => {},
+        () => [],
+        acknowledge,
+        silence,
+        () => false,
+      );
+      const response = new FakeResponse();
+      handlers.get(`POST /alerts/:id/${action}`)!(
+        { params: { id: "active" } },
+        response,
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(response.statusCode).toBe(403);
+      expect(acknowledge).not.toHaveBeenCalled();
+      expect(silence).not.toHaveBeenCalled();
+    });
+  }
 });

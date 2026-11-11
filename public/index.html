@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-access="readonly">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -22,7 +22,12 @@
             aria-label="Back to Signal K administration"
             >← Back to Signal K</a
           ><span id="updated" class="updated">Loading…</span
-          ><button id="snooze-open" class="button" type="button">
+          ><button
+            id="snooze-open"
+            data-required-access="admin"
+            class="button"
+            type="button"
+          >
             Snooze all alerts</button
           ><button id="refresh" class="button button-quiet" type="button">
             Refresh
@@ -47,7 +52,12 @@
 
       <section id="snooze-banner" class="snooze-banner" role="status" hidden>
         <span id="snooze-summary"></span
-        ><button id="snooze-end" class="button button-small" type="button">
+        ><button
+          id="snooze-end"
+          data-required-access="admin"
+          class="button button-small"
+          type="button"
+        >
           End snooze now</button
         ><span id="snooze-cleanup"></span>
       </section>
@@ -109,8 +119,8 @@
           <div>
             <h2>Alerts</h2>
             <p>
-              Active alerts first. Select an alert for zones, history, and
-              settings.
+              Active alerts first. Select an alert for details, zones, and
+              history.
             </p>
           </div>
         </div>
@@ -276,7 +286,7 @@
             <h2>Notification deliveries</h2>
             <p>Delivery results and retries for your notification services.</p>
           </div>
-          <div class="section-actions">
+          <div class="section-actions" data-required-access="admin">
             <button
               id="delete-failed"
               class="button button-danger button-small"
@@ -312,7 +322,11 @@
           <span id="health-state" class="health-pill">Checking</span>
           System diagnostics
         </summary>
-        <section class="service-tests" aria-labelledby="service-tests-title">
+        <section
+          class="service-tests"
+          data-required-access="admin"
+          aria-labelledby="service-tests-title"
+        >
           <div class="service-tests-heading">
             <div>
               <h3 id="service-tests-title">Test notification services</h3>
@@ -447,6 +461,7 @@
       <div class="dialog-actions delivery-dialog-actions">
         <button
           id="delivery-delete"
+          data-required-access="admin"
           class="button button-danger button-small"
           type="button"
           hidden
@@ -455,6 +470,7 @@
         </button>
         <button
           id="delivery-retry"
+          data-required-access="admin"
           class="button button-primary button-small"
           type="button"
           hidden
