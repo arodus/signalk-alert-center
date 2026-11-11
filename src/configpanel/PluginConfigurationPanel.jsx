@@ -24,6 +24,7 @@ const tabs = [
 ];
 
 const defaults = {
+  ignoredPaths: ["navigation.closestApproach.*"],
   storage: { path: "alert-center.sqlite" },
   snooze: { onlyWhenAnchoredOrMoored: false },
   discovery: { zoneRefreshSeconds: 300 },
@@ -1263,6 +1264,23 @@ function Advanced({ config, update, resetDatabase, resetRequested }) {
   return (
     <>
       <Card
+        title="Notification paths to leave out"
+        help="Matching paths are not tracked, including at startup and during zone discovery. Existing history and delivery work are kept; later updates and clears are ignored. Other Signal K apps still receive these alerts."
+      >
+        <Field
+          label="Ignored path patterns"
+          hint="Enter one pattern per line, for example navigation.closestApproach.*. The notifications. prefix is optional. * matches one or more characters, including nested path segments. Leave empty to track all paths."
+        >
+          <textarea
+            style={{ ...styles.input, minHeight: 100, resize: "vertical" }}
+            value={config.ignoredPaths.join("\n")}
+            onChange={(event) =>
+              update("ignoredPaths", event.target.value.split("\n"))
+            }
+          />
+        </Field>
+      </Card>
+      <Card
         title="Storage"
         help="Relative database paths are stored in Signal K's data directory."
       >
@@ -1445,8 +1463,15 @@ export default function PluginConfigurationPanel({ configuration, save }) {
     setConfig((current) => ({ ...current, [key]: value }));
   };
   const saveConfiguration = () => {
-    save(config);
-    setBaseline(clone(config));
+    const next = {
+      ...config,
+      ignoredPaths: config.ignoredPaths
+        .map((path) => path.trim())
+        .filter(Boolean),
+    };
+    save(next);
+    setConfig(next);
+    setBaseline(clone(next));
     setSaved(true);
   };
   const resetDatabase = () => {

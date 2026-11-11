@@ -13,17 +13,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate:
-    uses: ./.github/workflows/ci.yml
-
-  validate-plugin:
-    uses: ./.github/workflows/signalk-ci.yml
-
   publish:
-    needs: [validate, validate-plugin]
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      actions: read
       contents: write
       id-token: write
     steps:
@@ -34,12 +28,16 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      - name: Verify release tag and notes
+        run: node scripts/verify-release-tag.mjs "$GITHUB_REF_NAME"
+      - name: Verify successful main CI for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release-ci.mjs "$(git rev-parse HEAD)"
       - name: Install dependencies
         run: npm ci
       - name: Install npm with trusted-publishing support
         run: npm install --global npm@11.6.0
-      - name: Verify release tag and notes
-        run: node scripts/verify-release-tag.mjs "$GITHUB_REF_NAME"
       - name: Build and inspect package
         run: |
           npm run build

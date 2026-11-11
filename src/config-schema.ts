@@ -1,4 +1,5 @@
 import { severities } from "./alerts/types";
+import { DEFAULT_IGNORED_PATHS } from "./signalk/ignored-paths";
 
 const serviceName = {
   type: "string",
@@ -137,6 +138,14 @@ export const pluginConfigSchema = {
           default: false,
         },
       },
+    },
+    ignoredPaths: {
+      type: "array",
+      title: "Notification paths to leave out",
+      description:
+        "Do not track matching paths. Use * for one or more characters, including nested path segments, e.g. navigation.closestApproach.* (the default). The notifications. prefix is optional. Empty means track all paths. Existing history and delivery work are kept; updates and clears on matching paths are ignored.",
+      items: { type: "string", minLength: 1 },
+      default: [...DEFAULT_IGNORED_PATHS],
     },
     discovery: {
       type: "object",
