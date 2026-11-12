@@ -374,12 +374,19 @@ function zoneBadges(definition) {
 
 const displayMetadata = new Map();
 const liveValues = new AlertLiveValues(
-  () => renderLiveValues(),
+  () => {
+    renderLiveValues();
+    AlertTheme.setSignalKMode(liveValues.values.get("environment.mode")?.value);
+  },
   () => {
     elements.login.hidden = false;
   },
 );
 window.addEventListener("pagehide", () => liveValues.close());
+liveValues.setPaths(["environment.mode"]);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) liveValues.connect();
+});
 function displayedMessage(item, live = false, message = item?.message) {
   if (!item) return message;
   const definition = state.definitions.find(
@@ -913,11 +920,12 @@ async function load(preserveLoadedHistory = false) {
     for (const path of displayMetadata.keys())
       if (!definitions.some((item) => item.pathPattern === path))
         displayMetadata.delete(path);
-    liveValues.setPaths(
-      definitions.map((item) =>
+    liveValues.setPaths([
+      "environment.mode",
+      ...definitions.map((item) =>
         item.pathPattern.replace(/^notifications\./, ""),
       ),
-    );
+    ]);
     state.activeDefinitionIds = new Set(
       activeOccurrences.map((item) => item.definitionId),
     );
