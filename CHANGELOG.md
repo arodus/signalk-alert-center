@@ -5,6 +5,14 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Features
+
+- Add a sun/moon appearance menu to Alert Center. Auto (the default) follows
+  Signal K's day/night mode, falling back to the device's appearance when
+  unavailable. Light and Dark overrides are saved per browser and server,
+  without changing the shared mode. Dark styling covers alerts, history,
+  delivery details, settings, and status banners.
+
 ### Fixes
 
 - Show the alert list as soon as its alert data arrives, without waiting for

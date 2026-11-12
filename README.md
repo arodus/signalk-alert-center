@@ -79,6 +79,24 @@ pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
+### Appearance
+
+Use the sun/moon button in the top-right header to choose **Auto**, **Light**, or
+**Dark**. Auto is the default: it follows Signal K's
+`vessels.self.environment.mode` (`day` or `night`) and falls back to your device's
+appearance when that value is unavailable or unrecognised. The menu shows which
+source is being followed. Changes arrive through the existing live Signal K
+connection; no App Dock installation is required.
+
+Light and Dark override both Signal K and device changes. The choice is saved
+per browser profile and server address, survives reloads, and is shared between
+tabs for that server. It never changes the boat's shared mode or other devices.
+Choose Auto to resume following Signal K; clearing browser site data also resets
+the preference to Auto. If browser storage is blocked, the menu explains that the
+choice lasts only for the current page.
+
+![Alert Center in dark mode with the appearance menu open](./docs/screenshots/alert-center-dark.png)
+
 ### Access and permissions
 
 Reading alerts and history follows Signal K's read-only access settings, including

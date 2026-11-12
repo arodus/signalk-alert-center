@@ -380,12 +380,19 @@ function zoneBadges(definition) {
 
 const displayMetadata = new Map();
 const liveValues = new AlertLiveValues(
-  () => renderLiveValues(),
+  () => {
+    renderLiveValues();
+    AlertTheme.setSignalKMode(liveValues.values.get("environment.mode")?.value);
+  },
   () => {
     elements.login.hidden = false;
   },
 );
 window.addEventListener("pagehide", () => liveValues.close());
+liveValues.setPaths(["environment.mode"]);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) liveValues.connect();
+});
 function displayedMessage(item, live = false, message = item?.message) {
   if (!item) return message;
   const definition = state.definitions.find(
@@ -982,11 +989,12 @@ async function load(preserveLoadedHistory = false) {
     elements.definitionCount.textContent = definitions.length;
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     renderDefinitions();
-    liveValues.setPaths(
-      definitions.map((item) =>
+    liveValues.setPaths([
+      "environment.mode",
+      ...definitions.map((item) =>
         item.pathPattern.replace(/^notifications\./, ""),
       ),
-    );
+    ]);
     void loadMetadataInBackground().catch(showError);
   } catch (error) {
     showError(error);

@@ -79,7 +79,7 @@ async function launchBrowser() {
 }
 
 async function preparePage(browser, viewport) {
-  return browser.newPage({ viewport });
+  return browser.newPage({ viewport, colorScheme: "light" });
 }
 
 async function capture(page, name, options = {}) {
@@ -170,6 +170,14 @@ try {
     .first()
     .waitFor();
   await capture(desktop, "alert-center-overview.png");
+
+  await desktop.locator("#theme-toggle").click();
+  await desktop.getByRole("radio", { name: "Dark", exact: true }).check();
+  await capture(desktop, "alert-center-dark.png");
+  await desktop
+    .getByRole("radio", { name: "Auto — follow Signal K", exact: true })
+    .check();
+  await desktop.locator("#theme-toggle").click();
 
   const detailRow = desktop
     .locator("#definition-list tr.clickable-row")

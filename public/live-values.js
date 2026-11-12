@@ -92,7 +92,9 @@ class AlertLiveValues {
         return;
       this.values.set(
         path,
-        node && Number.isFinite(node.value)
+        node &&
+          (Number.isFinite(node.value) ||
+            (path === "environment.mode" && typeof node.value === "string"))
           ? { value: node.value, timestamp: node.timestamp }
           : undefined,
       );
