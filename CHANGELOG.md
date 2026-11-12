@@ -10,8 +10,15 @@ Versioning while it remains pre-1.0.
 - Show the alert list as soon as its alert data arrives, without waiting for
   units metadata, login status, or diagnostics. Load units in the background
   and fetch history and deliveries only when their tab is selected. The delivery
-  count appears after opening Deliveries. No configuration or data migration is
-  required.
+  badge now counts undelivered items (including failures), while the tab retains
+  the full delivery history. Detailed diagnostics load only when expanded.
+- Use indexed pending counts and delivery-history pagination. The dashboard skips
+  lifetime totals; API clients still receive them unless they set
+  `includeTotal=false`. A lightweight `/summary` endpoint avoids historical and
+  service aggregates during page loading.
+- Automatically upgrade storage to schema version 4 with a delivery-history index.
+  The first startup may take longer while the index builds. History, settings, and
+  pending work are preserved; no reset or configuration change is needed.
 
 ## [0.7.0] - 2026-11-11
 

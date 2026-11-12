@@ -70,9 +70,12 @@ async function mockDashboard(page: Page) {
               : occurrences,
         },
       });
-    if (endpoint === "status")
+    if (endpoint === "summary" || endpoint === "status")
       return route.fulfill({
-        json: { alerts: { pendingDelivery: 3 }, health: { state: "healthy" } },
+        json: {
+          alerts: { pendingDelivery: 3, undeliveredDelivery: 4 },
+          health: { state: "healthy" },
+        },
       });
     return route.fulfill({ json: { items: [] } });
   });
@@ -87,7 +90,7 @@ async function mockDashboard(page: Page) {
 
 test.beforeEach(async ({ page }) => mockDashboard(page));
 
-test("renders and refreshes alerts while metadata, access, and status are pending", async ({
+test("renders and refreshes alerts while metadata, access, and summary are pending", async ({
   page,
 }) => {
   const metadataResponses = heldResponses();
@@ -95,14 +98,16 @@ test("renders and refreshes alerts while metadata, access, and status are pendin
   const accessResponses: Route[] = [];
   const hiddenRequests: string[] = [];
   page.on("request", (request) => {
-    if (/\/(alert-history|deliveries|notifiers)(\?|$)/.test(request.url()))
+    if (
+      /\/(alert-history|deliveries|notifiers|status)(\?|$)/.test(request.url())
+    )
       hiddenRequests.push(request.url());
   });
   await page.route(
     "**/signalk/v1/api/vessels/self/**/meta",
     metadataResponses.handle,
   );
-  await page.route(`**${plugin}/status`, (route) => {
+  await page.route(`**${plugin}/summary`, (route) => {
     statusResponses.push(route);
   });
   await page.route("**/loginStatus", (route) => {
@@ -145,7 +150,10 @@ test("renders and refreshes alerts while metadata, access, and status are pendin
   await Promise.all(
     statusResponses.map((route) =>
       route.fulfill({
-        json: { alerts: { pendingDelivery: 3 }, health: { state: "healthy" } },
+        json: {
+          alerts: { pendingDelivery: 3, undeliveredDelivery: 4 },
+          health: { state: "healthy" },
+        },
       }),
     ),
   );
@@ -155,6 +163,7 @@ test("renders and refreshes alerts while metadata, access, and status are pendin
     ),
   );
   await expect(page.locator("#pending-count")).toHaveText("3");
+  await expect(page.locator("#delivery-tab-count")).toHaveText("4");
   await expect(page.locator("html")).toHaveAttribute("data-access", "admin");
   await expect(
     page.locator('[data-definition-id="depth-0"] .live-value'),
@@ -237,6 +246,10 @@ for (const view of ["history", "deliveries"] as const) {
     await page.locator(`#${more}`).click();
     await expect(page.locator(`#${panel}`)).toContainText("Older entry");
     expect(calls[1].searchParams.get("cursor")).toBe("older");
+    if (view === "deliveries") {
+      expect(calls[0].searchParams.get("includeTotal")).toBe("false");
+      await expect(page.locator("#delivery-tab-count")).toHaveText("4");
+    }
     await page.evaluate(() =>
       document.dispatchEvent(new Event("test-alert-change")),
     );
@@ -353,4 +366,116 @@ test("a pending hidden tab does not block alert refreshes or replace newer filte
   await expect(page.locator("#alert-history-list")).not.toContainText(
     "Stale filter result",
   );
+});
+
+test("shows only the undelivered count while the tab retains completed and suppressed history", async ({
+  page,
+}) => {
+  let undelivered = 6;
+  await page.route(`**${plugin}/summary`, (route) =>
+    route.fulfill({
+      json: {
+        alerts: {
+          pendingDelivery: Math.min(5, undelivered),
+          undeliveredDelivery: undelivered,
+        },
+      },
+    }),
+  );
+  await page.route(`**${plugin}/deliveries?*`, (route) =>
+    route.fulfill({
+      json: {
+        total: 100000,
+        items: [
+          "pending",
+          "failed_retryable",
+          "paused",
+          "failed_terminal",
+          "delivered",
+          "suppressed",
+        ].map((state) => ({
+          id: state,
+          state,
+          alert: {
+            path: `notifications.test.${state}`,
+            name: `History ${state}`,
+          },
+          service: { name: "Mock", type: "ntfy" },
+        })),
+      },
+    }),
+  );
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#delivery-tab-count")).toHaveText("6");
+  await expect(page.locator("#delivery-tab-count")).toHaveAttribute(
+    "title",
+    /undelivered.*including failures/,
+  );
+  await page.locator("#deliveries-tab").click();
+  await expect(page.locator("#delivery-list tbody tr")).toHaveCount(6);
+  await expect(page.locator("#delivery-list")).toContainText(
+    "History delivered",
+  );
+  await expect(page.locator("#delivery-list")).toContainText(
+    "History suppressed",
+  );
+  await expect(page.locator("#delivery-tab-count")).toHaveText("6");
+  await page.locator("#alerts-tab").click();
+  undelivered = 0;
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("test-alert-change")),
+  );
+  await expect(page.locator("#delivery-tab-count")).toHaveText("0");
+  await page.screenshot({
+    path: `test-results/undelivered-badge-${test.info().project.name}.png`,
+    fullPage: true,
+  });
+});
+
+test("loads full diagnostics only while expanded", async ({ page }) => {
+  let diagnosticsCalls = 0;
+  await page.route(`**${plugin}/status`, (route) => {
+    diagnosticsCalls++;
+    return route.fulfill({
+      json: {
+        health: { state: "healthy" },
+        database: { healthy: true, schemaVersion: 4, expectedSchemaVersion: 4 },
+        services: [
+          {
+            id: "Mock",
+            name: "Mock",
+            type: "ntfy",
+            enabled: true,
+            pendingCount: 0,
+          },
+        ],
+      },
+    });
+  });
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(9);
+  await expect(page.locator("#delivery-tab-count")).toHaveText("4");
+  expect(diagnosticsCalls).toBe(0);
+  await page.locator(".system-diagnostics summary").click();
+  await expect(page.locator("#health-state")).toHaveText("healthy");
+  await expect(page.locator("#diagnostics-list")).toContainText("schema 4/4");
+  expect(diagnosticsCalls).toBe(1);
+  await page.locator("#refresh").click();
+  await expect.poll(() => diagnosticsCalls).toBe(2);
+  await page.locator(".system-diagnostics summary").click();
+  await page.route(`**${plugin}/summary`, (route) =>
+    route.fulfill({
+      json: {
+        alerts: { pendingDelivery: 3, undeliveredDelivery: 4 },
+        snooze: {
+          active: true,
+          endsAt: new Date(Date.now() + 600000).toISOString(),
+        },
+      },
+    }),
+  );
+  await page.locator("#refresh").click();
+  await expect(page.locator("#delivery-tab-count")).toHaveText("4");
+  await expect(page.locator("#notifier-tests button")).toBeDisabled();
+  expect(diagnosticsCalls).toBe(2);
 });

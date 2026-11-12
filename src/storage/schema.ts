@@ -1,5 +1,9 @@
 /** Initial Signal K Alert Center schema. */
-export const currentSchemaVersion = 3;
+export const currentSchemaVersion = 4;
+
+// Equality on this expression lets delivery pages seek by the implicit rowid.
+export const deliveryPrioritySql = `CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused') THEN 0 ELSE 1 END`;
+export const deliveryHistoryIndex = `CREATE INDEX IF NOT EXISTS deliveries_history_priority_idx ON deliveries(${deliveryPrioritySql})`;
 
 export const schema = `
 CREATE TABLE IF NOT EXISTS notification_controls (key TEXT PRIMARY KEY, value TEXT NOT NULL);

@@ -21,6 +21,28 @@ describe("AlertCenterRuntime", () => {
     directories.length = 0;
   });
 
+  it("builds the dashboard summary without historical or service aggregates", () => {
+    const runtime = new AlertCenterRuntime({} as ServerAPI);
+    const database = new AlertDatabase();
+    const internals = runtime as unknown as { database: AlertDatabase };
+    internals.database = database;
+    const aggregates = [
+      vi.spyOn(database, "alertStats"),
+      vi.spyOn(database, "operationalStatus"),
+      vi.spyOn(database, "definitionCount"),
+    ];
+    try {
+      expect(runtime.summary()).toMatchObject({
+        alerts: { pendingDelivery: 0, undeliveredDelivery: 0 },
+        connectivity: { state: "OFF" },
+      });
+      for (const aggregate of aggregates)
+        expect(aggregate).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
   it("rejects overlapping manual tests for the same service", async () => {
     let completeRequest: ((response: Response) => void) | undefined;
     vi.stubGlobal(
@@ -382,7 +404,7 @@ describe("AlertCenterRuntime", () => {
           rejected: 0,
         },
         scheduler: { running: false, activeRequests: 0 },
-        database: { healthy: true, schemaVersion: 3, expectedSchemaVersion: 3 },
+        database: { healthy: true, schemaVersion: 4, expectedSchemaVersion: 4 },
         services: [
           {
             id: "warning",

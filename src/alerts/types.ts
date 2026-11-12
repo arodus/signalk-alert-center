@@ -256,7 +256,7 @@ export interface WyomingPlaybackRecord {
 export interface DeliveryPage {
   items: DeliveryRecord[];
   nextCursor?: string;
-  total: number;
+  total?: number;
 }
 
 export interface DeliveryAttemptPage {

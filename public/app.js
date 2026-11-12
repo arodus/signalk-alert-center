@@ -6,7 +6,6 @@ const state = {
   activeDefinitionIds: new Set(),
   notifiers: [],
   deliveries: [],
-  deliveryTotal: 0,
   alertHistory: [],
   historyLoaded: false,
   deliveryCursor: undefined,
@@ -22,12 +21,14 @@ const state = {
   historyRequest: 0,
   deliveryRequest: 0,
   statusRequest: 0,
+  summaryRequest: 0,
   reloadQueued: false,
   policyDefaults: undefined,
   policyHiddenOverrides: [],
   notifierTestResults: new Map(),
   notifierTestsInFlight: new Set(),
   lastStatus: undefined,
+  lastSummary: undefined,
   authenticated: false,
 };
 const $ = (selector) => document.querySelector(selector);
@@ -861,7 +862,7 @@ function renderAlertHistoryDefinitionOptions() {
 
 async function loadDeliveries(append = false) {
   const request = ++state.deliveryRequest;
-  const params = new URLSearchParams({ limit: "50" });
+  const params = new URLSearchParams({ limit: "50", includeTotal: "false" });
   if (append && state.deliveryCursor)
     params.set("cursor", state.deliveryCursor);
   const page = await api(`/deliveries?${params}`);
@@ -870,9 +871,6 @@ async function loadDeliveries(append = false) {
     ? mergeById(state.deliveries, pageItems(page))
     : pageItems(page);
   state.deliveryCursor = page.nextCursor;
-  state.deliveryTotal = page.total ?? state.deliveries.length;
-  elements.deliveryTabCount.textContent = state.deliveryTotal;
-  elements.deliveryTabCount.hidden = false;
   renderDeliveries(state.deliveries);
 }
 async function loadAlertHistory(append = false, preserveLoadedHistory = false) {
@@ -898,18 +896,31 @@ function loadVisibleView(preserveLoadedHistory = false) {
   if (state.view === "deliveries") void loadDeliveries().catch(showError);
   if (state.selectedDelivery) void refreshDeliveryDetail().catch(showError);
 }
-async function loadStatus() {
+async function loadSummary() {
+  const request = ++state.summaryRequest;
+  const summary = await api("/summary");
+  if (request !== state.summaryRequest) return;
+  elements.pendingCount.textContent = summary.alerts?.pendingDelivery ?? "—";
+  const undelivered = summary.alerts?.undeliveredDelivery;
+  elements.deliveryTabCount.hidden = !Number.isInteger(undelivered);
+  elements.deliveryTabCount.textContent = undelivered ?? "";
+  elements.deliveryTabCount.title = `${undelivered ?? 0} undelivered deliveries, including failures`;
+  elements.connectivityNote.textContent = summary.connectivity?.state
+    ? `Internet ${summary.connectivity.internetAvailability?.state ?? "unknown"} · connectivity ${summary.connectivity.state.toLowerCase()}`
+    : "Connectivity status unavailable";
+  state.lastSummary = summary;
+  state.lastStatus = { ...state.lastStatus, ...summary };
+  if (state.lastStatus.services) renderNotifierTests(state.lastStatus.services);
+  renderSnooze();
+  renderQuietHoursOverride();
+}
+async function loadDiagnostics() {
   const request = ++state.statusRequest;
   const status = await api("/status");
   if (request !== state.statusRequest) return;
-  elements.pendingCount.textContent = status.alerts?.pendingDelivery ?? "—";
-  elements.connectivityNote.textContent = status.connectivity?.state
-    ? `${status.health?.state ?? "unknown"} · Internet ${status.connectivity.internetAvailability?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
-    : "delivery intents waiting";
-  state.lastStatus = status;
+  // Keep the independently refreshed controls and badge count.
+  state.lastStatus = { ...status, ...state.lastSummary };
   renderDiagnostics(status);
-  renderSnooze();
-  renderQuietHoursOverride();
 }
 
 // Coalesce refreshes into the latest queue, retaining the four-request limit.
@@ -946,7 +957,8 @@ async function load(preserveLoadedHistory = false) {
   elements.login.hidden = true;
   // Controls remain read-only until the independent access lookup succeeds.
   void loadAccess();
-  void loadStatus().catch(showError);
+  void loadSummary().catch(showError);
+  if ($(".system-diagnostics").open) void loadDiagnostics().catch(showError);
   loadVisibleView(preserveLoadedHistory);
   try {
     const historyFiltered = hasHistoryFilters();
@@ -1539,6 +1551,9 @@ function selectView(view, moveFocus = false) {
   }
 }
 
+$(".system-diagnostics").addEventListener("toggle", (event) => {
+  if (event.target.open) void loadDiagnostics().catch(showError);
+});
 $("#refresh").addEventListener("click", () => void load());
 elements.notifierTests.addEventListener("click", (event) => {
   const button = event.target.closest("[data-test-notifier]");

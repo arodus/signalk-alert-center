@@ -165,6 +165,7 @@ async function testAuthorization() {
   const deliveryId = encodeURIComponent(deliveries.items[0].id);
   const reads = [
     "/status",
+    "/summary",
     "/alerts",
     "/definitions",
     "/occurrences",
