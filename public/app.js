@@ -6,8 +6,8 @@ const state = {
   activeDefinitionIds: new Set(),
   notifiers: [],
   deliveries: [],
-  deliveryTotal: 0,
   alertHistory: [],
+  historyLoaded: false,
   deliveryCursor: undefined,
   alertHistoryCursor: undefined,
   eventCursor: undefined,
@@ -17,12 +17,18 @@ const state = {
   selectedDefinition: undefined,
   selectedDelivery: undefined,
   loading: false,
+  view: undefined,
+  historyRequest: 0,
+  deliveryRequest: 0,
+  statusRequest: 0,
+  summaryRequest: 0,
   reloadQueued: false,
   policyDefaults: undefined,
   policyHiddenOverrides: [],
   notifierTestResults: new Map(),
   notifierTestsInFlight: new Set(),
   lastStatus: undefined,
+  lastSummary: undefined,
   authenticated: false,
 };
 const $ = (selector) => document.querySelector(selector);
@@ -447,11 +453,11 @@ function renderLiveValues() {
     row.querySelector(".live-age").textContent = liveAgeText(definition);
     const summary = row.querySelector(".alert-summary");
     const occurrence = state.occurrences.find(
-      (item) => item.id === summary.dataset.liveOccurrence,
+      (item) => item.id === summary.dataset.summaryOccurrence,
     );
     if (occurrence && isZoneMessage(occurrence.message)) {
       summary.textContent = [
-        displayedMessage(occurrence, true),
+        displayedMessage(occurrence, Boolean(row.dataset.occurrenceId)),
         definitionZones(definition).length
           ? `Configured zone · ${definitionZones(definition).length} thresholds`
           : "",
@@ -499,6 +505,7 @@ async function loadDisplayUnits(definition) {
       metadata: definition.metadata,
       at: Date.now(),
     });
+    return true;
   } catch {
     // Keep the detail usable when live metadata is unavailable.
   }
@@ -621,7 +628,7 @@ function renderDefinitions() {
                   ? "No active alert has been recorded"
                   : "No alert has been recorded for this definition";
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
-            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-live-occurrence="${active ? escapeHtml(latest.id) : ""}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
+            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-summary-occurrence="${escapeHtml(latest?.id ?? "")}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
             <td data-label="Age" class="live-age" title="Time since the sensor reading">${escapeHtml(liveAgeText(item))}</td>
             <td data-label="Last triggered" class="last-triggered-cell">${item.lastFiredAt ? `<time datetime="${escapeHtml(item.lastFiredAt)}">${escapeHtml(formatDate(item.lastFiredAt))}</time>` : '<span class="muted">Never</span>'}</td>
@@ -861,27 +868,91 @@ function renderAlertHistoryDefinitionOptions() {
 }
 
 async function loadDeliveries(append = false) {
-  const params = new URLSearchParams({ limit: "50" });
+  const request = ++state.deliveryRequest;
+  const params = new URLSearchParams({ limit: "50", includeTotal: "false" });
   if (append && state.deliveryCursor)
     params.set("cursor", state.deliveryCursor);
   const page = await api(`/deliveries?${params}`);
+  if (request !== state.deliveryRequest) return;
   state.deliveries = append
     ? mergeById(state.deliveries, pageItems(page))
     : pageItems(page);
   state.deliveryCursor = page.nextCursor;
-  state.deliveryTotal = page.total ?? state.deliveries.length;
-  elements.deliveryTabCount.textContent = state.deliveryTotal;
   renderDeliveries(state.deliveries);
 }
-async function loadAlertHistory(append = false) {
+async function loadAlertHistory(append = false, preserveLoadedHistory = false) {
+  const request = ++state.historyRequest;
   const page = await api(
     `/alert-history?${alertHistoryParams(append ? state.alertHistoryCursor : undefined)}`,
   );
+  if (request !== state.historyRequest) return;
+  state.historyLoaded = true;
+  const previousCursor = state.alertHistoryCursor;
   state.alertHistory = append
     ? mergeById(state.alertHistory, pageItems(page))
-    : pageItems(page);
-  state.alertHistoryCursor = page.nextCursor;
+    : preserveLoadedHistory
+      ? mergeById(pageItems(page), state.alertHistory)
+      : pageItems(page);
+  state.alertHistoryCursor =
+    preserveLoadedHistory && previousCursor ? previousCursor : page.nextCursor;
   renderAlertHistory();
+}
+function loadVisibleView(preserveLoadedHistory = false) {
+  if (state.view === "history")
+    void loadAlertHistory(false, preserveLoadedHistory).catch(showError);
+  if (state.view === "deliveries") void loadDeliveries().catch(showError);
+  if (state.selectedDelivery) void refreshDeliveryDetail().catch(showError);
+}
+async function loadSummary() {
+  const request = ++state.summaryRequest;
+  const summary = await api("/summary");
+  if (request !== state.summaryRequest) return;
+  elements.pendingCount.textContent = summary.alerts?.pendingDelivery ?? "—";
+  const undelivered = summary.alerts?.undeliveredDelivery;
+  elements.deliveryTabCount.hidden = !Number.isInteger(undelivered);
+  elements.deliveryTabCount.textContent = undelivered ?? "";
+  elements.deliveryTabCount.title = `${undelivered ?? 0} undelivered deliveries, including failures`;
+  elements.connectivityNote.textContent = summary.connectivity?.state
+    ? `Internet ${summary.connectivity.internetAvailability?.state ?? "unknown"} · connectivity ${summary.connectivity.state.toLowerCase()}`
+    : "Connectivity status unavailable";
+  state.lastSummary = summary;
+  state.lastStatus = { ...state.lastStatus, ...summary };
+  if (state.lastStatus.services) renderNotifierTests(state.lastStatus.services);
+  renderSnooze();
+  renderQuietHoursOverride();
+}
+async function loadDiagnostics() {
+  const request = ++state.statusRequest;
+  const status = await api("/status");
+  if (request !== state.statusRequest) return;
+  // Keep the independently refreshed controls and badge count.
+  state.lastStatus = { ...status, ...state.lastSummary };
+  renderDiagnostics(status);
+}
+
+// Coalesce refreshes into the latest queue, retaining the four-request limit.
+// Optional metadata never holds up the alert list or its live updates.
+let metadataQueue = [];
+let metadataLoading = false;
+async function loadMetadataInBackground() {
+  metadataQueue = [...state.definitions];
+  if (metadataLoading) return;
+  metadataLoading = true;
+  try {
+    while (metadataQueue.length) {
+      const updated = await Promise.all(
+        metadataQueue.splice(0, 4).map(loadDisplayUnits),
+      );
+      if (!updated.some(Boolean)) continue;
+      renderLiveValues();
+      if (state.view === "history" && state.historyLoaded) renderAlertHistory();
+    }
+    for (const path of displayMetadata.keys())
+      if (!state.definitions.some((item) => item.pathPattern === path))
+        displayMetadata.delete(path);
+  } finally {
+    metadataLoading = false;
+  }
 }
 async function load(preserveLoadedHistory = false) {
   if (state.loading) {
@@ -891,83 +962,40 @@ async function load(preserveLoadedHistory = false) {
   state.loading = true;
   elements.error.hidden = true;
   elements.login.hidden = true;
+  // Controls remain read-only until the independent access lookup succeeds.
+  void loadAccess();
+  void loadSummary().catch(showError);
+  if ($(".system-diagnostics").open) void loadDiagnostics().catch(showError);
+  loadVisibleView(preserveLoadedHistory);
   try {
-    await loadAccess();
-    const [
-      definitions,
-      activeOccurrences,
-      occurrences,
-      notifiers,
-      status,
-      deliveryPage,
-      alertHistoryPage,
-    ] = await Promise.all([
+    const historyFiltered = hasHistoryFilters();
+    const [definitions, activeOccurrences, occurrences] = await Promise.all([
       allPages("/definitions"),
       allPages("/occurrences?state=active"),
-      hasHistoryFilters()
+      historyFiltered
         ? allPages(`/occurrences?${occurrenceParams()}`)
         : api("/occurrences?limit=100"),
-      api("/notifiers"),
-      api("/status").catch(() => ({})),
-      api("/deliveries?limit=50"),
-      api(`/alert-history?${alertHistoryParams()}`),
     ]);
     state.definitions = definitions;
-    for (let index = 0; index < definitions.length; index += 4)
-      await Promise.all(
-        definitions.slice(index, index + 4).map(loadDisplayUnits),
-      );
-    for (const path of displayMetadata.keys())
-      if (!definitions.some((item) => item.pathPattern === path))
-        displayMetadata.delete(path);
+    state.activeDefinitionIds = new Set(
+      activeOccurrences.map((item) => item.definitionId),
+    );
+    state.occurrences = historyFiltered
+      ? pageItems(occurrences)
+      : mergeById(activeOccurrences, pageItems(occurrences));
+    renderPathOptions();
+    renderAlertHistoryDefinitionOptions();
+    elements.activeCount.textContent = activeOccurrences.length;
+    elements.definitionCount.textContent = definitions.length;
+    elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    renderDefinitions();
     liveValues.setPaths([
       "environment.mode",
       ...definitions.map((item) =>
         item.pathPattern.replace(/^notifications\./, ""),
       ),
     ]);
-    state.activeDefinitionIds = new Set(
-      activeOccurrences.map((item) => item.definitionId),
-    );
-    renderPathOptions();
-    renderAlertHistoryDefinitionOptions();
-    state.occurrences = hasHistoryFilters()
-      ? pageItems(occurrences)
-      : mergeById(activeOccurrences, pageItems(occurrences));
-    state.notifiers = pageItems(notifiers);
-    state.deliveries = pageItems(deliveryPage);
-    state.deliveryTotal = deliveryPage.total ?? state.deliveries.length;
-    state.deliveryCursor = deliveryPage.nextCursor;
-    const previousHistoryCursor = state.alertHistoryCursor;
-    state.alertHistory = preserveLoadedHistory
-      ? mergeById(pageItems(alertHistoryPage), state.alertHistory)
-      : pageItems(alertHistoryPage);
-    state.alertHistoryCursor =
-      preserveLoadedHistory && previousHistoryCursor
-        ? previousHistoryCursor
-        : alertHistoryPage.nextCursor;
-    elements.activeCount.textContent = activeOccurrences.length;
-    elements.definitionCount.textContent =
-      status.alerts?.definitions ?? state.definitions.length;
-    const pendingDeliveryCount =
-      status.alerts?.pendingDelivery ??
-      state.deliveries.filter(
-        (item) => !["delivered", "failed_terminal"].includes(item.state),
-      ).length;
-    elements.pendingCount.textContent = pendingDeliveryCount;
-    elements.deliveryTabCount.textContent = state.deliveryTotal;
-    elements.connectivityNote.textContent = status.connectivity?.state
-      ? `${status.health?.state ?? "unknown"} · Internet ${status.connectivity.internetAvailability?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
-      : "delivery intents waiting";
-    state.lastStatus = status;
-    renderDiagnostics(status);
-    renderSnooze();
-    renderQuietHoursOverride();
-    elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    renderDefinitions();
-    renderAlertHistory();
-    renderDeliveries(state.deliveries);
-    if (state.selectedDelivery) await refreshDeliveryDetail();
+    void loadMetadataInBackground().catch(showError);
   } catch (error) {
     showError(error);
   } finally {
@@ -1342,7 +1370,13 @@ function updateInheritanceSummary() {
   $("#policy-reset").disabled = count === 0;
 }
 
-function openPolicy(id) {
+async function openPolicy(id) {
+  try {
+    state.notifiers = pageItems(await api("/notifiers"));
+  } catch (error) {
+    showError(error);
+    return;
+  }
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
   const policy = definition.policy ?? {};
@@ -1488,7 +1522,7 @@ async function resetPolicy() {
       item.id === id ? updated : item,
     );
     renderDefinitions();
-    openPolicy(id);
+    await openPolicy(id);
     elements.policyResult.textContent = "Now using global defaults.";
   } catch (error) {
     elements.policyResult.textContent = error.message;
@@ -1497,6 +1531,8 @@ async function resetPolicy() {
 }
 
 function selectView(view, moveFocus = false) {
+  const previousView = state.view;
+  state.view = view;
   $("#alerts-panel").hidden = view !== "alerts";
   $("#alert-history-panel").hidden = view !== "history";
   $("#deliveries-panel").hidden = view !== "deliveries";
@@ -1516,8 +1552,16 @@ function selectView(view, moveFocus = false) {
     "",
     view === "alerts" ? location.pathname : `#${view}`,
   );
+  // The initial load handles deep links; later selections fetch fresh tab data.
+  if (previousView !== undefined && previousView !== view) {
+    elements.error.hidden = true;
+    loadVisibleView();
+  }
 }
 
+$(".system-diagnostics").addEventListener("toggle", (event) => {
+  if (event.target.open) void loadDiagnostics().catch(showError);
+});
 $("#refresh").addEventListener("click", () => void load());
 elements.notifierTests.addEventListener("click", (event) => {
   const button = event.target.closest("[data-test-notifier]");
@@ -1529,7 +1573,7 @@ $("#history-filters").addEventListener("submit", (event) => {
 });
 $("#alert-history-filters").addEventListener("submit", (event) => {
   event.preventDefault();
-  void loadAlertHistory();
+  void loadAlertHistory().catch(showError);
 });
 $("#history-event-filter").addEventListener("change", () =>
   loadAlertHistory().catch(showError),
@@ -1542,7 +1586,7 @@ $("#history-definition-filter").addEventListener("change", () =>
 );
 $("#alert-history-clear").addEventListener("click", () => {
   $("#alert-history-filters").reset();
-  void loadAlertHistory();
+  void loadAlertHistory().catch(showError);
 });
 $("#state-filter").addEventListener("change", () => void load());
 $("#alert-search").addEventListener("input", renderDefinitions);

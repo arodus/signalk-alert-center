@@ -21,8 +21,9 @@ import {
   WyomingPlaybackRecord,
   WyomingPlaybackState,
 } from "../alerts/types";
-import { currentSchemaVersion, schema } from "./schema";
+import { currentSchemaVersion, deliveryPrioritySql, schema } from "./schema";
 import {
+  migrateDeliveryHistoryIndex,
   migrateLegacyRepeatSchema,
   migrateMessageSamples,
   migrateSuppression,
@@ -311,12 +312,16 @@ export class AlertDatabase {
       const soundMigrationApplied = soundMigrationResults.some(Boolean);
       const samplesMigrationApplied = migrateMessageSamples(this.db);
       const suppressionMigrationApplied = migrateSuppression(this.db);
+      const deliveryHistoryMigrationApplied = migrateDeliveryHistoryIndex(
+        this.db,
+      );
       this.db.exec("COMMIT");
       this.migrationApplied =
         repeatMigrationApplied ||
         playbackMigrationApplied ||
         samplesMigrationApplied ||
         suppressionMigrationApplied ||
+        deliveryHistoryMigrationApplied ||
         soundMigrationApplied;
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -1788,7 +1793,16 @@ export class AlertDatabase {
   pendingDeliveryCount(): number {
     const row = this.db
       .prepare(
-        "SELECT COUNT(*) AS count FROM deliveries WHERE state NOT IN ('delivered', 'failed_terminal', 'suppressed')",
+        "SELECT COUNT(*) AS count FROM deliveries WHERE state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')",
+      )
+      .get() as Row;
+    return Number(row.count);
+  }
+
+  undeliveredDeliveryCount(): number {
+    const row = this.db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM deliveries WHERE state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'failed_terminal', 'paused')",
       )
       .get() as Row;
     return Number(row.count);
@@ -1986,54 +2000,64 @@ export class AlertDatabase {
   }
 
   listRecentDeliveries(limit = 100): DeliveryRecord[] {
-    return this.queryDeliveries(limit).items;
+    return this.queryDeliveries(limit, undefined, false).items;
   }
 
-  queryDeliveries(limit = 30, cursor?: string): DeliveryPage {
+  queryDeliveries(
+    limit = 30,
+    cursor?: string,
+    includeTotal = true,
+  ): DeliveryPage {
     const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-    const total = Number(
-      (this.db.prepare("SELECT COUNT(*) AS count FROM deliveries").get() as Row)
-        .count ?? 0,
-    );
-    let cursorPriority: number | undefined;
-    let cursorRowId: number | undefined;
+    const totals = includeTotal
+      ? {
+          total: Number(
+            (
+              this.db
+                .prepare("SELECT COUNT(*) AS count FROM deliveries")
+                .get() as Row
+            ).count,
+          ),
+        }
+      : {};
+    let priority = 0;
+    let beforeRowId: number | undefined;
     if (cursor) {
       const row = this.db
         .prepare(
-          `SELECT rowid,
-                  CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                       THEN 0 ELSE 1 END AS priority
-           FROM deliveries WHERE id=?`,
+          `SELECT rowid, ${deliveryPrioritySql} AS priority FROM deliveries WHERE id=?`,
         )
         .get(cursor) as Row | undefined;
-      if (!row) return { items: [], total };
-      cursorPriority = Number(row.priority);
-      cursorRowId = Number(row.rowid);
+      if (!row) return { items: [], ...totals };
+      priority = Number(row.priority);
+      beforeRowId = Number(row.rowid);
     }
-    const rows = this.db
-      .prepare(
-        `${deliveryContextSelect}
-         WHERE ? IS NULL
-            OR CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                    THEN 0 ELSE 1 END > ?
-            OR (CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                     THEN 0 ELSE 1 END = ? AND d.rowid < ?)
-         ORDER BY CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                       THEN 0 ELSE 1 END,
-                  d.rowid DESC LIMIT ?`,
-      )
-      .all(
-        cursorPriority ?? null,
-        cursorPriority ?? null,
-        cursorPriority ?? null,
-        cursorRowId ?? null,
-        boundedLimit + 1,
-      ) as Row[];
-    const selected = rows.slice(0, boundedLimit).map(deliveryRecord);
+    // Seek each priority range separately. The index includes the implicit rowid;
+    // neither a whole-history sort nor context joins are needed to choose a page.
+    const ids: string[] = [];
+    for (; priority <= 1 && ids.length <= boundedLimit; priority++) {
+      const rows = this.db
+        .prepare(
+          `SELECT id FROM deliveries WHERE ${deliveryPrioritySql} = ?
+         ${beforeRowId === undefined ? "" : "AND rowid < ?"}
+         ORDER BY rowid DESC LIMIT ?`,
+        )
+        .all(
+          ...(beforeRowId === undefined
+            ? [priority, boundedLimit + 1 - ids.length]
+            : [priority, beforeRowId, boundedLimit + 1 - ids.length]),
+        ) as Row[];
+      ids.push(...rows.map((row) => String(row.id)));
+      beforeRowId = undefined;
+    }
+    const context = this.db.prepare(`${deliveryContextSelect} WHERE d.id=?`);
+    const items = ids
+      .slice(0, boundedLimit)
+      .map((id) => deliveryRecord(context.get(id) as Row));
     return {
-      items: selected,
-      nextCursor: rows.length > boundedLimit ? selected.at(-1)?.id : undefined,
-      total,
+      items,
+      nextCursor: ids.length > boundedLimit ? items.at(-1)?.id : undefined,
+      ...totals,
     };
   }
 

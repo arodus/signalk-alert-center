@@ -253,6 +253,21 @@ describe("alert-center routes", () => {
     expect(busy.body).toMatchObject({ error: { code: "TEST_IN_PROGRESS" } });
   });
 
+  it("validates optional lifetime totals without changing delivery pagination", async () => {
+    const current = fixture();
+    await current.invoke("GET", "/deliveries", {
+      query: { includeTotal: "false", limit: "2" },
+    });
+    expect(current.queries.at(-1)).toMatchObject({
+      includeTotal: false,
+      limit: 2,
+    });
+    const invalid = await current.invoke("GET", "/deliveries", {
+      query: { includeTotal: "maybe" },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
   it("pages delivery summaries, details, attempts, retries, and deletes", async () => {
     const current = fixture();
     const list = await current.invoke("GET", "/deliveries", {
@@ -266,6 +281,7 @@ describe("alert-center routes", () => {
     expect(current.queries.at(-1)).toEqual({
       limit: 25,
       cursor: "previous",
+      includeTotal: true,
     });
 
     const detail = await current.invoke("GET", "/deliveries/:id", {
@@ -558,7 +574,14 @@ describe("legacy alert routes", () => {
       async (id) => id === "active",
       async () => false,
       (_request, id) => (id === "active" ? true : undefined),
+      () => ({ alerts: { pendingDelivery: 2, undeliveredDelivery: 3 } }),
     );
+
+    const summaryResponse = new FakeResponse();
+    handlers.get("GET /summary")!({}, summaryResponse);
+    expect(summaryResponse.body).toEqual({
+      alerts: { pendingDelivery: 2, undeliveredDelivery: 3 },
+    });
 
     const invoke = async (path: string, id: string) => {
       const response = new FakeResponse();
@@ -699,6 +722,7 @@ describe("occurrence authorization", () => {
         acknowledge,
         silence,
         () => false,
+        () => ({}),
       );
       const response = new FakeResponse();
       handlers.get(`POST /alerts/:id/${action}`)!(

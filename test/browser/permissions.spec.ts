@@ -31,7 +31,7 @@ for (const role of [
     );
     // Keep snooze status visible to every role, independently of its controls.
     const status = await (await request.get(`${plugin}/status`)).json();
-    await page.route(`**${plugin}/status`, async (route) => {
+    await page.route(`**${plugin}/summary`, async (route) => {
       await route.fulfill({
         json: {
           ...status,

@@ -80,7 +80,7 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   expect(
     await page.locator("#history-severity-filter option").allTextContents(),
   ).toEqual(["All", "emergency", "alarm", "warn", "alert", "normal"]);
-  await expect(page.locator("#health-state")).toHaveText(/healthy|degraded/);
+  await expect(page.locator("#health-state")).toHaveText("Not checked");
   const diagnostics = page.locator(".system-diagnostics");
   await expect(diagnostics).not.toHaveAttribute("open", "");
   expect(
@@ -98,6 +98,7 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await diagnosticsSummary.focus();
   await diagnosticsSummary.press("Enter");
   await expect(diagnostics).toHaveAttribute("open", "");
+  await expect(page.locator("#health-state")).toHaveText(/healthy|degraded/);
   await expect(page.locator("#diagnostics-list")).toContainText("Database");
   await expect(page.locator("#diagnostics-list")).toContainText(
     "Startup reconciliation",
@@ -361,12 +362,15 @@ test("opens, retries, and deletes failed deliveries", async ({ page }) => {
   );
 
   await page.goto("/signalk-alert-center/");
-  await expect(page.locator("#delivery-tab-count")).toHaveText("7");
   await expect(page.locator("#alerts-panel")).toBeVisible();
   await expect(page.locator("#deliveries-panel")).toBeHidden();
   await page.getByRole("tab", { name: /Deliveries/ }).click();
   await expect(page.locator("#alerts-panel")).toBeHidden();
   await expect(page.locator("#deliveries-panel")).toBeVisible();
+  await expect(page.locator("#delivery-tab-count")).toHaveAttribute(
+    "title",
+    /undelivered/,
+  );
   await page.locator("[data-delivery-id='delivery-1']").click();
   await expect(page.locator("#delivery-dialog")).toBeVisible();
   await expect(page.locator("#delivery-dialog-body")).toContainText(

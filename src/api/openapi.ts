@@ -35,11 +35,20 @@ const occurrenceWriteDescription =
   "Requires Signal K readwrite or admin access and ACL put permission on the occurrence's exact notifications.* path in vessels.self. Returns 403 before any upstream or local change when permission is denied or the permission checker is unavailable.";
 const page = (item: string, includeTotal = false) => ({
   type: "object",
-  required: ["items", ...(includeTotal ? ["total"] : [])],
+  required: ["items"],
   properties: {
     items: { type: "array", items: { $ref: item } },
     nextCursor: { type: "string" },
-    ...(includeTotal ? { total: { type: "integer", minimum: 0 } } : {}),
+    ...(includeTotal
+      ? {
+          total: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Lifetime delivery total; omitted when includeTotal=false.",
+          },
+        }
+      : {}),
   },
 });
 
@@ -140,10 +149,33 @@ export function getAlertCenterOpenApi() {
           },
         },
       },
+      "/summary": {
+        get: {
+          summary: "Get lightweight dashboard counts and current controls",
+          description:
+            "Uses indexed unfinished-delivery counts without aggregating historical occurrences or service diagnostics.",
+          responses: {
+            "200": response("Dashboard summary", {
+              $ref: "#/components/schemas/DashboardSummary",
+            }),
+            ...errors,
+          },
+        },
+      },
       "/deliveries": {
         get: {
           summary: "List recent delivery intents and their latest outcome",
-          parameters: pageParameters,
+          parameters: [
+            ...pageParameters,
+            {
+              name: "includeTotal",
+              in: "query",
+              required: false,
+              description:
+                "Set false to skip counting the lifetime delivery history. Items and cursor pagination are unchanged.",
+              schema: { type: "boolean", default: true },
+            },
+          ],
           responses: {
             "200": response(
               "Delivery page",
@@ -579,6 +611,43 @@ export function getAlertCenterOpenApi() {
             enabled: { type: "boolean" },
             updatedAt: { type: "string", format: "date-time" },
             source: { type: "string" },
+          },
+        },
+        DashboardSummary: {
+          type: "object",
+          required: ["alerts", "quietHours", "connectivity"],
+          properties: {
+            alerts: {
+              type: "object",
+              required: ["pendingDelivery", "undeliveredDelivery"],
+              properties: {
+                pendingDelivery: {
+                  type: "integer",
+                  minimum: 0,
+                  description:
+                    "Queued, waiting, sending, retrying, or paused deliveries.",
+                },
+                undeliveredDelivery: {
+                  type: "integer",
+                  minimum: 0,
+                  description:
+                    "Pending deliveries plus terminal failures. Delivered and suppressed items are excluded.",
+                },
+              },
+            },
+            snooze: { $ref: "#/components/schemas/Snooze" },
+            quietHours: { $ref: "#/components/schemas/QuietHoursControl" },
+            connectivity: {
+              type: "object",
+              required: ["state", "internetAvailability"],
+              properties: {
+                state: { type: "string" },
+                internetAvailability: {
+                  type: "object",
+                  additionalProperties: true,
+                },
+              },
+            },
           },
         },
         OperationalStatus: {

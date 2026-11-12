@@ -188,6 +188,27 @@ const activeRemoval = await fetch(
 );
 assert.equal(activeRemoval.status, 409);
 
+const summary = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/summary`,
+);
+assert.equal(typeof summary.alerts.undeliveredDelivery, "number");
+assert.equal(
+  summary.alerts.undeliveredDelivery >= summary.alerts.pendingDelivery,
+  true,
+);
+assert.equal(Object.hasOwn(summary, "database"), false);
+const withoutTotal = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/deliveries?limit=1&includeTotal=false`,
+);
+assert.equal(Object.hasOwn(withoutTotal, "total"), false);
+const withTotal = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/deliveries?limit=1`,
+);
+assert.equal(typeof withTotal.total, "number");
+assert.deepEqual(
+  withoutTotal.items.map((item) => item.id),
+  withTotal.items.map((item) => item.id),
+);
 const status = await json(`${signalkUrl}/plugins/signalk-alert-center/status`);
 assert.equal(status.alerts.total >= 1, true);
 assert.equal(
@@ -195,7 +216,7 @@ assert.equal(
   true,
 );
 assert.equal(status.database.healthy, true);
-assert.equal(status.database.schemaVersion, 3);
+assert.equal(status.database.schemaVersion, 4);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);

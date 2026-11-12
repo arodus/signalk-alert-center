@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { currentSchemaVersion, deliveryHistoryIndex } from "./schema";
 
 type Row = Record<string, unknown>;
 
@@ -254,7 +255,7 @@ export function migrateMessageSamples(database: DatabaseSync): boolean {
   const version = Number(
     (database.prepare("PRAGMA user_version").get() as Row).user_version,
   );
-  if (version > 3)
+  if (version > currentSchemaVersion)
     throw new Error("Alert Center database was created by a newer version");
   if (version >= 2) return false;
   let changed = false;
@@ -275,5 +276,16 @@ export function migrateSuppression(database: DatabaseSync): boolean {
   );
   if (version >= 3) return false;
   database.exec("PRAGMA user_version = 3");
+  return true;
+}
+
+/** Version 4: bounded pending-first delivery history, inside the schema transaction. */
+export function migrateDeliveryHistoryIndex(database: DatabaseSync): boolean {
+  const version = Number(
+    (database.prepare("PRAGMA user_version").get() as Row).user_version,
+  );
+  if (version >= 4) return false;
+  database.exec(deliveryHistoryIndex);
+  database.exec("PRAGMA user_version = 4");
   return true;
 }

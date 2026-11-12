@@ -221,6 +221,21 @@ export class AlertCenterRuntime {
     }
   }
 
+  summary() {
+    return {
+      alerts: {
+        pendingDelivery: this.database?.pendingDeliveryCount() ?? 0,
+        undeliveredDelivery: this.database?.undeliveredDeliveryCount() ?? 0,
+      },
+      snooze: this.snoozeStatus(),
+      quietHours: this.suppression?.getQuietHoursControl() ?? { enabled: true },
+      connectivity: {
+        state: this.connectivity?.state ?? "OFF",
+        internetAvailability: this.internet?.status() ?? { state: "unknown" },
+      },
+    };
+  }
+
   status() {
     const alertStats = this.database?.alertStats();
     const database = this.database?.operationalStatus();
@@ -1573,7 +1588,11 @@ export class AlertCenterRuntime {
       },
       listAlertHistory: (query) => this.db().queryAlertHistory(query),
       listDeliveries: (query) => {
-        const page = this.db().queryDeliveries(query.limit, query.cursor);
+        const page = this.db().queryDeliveries(
+          query.limit,
+          query.cursor,
+          query.includeTotal,
+        );
         return {
           items: page.items.map((delivery) => this.deliveryView(delivery)),
           nextCursor: page.nextCursor,
@@ -2068,6 +2087,7 @@ export class AlertCenterRuntime {
         return Boolean(result && result !== "inactive");
       },
       canChangeOccurrence,
+      () => this.summary(),
     );
     registerAlertCenterRoutes(compatible, {
       canChangeOccurrence,

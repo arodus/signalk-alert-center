@@ -44,6 +44,7 @@ export interface AlertHistoryQuery extends EventQuery {
   to?: Date;
 }
 export interface DeliveryQuery {
+  includeTotal?: boolean;
   limit: number;
   cursor?: string;
 }
@@ -914,7 +915,13 @@ export function registerAlertCenterRoutes(
     "/deliveries",
     "readonly",
     wrap(async (req, res) =>
-      res.json(await repo().listDeliveries(pagination(req.query ?? {}))),
+      res.json(
+        await repo().listDeliveries({
+          ...pagination(req.query ?? {}),
+          includeTotal:
+            boolParam(req.query?.includeTotal, "includeTotal") ?? true,
+        }),
+      ),
     ),
   );
   addRoute(
@@ -1035,7 +1042,11 @@ export function registerRoutes(
   acknowledgeAlert: (id: string) => MaybePromise<boolean>,
   silenceAlert: (id: string) => MaybePromise<boolean>,
   canChangeOccurrence: OccurrenceWriteAuthorization,
+  summary: () => unknown,
 ): void {
+  addRoute(router, "get", "/summary", "readonly", (_req, res) =>
+    res.json(summary()),
+  );
   addRoute(router, "get", "/status", "readonly", (_req, res) =>
     res.json(status()),
   );

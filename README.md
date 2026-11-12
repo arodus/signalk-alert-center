@@ -152,7 +152,19 @@ You can configure:
 
 **Alert history** is a chronological record of Signal K alert changes. It is
 separate from **Deliveries**, which tracks attempts to send those alerts to
-notification services.
+notification services. These tabs load when selected. The Deliveries badge counts
+undelivered items, including queued, retrying, paused, and permanently failed
+attempts; completed and suppressed deliveries remain in the full history but are
+excluded from the badge. The alert list loads independently, with preferred units
+filled in as background metadata requests complete. Detailed diagnostics load when
+the System diagnostics section is expanded.
+
+The dashboard uses a lightweight `/summary` endpoint and requests delivery pages
+with `includeTotal=false` to avoid counting the full history. Other API clients
+retain the existing `/status` response and lifetime delivery totals by default.
+Database schema version 4 adds an index automatically on upgrade; the first startup
+may take longer while SQLite builds it. Existing history, settings, and pending
+work are preserved, and no reset is required.
 
 ![Chronological Signal K alert changes, separate from delivery attempts](./docs/screenshots/alert-history.png)
 
