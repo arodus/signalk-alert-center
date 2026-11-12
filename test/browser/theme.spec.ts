@@ -114,6 +114,32 @@ test("falls back to device for missing, invalid and inaccessible mode and recove
   }
 });
 
+test("follows rapid mode changes after reading the preceding value", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#definition-list tbody tr").first()).toBeVisible();
+  await expect(page.locator("#theme-status")).toHaveText(
+    "Light · following Signal K",
+  );
+  // Change the mode again as soon as its preceding REST read reaches the UI.
+  // A leading-only one-second stream debounce loses these later transitions.
+  for (const value of ["night", "unknown", "night", null, "night", "day"]) {
+    const response = await request.post(`${fixture}/reading`, {
+      data: { path: "environment.mode", value },
+    });
+    expect(response.ok()).toBe(true);
+    await expect(page.locator("#theme-status")).toHaveText(
+      value === "night"
+        ? "Dark · following Signal K"
+        : value === "day"
+          ? "Light · following Signal K"
+          : "Light · following device",
+    );
+  }
+});
+
 test("keeps browser choices separate, synchronizes tabs and resets when storage clears", async ({
   page,
   context,
