@@ -34,7 +34,10 @@ class AlertLiveValues {
           subscribe: [...this.paths].map((path) => ({
             path,
             policy: "instant",
-            minPeriod: 1000,
+            // The server's leading-only debounce can discard the last change
+            // in a burst. Mode changes must always wake a priority-resolved read;
+            // the client still coalesces those reads below.
+            minPeriod: path === "environment.mode" ? 0 : 1000,
           })),
         }),
       );

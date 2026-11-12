@@ -15,6 +15,8 @@ Versioning while it remains pre-1.0.
 
 ### Fixes
 
+- Keep automatic appearance in sync when Signal K's day/night mode changes
+  rapidly, including falling back to the device after an invalid or cleared mode.
 - Show the alert list as soon as its alert data arrives, without waiting for
   units metadata, login status, or diagnostics. Load units in the background
   and fetch history and deliveries only when their tab is selected. The delivery
