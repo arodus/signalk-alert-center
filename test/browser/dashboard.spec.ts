@@ -361,12 +361,12 @@ test("opens, retries, and deletes failed deliveries", async ({ page }) => {
   );
 
   await page.goto("/signalk-alert-center/");
-  await expect(page.locator("#delivery-tab-count")).toHaveText("7");
   await expect(page.locator("#alerts-panel")).toBeVisible();
   await expect(page.locator("#deliveries-panel")).toBeHidden();
   await page.getByRole("tab", { name: /Deliveries/ }).click();
   await expect(page.locator("#alerts-panel")).toBeHidden();
   await expect(page.locator("#deliveries-panel")).toBeVisible();
+  await expect(page.locator("#delivery-tab-count")).toHaveText("7");
   await page.locator("[data-delivery-id='delivery-1']").click();
   await expect(page.locator("#delivery-dialog")).toBeVisible();
   await expect(page.locator("#delivery-dialog-body")).toContainText(

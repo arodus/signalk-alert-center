@@ -134,7 +134,9 @@ You can configure:
 
 **Alert history** is a chronological record of Signal K alert changes. It is
 separate from **Deliveries**, which tracks attempts to send those alerts to
-notification services.
+notification services. These tabs load when selected; the Deliveries count appears
+once that tab has loaded. The alert list loads independently, with preferred units
+filled in as background metadata requests complete.
 
 ![Chronological Signal K alert changes, separate from delivery attempts](./docs/screenshots/alert-history.png)
 
