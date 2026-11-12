@@ -164,7 +164,10 @@ with `includeTotal=false` to avoid counting the full history. Other API clients
 retain the existing `/status` response and lifetime delivery totals by default.
 Database schema version 4 adds an index automatically on upgrade; the first startup
 may take longer while SQLite builds it. Existing history, settings, and pending
-work are preserved, and no reset is required.
+work are preserved, and no reset is required. Stop Signal K and back up the
+Alert Center SQLite database before upgrading. Version 0.7.0 cannot open the
+upgraded database; rollback requires the older package and the pre-upgrade backup,
+which does not contain history or delivery progress recorded after that backup.
 
 ![Chronological Signal K alert changes, separate from delivery attempts](./docs/screenshots/alert-history.png)
 
@@ -291,7 +294,7 @@ npm ci
 npm run build
 npm pack
 cd ~/.signalk
-npm install /path/to/signalk-alert-center-0.6.0.tgz
+npm install /path/to/signalk-alert-center-0.8.0.tgz
 ```
 
 Restart Signal K after installation. Docker installations should run the final

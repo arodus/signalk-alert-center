@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-12
+
 ### Features
 
 - Add a sun/moon appearance menu to Alert Center. Auto (the default) follows
@@ -29,6 +31,13 @@ Versioning while it remains pre-1.0.
 - Automatically upgrade storage to schema version 4 with a delivery-history index.
   The first startup may take longer while the index builds. History, settings, and
   pending work are preserved; no reset or configuration change is needed.
+
+### Upgrade and rollback
+
+- Stop Signal K and back up the Alert Center SQLite database before upgrading.
+  Version 0.7.0 rejects the upgraded schema; rolling back requires both the older
+  package and the pre-upgrade database backup. Restoring that backup also discards
+  history and delivery progress recorded after it was taken.
 
 ## [0.7.0] - 2026-11-11
 
