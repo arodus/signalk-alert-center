@@ -11,6 +11,10 @@ import { AlertDatabase } from "../src/storage/db";
 
 const collision =
   "notifications.navigation.closestApproach.urn:mrn:imo:mmsi:244954000";
+const coursePaths = [
+  "notifications.navigation.course.arrivalCircleEntered",
+  "notifications.navigation.course.perpendicularPassed",
+];
 const battery = "notifications.electrical.batteries.house.voltage";
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -45,9 +49,28 @@ describe("ignored notification paths", () => {
     expect(ignoredPathMatcher([])(collision)).toBe(false);
   });
 
-  it("defaults to ignoring collision paths and rejects malformed configuration", () => {
+  it("keeps other course paths and honors explicit lists without adding defaults", () => {
+    const ignored = ignoredPathMatcher();
+    for (const path of coursePaths) {
+      expect(ignored(path)).toBe(true);
+      expect(ignored(path.replace(/^notifications\./, ""))).toBe(true);
+      expect(ignored(`${path}.extra`)).toBe(false);
+      expect(ignoredPathMatcher([])(path)).toBe(false);
+      expect(ignoredPathMatcher(["navigation.closestApproach.*"])(path)).toBe(
+        false,
+      );
+      expect(ignoredPathMatcher([coursePaths[0]])(path)).toBe(
+        path === coursePaths[0],
+      );
+    }
+    expect(ignored("notifications.navigation.course.offCourse")).toBe(false);
+  });
+
+  it("defaults to ignoring collision and exact waypoint paths and rejects malformed configuration", () => {
     expect(pluginConfigSchema.properties.ignoredPaths.default).toEqual([
       "navigation.closestApproach.*",
+      "navigation.course.arrivalCircleEntered",
+      "navigation.course.perpendicularPassed",
     ]);
     for (const config of [
       {},
@@ -71,147 +94,157 @@ describe("ignored notification paths", () => {
     }
   });
 
-  it("filters live updates, startup snapshots and zone refreshes, preserving stored work across restart", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "ignored-paths-"));
-    let subscriber: (delta: unknown) => void = () => {};
-    const self = {
-      navigation: {
-        closestApproach: {
-          zoned: { meta: { zones: [{ state: "alarm", upper: 100 }] } },
-        },
-      },
-      electrical: {
-        batteries: {
-          house: {
-            voltage: { meta: { zones: [{ state: "alarm", upper: 12 }] } },
-          },
-        },
-      },
-      notifications: {
+  it.each([collision, ...coursePaths])(
+    "filters %s live updates and snapshots, preserving stored work across restart",
+    async (ignoredPath) => {
+      const directory = mkdtempSync(join(tmpdir(), "ignored-paths-"));
+      let subscriber: (delta: unknown) => void = () => {};
+      const self = {
         navigation: {
           closestApproach: {
-            "urn:mrn:imo:mmsi:244954000": {
-              value: { state: "alarm", message: "Collision snapshot" },
-              $source: "fixture",
+            zoned: { meta: { zones: [{ state: "alarm", upper: 100 }] } },
+          },
+        },
+        electrical: {
+          batteries: {
+            house: {
+              voltage: { meta: { zones: [{ state: "alarm", upper: 12 }] } },
             },
           },
         },
-      },
-    };
-    const app = {
-      debug: vi.fn(),
-      error: vi.fn(),
-      handleMessage: vi.fn(),
-      setPluginStatus: vi.fn(),
-      getDataDirPath: () => directory,
-      selfContext: "vessels.self",
-      getPath: (path: string) =>
-        path === "vessels.self.notifications" ? self.notifications : self,
-      getSelfPath: (path: string) =>
-        path === "network.internet.state" ? "offline" : undefined,
-      subscriptionmanager: {
-        subscribe: (
-          command: { subscribe: Array<{ path: string }> },
-          unsubscribes: Array<() => void>,
-          _error: unknown,
-          callback: (delta: unknown) => void,
-        ) => {
-          if (command.subscribe.some(({ path }) => path === "notifications.*"))
-            subscriber = callback;
-          unsubscribes.push(vi.fn());
+        notifications: ignoredPath
+          .replace(/^notifications\./, "")
+          .split(".")
+          .reduceRight<Record<string, unknown>>(
+            (value, segment) => ({ [segment]: value }),
+            {
+              value: { state: "alert", message: "Ignored snapshot" },
+              $source: "fixture",
+            },
+          ),
+      };
+      const app = {
+        debug: vi.fn(),
+        error: vi.fn(),
+        handleMessage: vi.fn(),
+        setPluginStatus: vi.fn(),
+        getDataDirPath: () => directory,
+        selfContext: "vessels.self",
+        getPath: (path: string) =>
+          path === "vessels.self.notifications" ? self.notifications : self,
+        getSelfPath: (path: string) =>
+          path === "network.internet.state" ? "offline" : undefined,
+        subscriptionmanager: {
+          subscribe: (
+            command: { subscribe: Array<{ path: string }> },
+            unsubscribes: Array<() => void>,
+            _error: unknown,
+            callback: (delta: unknown) => void,
+          ) => {
+            if (
+              command.subscribe.some(({ path }) => path === "notifications.*")
+            )
+              subscriber = callback;
+            unsubscribes.push(vi.fn());
+          },
         },
-      },
-    } as unknown as ServerAPI;
-    const runtime = new AlertCenterRuntime(app);
-    const config: PluginConfig = {
-      defaults: { notifiers: ["Crew"], connectivity: { mode: "wake" } },
-      notifiers: [
-        {
-          name: "Crew",
-          type: "ntfy",
-          server: "http://notifier.invalid",
-          topic: "test",
+      } as unknown as ServerAPI;
+      const runtime = new AlertCenterRuntime(app);
+      const config: PluginConfig = {
+        defaults: {
+          minSeverity: "alert",
+          notifiers: ["Crew"],
+          connectivity: { mode: "wake" },
         },
-      ],
-    };
-    const db = () =>
-      (runtime as unknown as { database: AlertDatabase }).database;
-    const send = (path: string, value: unknown) =>
-      subscriber({
-        updates: [{ $source: "fixture", values: [{ path, value }] }],
-      });
-    try {
-      runtime.start(config);
-      // The filter runs before queueing, even during startup reconciliation.
-      for (let i = 0; i < 100; i += 1)
-        send(`${collision}.${i}`, { state: "alarm" });
-      send(battery, { state: "alarm", message: "Low voltage" });
-      await vi.waitFor(() => expect(db().listOccurrences()).toHaveLength(1));
-      expect(runtime.status().ingestion.received).toBe(1);
-      expect(
-        db()
-          .listDefinitions()
-          .map((item) => item.pathPattern),
-      ).toEqual([battery]);
-      expect(db().listOccurrences()[0].path).toBe(battery);
-      expect(db().listDeliveries()).toHaveLength(1);
-      expect(db().listWakeRequests()).toHaveLength(1);
-      expect(
-        db()
-          .listAlertEvents()
-          .every((event) => event.alertId === db().listOccurrences()[0].id),
-      ).toBe(true);
-      send(collision, { state: "emergency" });
-      send(collision, null);
-      // Exercise the same discovery method used by the periodic refresh.
-      (runtime as unknown as { seedDefinitions(): void }).seedDefinitions();
-      await flush();
-      expect(db().listDefinitions()).toHaveLength(1);
-      expect(runtime.status().ingestion.received).toBe(1);
-      await runtime.stop();
-
-      // Removing the filter resumes discovery and ingests the current snapshot.
-      runtime.start({ ...config, ignoredPaths: [] });
-      await vi.waitFor(() => expect(db().listOccurrences()).toHaveLength(2));
-      const previous = db()
-        .listOccurrences()
-        .find((item) => item.path === collision)!;
-      const definition = db().getDefinition(previous.definitionId!);
-      const policy = db().setPolicy(definition.id, {
-        enabled: false,
-        notifierIds: [],
-        notifierRepeatOverrides: {},
-        overrideFields: ["enabled"],
-      });
-      const events = db().listAlertEvents(previous.id);
-      await vi.waitFor(() =>
+        notifiers: [
+          {
+            name: "Crew",
+            type: "ntfy",
+            server: "http://notifier.invalid",
+            topic: "test",
+          },
+        ],
+      };
+      const db = () =>
+        (runtime as unknown as { database: AlertDatabase }).database;
+      const send = (path: string, value: unknown) =>
+        subscriber({
+          updates: [{ $source: "fixture", values: [{ path, value }] }],
+        });
+      try {
+        runtime.start(config);
+        // The filter runs before queueing, even during startup reconciliation.
+        for (let i = 0; i < 100; i += 1)
+          send(`${collision}.${i}`, { state: "alarm" });
+        send(battery, { state: "alarm", message: "Low voltage" });
+        await vi.waitFor(() => expect(db().listOccurrences()).toHaveLength(1));
+        expect(runtime.status().ingestion.received).toBe(1);
         expect(
           db()
-            .listDeliveries()
-            .every((item) => item.state === "waiting_connectivity"),
-        ).toBe(true),
-      );
-      const deliveries = db().listDeliveries();
-      await runtime.stop();
+            .listDefinitions()
+            .map((item) => item.pathPattern),
+        ).toEqual([battery]);
+        expect(db().listOccurrences()[0].path).toBe(battery);
+        expect(db().listDeliveries()).toHaveLength(1);
+        expect(db().listWakeRequests()).toHaveLength(1);
+        expect(
+          db()
+            .listAlertEvents()
+            .every((event) => event.alertId === db().listOccurrences()[0].id),
+        ).toBe(true);
+        send(ignoredPath, { state: "emergency" });
+        send(ignoredPath, null);
+        // Exercise the same discovery method used by the periodic refresh.
+        (runtime as unknown as { seedDefinitions(): void }).seedDefinitions();
+        await flush();
+        expect(db().listDefinitions()).toHaveLength(1);
+        expect(runtime.status().ingestion.received).toBe(1);
+        await runtime.stop();
 
-      runtime.start(config);
-      await vi.waitFor(() =>
-        expect(runtime.status().reconciliation.state).toBe("complete"),
-      );
-      send(collision, null);
-      await flush();
-      expect(db().getDefinition(definition.id)).toEqual(definition);
-      expect(db().getPolicy(definition.id)).toEqual(policy);
-      expect(
-        db()
+        // Removing the filter resumes discovery and ingests the current snapshot.
+        runtime.start({ ...config, ignoredPaths: [] });
+        await vi.waitFor(() => expect(db().listOccurrences()).toHaveLength(2));
+        const previous = db()
           .listOccurrences()
-          .find((item) => item.id === previous.id),
-      ).toEqual(previous);
-      expect(db().listAlertEvents(previous.id)).toEqual(events);
-      expect(db().listDeliveries()).toEqual(deliveries);
-    } finally {
-      await runtime.stop();
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
+          .find((item) => item.path === ignoredPath)!;
+        const definition = db().getDefinition(previous.definitionId!);
+        const policy = db().setPolicy(definition.id, {
+          enabled: false,
+          notifierIds: [],
+          notifierRepeatOverrides: {},
+          overrideFields: ["enabled"],
+        });
+        const events = db().listAlertEvents(previous.id);
+        await vi.waitFor(() =>
+          expect(
+            db()
+              .listDeliveries()
+              .every((item) => item.state === "waiting_connectivity"),
+          ).toBe(true),
+        );
+        const deliveries = db().listDeliveries();
+        expect(deliveries).toHaveLength(2);
+        await runtime.stop();
+
+        runtime.start(config);
+        await vi.waitFor(() =>
+          expect(runtime.status().reconciliation.state).toBe("complete"),
+        );
+        send(ignoredPath, null);
+        await flush();
+        expect(db().getDefinition(definition.id)).toEqual(definition);
+        expect(db().getPolicy(definition.id)).toEqual(policy);
+        expect(
+          db()
+            .listOccurrences()
+            .find((item) => item.id === previous.id),
+        ).toEqual(previous);
+        expect(db().listAlertEvents(previous.id)).toEqual(events);
+        expect(db().listDeliveries()).toEqual(deliveries);
+      } finally {
+        await runtime.stop();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });
