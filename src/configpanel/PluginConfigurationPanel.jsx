@@ -24,7 +24,11 @@ const tabs = [
 ];
 
 const defaults = {
-  ignoredPaths: ["navigation.closestApproach.*"],
+  ignoredPaths: [
+    "navigation.closestApproach.*",
+    "navigation.course.arrivalCircleEntered",
+    "navigation.course.perpendicularPassed",
+  ],
   storage: { path: "alert-center.sqlite" },
   snooze: { onlyWhenAnchoredOrMoored: false },
   discovery: { zoneRefreshSeconds: 300 },

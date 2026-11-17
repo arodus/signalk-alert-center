@@ -5,6 +5,13 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixes
+
+- Ignore routine waypoint arrival-circle and perpendicular-passed notifications
+  by default, alongside per-target collision alarms. Existing explicit
+  `ignoredPaths` lists remain unchanged. Remove either exact course path from
+  the list to track and deliver it; other course notifications remain tracked.
+
 ## [0.8.0] - 2026-11-12
 
 ### Features

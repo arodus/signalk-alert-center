@@ -356,26 +356,34 @@ local state-recheck interval remain configurable in Alert Center.
 ## Notification paths to leave out
 
 Under **Storage & advanced → Notification paths to leave out**, enter one
-pattern per line. By default, Alert Center ignores per-target collision alarms:
+pattern per line. By default, Alert Center ignores per-target collision alarms
+and routine waypoint arrival notifications:
 
 ```json
 {
-  "ignoredPaths": ["navigation.closestApproach.*"]
+  "ignoredPaths": [
+    "navigation.closestApproach.*",
+    "navigation.course.arrivalCircleEntered",
+    "navigation.course.perpendicularPassed"
+  ]
 }
 ```
 
 Patterns match the whole notification path, with or without the leading
 `notifications.`. Matching is case-sensitive. Only `*` is special: it matches
 one or more characters, including dots between nested path segments. For example,
-the default matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
+the collision pattern matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
 and `navigation.closestApproach.radar:bridge:1`. An exact path matches only itself.
-Clear the list (or set `ignoredPaths: []`) to track all notification paths.
+The two course paths are exact matches; other course notifications remain tracked.
+Remove either course entry to track and deliver that notification, or clear the
+list (or set `ignoredPaths: []`) to track all notification paths.
 
 Matching updates and clears are skipped before queueing or creating definitions,
 history, deliveries, or connectivity requests. The same filter applies to startup
 snapshots and zone discovery. Other Signal K apps still receive these alerts.
 
-This default also applies after upgrading if `ignoredPaths` has never been set.
+These defaults also apply after upgrading if `ignoredPaths` has never been set.
+An explicitly saved list, including an empty list, is used unchanged.
 Existing definitions, history, per-alert settings, and queued delivery work are
 preserved. Existing occurrences stop receiving updates and clears while their
 path is ignored; ignoring a path does not cancel pending deliveries or wake work.

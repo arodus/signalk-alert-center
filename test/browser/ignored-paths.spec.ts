@@ -38,7 +38,16 @@ test("edits ignored paths, saves patterns, and allows an explicit empty list", a
     ).toBe(true);
     await open();
     const paths = page.getByLabel("Ignored path patterns");
-    await expect(paths).toHaveValue("navigation.closestApproach.*");
+    await expect(paths).toHaveValue(
+      [
+        "navigation.closestApproach.*",
+        "navigation.course.arrivalCircleEntered",
+        "navigation.course.perpendicularPassed",
+      ].join("\n"),
+    );
+    await paths.screenshot({
+      path: `test-results/ignored-path-defaults-${testInfo.project.name}.png`,
+    });
     await paths.fill(
       "navigation.closestApproach.*\n notifications.test.ignored.* \n\n",
     );
