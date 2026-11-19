@@ -1,6 +1,6 @@
 # Core alerts migration
 
-Alert Center consumes both legacy `notifications.*` and the proposed Signal K
+Alert Center consumes both legacy `notifications.*` and the Signal K
 core `alerts.*` API when the server exposes `app.alerts`. Detection and the core
 lifecycle stay with the server and alert producers such as `signalk-alert-rules`.
 Alert Center owns durable delivery, notifier retries, connectivity and Wyoming
@@ -60,7 +60,7 @@ Schema version 5 adds core identity, confirmed-resolution and deferred
 reannouncement fields in a transaction. Upgrades from v3 run v4 and v5 together;
 v4 databases run only v5. History, saved policies, delivery attempts and pending
 work survive the upgrade and restart. An interrupted migration rolls back and
-retries on startup. Back up the database before testing this unreleased build;
+retries on startup. Stop Signal K and back up the database before upgrading to 0.9.0;
 v0.8.0 and older builds cannot open schema version 5. Rollback requires the older
 package and the pre-upgrade database backup.
 
