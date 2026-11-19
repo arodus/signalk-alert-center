@@ -92,6 +92,7 @@ export interface AlertHistoryRecord extends AlertEventRecord {
 }
 
 export interface AlertHistoryQuery {
+  search?: string;
   definitionId?: string;
   path?: string;
   source?: string;
@@ -260,7 +261,7 @@ export interface WyomingPlaybackRecord {
 export interface DeliveryPage {
   items: DeliveryRecord[];
   nextCursor?: string;
-  total: number;
+  total?: number;
 }
 
 export interface DeliveryAttemptPage {
@@ -289,6 +290,7 @@ export interface IngestOptions {
 }
 
 export interface OccurrenceQuery {
+  search?: string;
   definitionId?: string;
   path?: string;
   source?: string;

@@ -4,7 +4,12 @@ import {
   ruleDefinitionId,
 } from "../signalk/alert-rules";
 import { SnoozeState, snoozeSeconds } from "../suppression/store";
-import { AlertPolicyField, alertPolicyFields, Severity } from "../alerts/types";
+import {
+  AlertPolicyField,
+  alertPolicyFields,
+  DeliveryState,
+  Severity,
+} from "../alerts/types";
 import { AlertDatabase } from "../storage/db";
 import {
   NotificationTestOperation,
@@ -24,6 +29,7 @@ export interface DefinitionQuery {
   enabled?: boolean;
 }
 export interface OccurrenceQuery {
+  search?: string;
   limit: number;
   cursor?: string;
   definitionId?: string;
@@ -40,6 +46,7 @@ export interface EventQuery {
   eventType?: string;
 }
 export interface AlertHistoryQuery extends EventQuery {
+  search?: string;
   definitionId?: string;
   path?: string;
   source?: string;
@@ -49,8 +56,14 @@ export interface AlertHistoryQuery extends EventQuery {
   to?: Date;
 }
 export interface DeliveryQuery {
+  includeTotal?: boolean;
   limit: number;
   cursor?: string;
+  search?: string;
+  state?: DeliveryState;
+  severity?: Severity;
+  from?: Date;
+  to?: Date;
 }
 export interface AlertPolicyPatch {
   rule?: RuleDescriptor;
@@ -337,6 +350,7 @@ function parseOccurrences(request: RequestLike): OccurrenceQuery {
     throw new ApiError(400, "INVALID_QUERY", "from must not be after to");
   return {
     ...pagination(q),
+    search: textParam(q.search, "search"),
     definitionId: textParam(q.definitionId, "definitionId"),
     path: textParam(q.path, "path"),
     source: textParam(q.source, "source"),
@@ -360,6 +374,7 @@ function parseAlertHistory(request: RequestLike): AlertHistoryQuery {
     throw new ApiError(400, "INVALID_QUERY", "from must not be after to");
   return {
     ...pagination(q),
+    search: textParam(q.search, "search"),
     definitionId: textParam(q.definitionId, "definitionId"),
     path: textParam(q.path, "path"),
     source: textParam(q.source, "source"),
@@ -376,6 +391,41 @@ function parseAlertHistory(request: RequestLike): AlertHistoryQuery {
     to,
   };
 }
+function parseDeliveries(request: RequestLike): DeliveryQuery {
+  const q = request.query ?? {};
+  const from = dateParam(q.from, "from");
+  const to = dateParam(q.to, "to");
+  if (from && to && from > to)
+    throw new ApiError(400, "INVALID_QUERY", "from must not be after to");
+  const search = textParam(q.search, "search");
+  const state = enumParam(q.state, "state", [
+    "pending",
+    "waiting_connectivity",
+    "sending",
+    "delivered",
+    "failed_retryable",
+    "failed_terminal",
+    "paused",
+    "suppressed",
+  ] as const);
+  const severity = enumParam(q.severity, "severity", [
+    "normal",
+    "alert",
+    "warn",
+    "alarm",
+    "emergency",
+  ] as const);
+  return {
+    ...pagination(q),
+    includeTotal: boolParam(q.includeTotal, "includeTotal") ?? true,
+    ...(search ? { search } : {}),
+    ...(state ? { state } : {}),
+    ...(severity ? { severity } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  };
+}
+
 function parsePolicy(body: unknown): AlertPolicyPatch {
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new ApiError(400, "INVALID_BODY", "Request body must be an object");
@@ -949,7 +999,7 @@ export function registerAlertCenterRoutes(
     "/deliveries",
     "readonly",
     wrap(async (req, res) =>
-      res.json(await repo().listDeliveries(pagination(req.query ?? {}))),
+      res.json(await repo().listDeliveries(parseDeliveries(req))),
     ),
   );
   addRoute(
@@ -1070,7 +1120,11 @@ export function registerRoutes(
   acknowledgeAlert: (id: string) => MaybePromise<boolean>,
   silenceAlert: (id: string) => MaybePromise<boolean>,
   canChangeOccurrence: OccurrenceWriteAuthorization,
+  summary: () => unknown,
 ): void {
+  addRoute(router, "get", "/summary", "readonly", (_req, res) =>
+    res.json(summary()),
+  );
   addRoute(router, "get", "/status", "readonly", (_req, res) =>
     res.json(status()),
   );

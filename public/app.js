@@ -6,8 +6,8 @@ const state = {
   activeDefinitionIds: new Set(),
   notifiers: [],
   deliveries: [],
-  deliveryTotal: 0,
   alertHistory: [],
+  historyLoaded: false,
   deliveryCursor: undefined,
   alertHistoryCursor: undefined,
   eventCursor: undefined,
@@ -17,12 +17,19 @@ const state = {
   selectedDefinition: undefined,
   selectedDelivery: undefined,
   loading: false,
+  view: undefined,
+  filterRevision: 0,
+  historyRequest: 0,
+  deliveryRequest: 0,
+  statusRequest: 0,
+  summaryRequest: 0,
   reloadQueued: false,
   policyDefaults: undefined,
   policyHiddenOverrides: [],
   notifierTestResults: new Map(),
   notifierTestsInFlight: new Set(),
   lastStatus: undefined,
+  lastSummary: undefined,
   authenticated: false,
 };
 const $ = (selector) => document.querySelector(selector);
@@ -375,12 +382,19 @@ function zoneBadges(definition) {
 
 const displayMetadata = new Map();
 const liveValues = new AlertLiveValues(
-  () => renderLiveValues(),
+  () => {
+    renderLiveValues();
+    AlertTheme.setSignalKMode(liveValues.values.get("environment.mode")?.value);
+  },
   () => {
     elements.login.hidden = false;
   },
 );
 window.addEventListener("pagehide", () => liveValues.close());
+liveValues.setPaths(["environment.mode"]);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) liveValues.connect();
+});
 function displayedMessage(item, live = false, message = item?.message) {
   if (!item) return message;
   if (item.coreAlert?.$source === "signalk-alert-rules") return message;
@@ -452,11 +466,11 @@ function renderLiveValues() {
     row.querySelector(".live-age").textContent = liveAgeText(definition);
     const summary = row.querySelector(".alert-summary");
     const occurrence = state.occurrences.find(
-      (item) => item.id === summary.dataset.liveOccurrence,
+      (item) => item.id === summary.dataset.summaryOccurrence,
     );
     if (occurrence && isZoneMessage(occurrence.message)) {
       summary.textContent = [
-        displayedMessage(occurrence, true),
+        displayedMessage(occurrence, Boolean(row.dataset.occurrenceId)),
         definition.ruleStatus,
         definition.sourceType === "rule" ? occurrence.path : "",
         definitionZones(definition).length
@@ -511,6 +525,7 @@ async function loadDisplayUnits(definition) {
       metadata: definition.metadata,
       at: Date.now(),
     });
+    return true;
   } catch {
     // Keep the detail usable when live metadata is unavailable.
   }
@@ -553,11 +568,16 @@ function bindOccurrenceActions(root = elements.drawerBody) {
   );
 }
 
+// SQLite lower() folds ASCII only. Keep local definition matching consistent.
+function searchText(value = "") {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
 function renderDefinitions() {
   const showActive = $("#state-filter").value === "active";
   const showZonesActive = $("#state-filter").value === "zones-active";
-  const severity = $("#severity-filter").value;
-  const search = $("#alert-search").value.trim().toLocaleLowerCase();
+  const severity = $("#unified-severity").value;
+  const search = searchText($("#unified-search").value.trim());
   const historyFiltered = hasHistoryFilters();
   const visible = state.definitions
     .flatMap((definition) => {
@@ -590,28 +610,31 @@ function renderDefinitions() {
         !showZonesActive || active || definitionZones(definition).length > 0,
     )
     .filter(
-      ({ definition }) =>
-        !$("#path-filter").value ||
-        definition.pathPattern === $("#path-filter").value,
-    )
-    .filter(
       (entry) =>
         !severity ||
         (historyFiltered
           ? entry.latest?.currentSeverity
           : definitionStatus(entry)) === severity,
     )
-    .filter(({ definition, latest }) =>
-      [
-        definition.name,
-        definition.pathPattern,
-        latest?.message,
-        latest?.sourceKey,
-        definition.metadata?.rule?.slug,
-      ]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(search),
+    .filter(
+      ({ definition }) =>
+        !search ||
+        historyFiltered ||
+        [
+          definition.name,
+          definition.pathPattern,
+          definition.metadata?.rule?.slug,
+        ].some((value) => searchText(value).includes(search)) ||
+        state.occurrences.some(
+          (occurrence) =>
+            occurrence.definitionId === definition.id &&
+            [
+              occurrence.message,
+              occurrence.sourceKey,
+              occurrence.source,
+              occurrence.path,
+            ].some((value) => searchText(value).includes(search)),
+        ),
     )
     .sort(
       (left, right) =>
@@ -652,7 +675,7 @@ function renderDefinitions() {
                   ? "No active alert has been recorded"
                   : "No alert has been recorded for this definition";
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
-            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-live-occurrence="${active ? escapeHtml(latest.id) : ""}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
+            <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-summary-occurrence="${escapeHtml(latest?.id ?? "")}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
             <td data-label="Age" class="live-age" title="Time since the sensor reading">${escapeHtml(liveAgeText(item))}</td>
             <td data-label="Last triggered" class="last-triggered-cell">${item.lastFiredAt ? `<time datetime="${escapeHtml(item.lastFiredAt)}">${escapeHtml(formatDate(item.lastFiredAt))}</time>` : '<span class="muted">Never</span>'}</td>
@@ -760,7 +783,7 @@ function renderDeliveries(deliveries) {
             </tr>`;
           })
           .join("")}</tbody></table>`
-    : '<div class="empty"><strong>No deliveries yet</strong><p>Delivery attempts appear here after an alert sends to a notification service.</p></div>';
+    : '<div class="empty"><strong>No deliveries found</strong><p>No deliveries match the current filters.</p></div>';
   elements.moreDeliveries.hidden = !state.deliveryCursor;
   document.querySelectorAll("[data-delivery-id]").forEach((row) => {
     const open = () => openDelivery(row.dataset.deliveryId);
@@ -836,37 +859,15 @@ function renderAlertHistory() {
     });
   });
 }
-function occurrenceParams(cursor) {
-  const params = new URLSearchParams({ limit: "100" });
-  if (cursor) params.set("cursor", cursor);
-  for (const id of ["state", "severity", "path", "source"]) {
-    const value = $(`#${id}-filter`).value.trim();
-    if (id === "state" && value === "zones-active") continue;
-    if (value) params.set(id, value);
-  }
-  for (const id of ["from", "to"]) {
-    const value = $(`#${id}-filter`).value;
-    if (value) params.set(id, new Date(value).toISOString());
-  }
-  return params;
-}
-
-function alertHistoryParams(cursor) {
-  const params = new URLSearchParams({ limit: "50" });
-  if (cursor) params.set("cursor", cursor);
+function sharedFilterParams() {
+  const params = new URLSearchParams();
+  const search = $("#unified-search").value.trim();
+  if (search) params.set("search", search);
+  const severity = $("#unified-severity").value;
+  if (severity) params.set("severity", severity);
   for (const [field, id] of [
-    ["definitionId", "history-definition-filter"],
-    ["eventType", "history-event-filter"],
-    ["severity", "history-severity-filter"],
-    ["source", "history-source-filter"],
-    ["state", "history-state-filter"],
-  ]) {
-    const value = $(`#${id}`).value.trim();
-    if (value) params.set(field, value);
-  }
-  for (const [field, id] of [
-    ["from", "history-from-filter"],
-    ["to", "history-to-filter"],
+    ["from", "unified-from"],
+    ["to", "unified-to"],
   ]) {
     const value = $(`#${id}`).value;
     if (value) params.set(field, new Date(value).toISOString());
@@ -874,23 +875,46 @@ function alertHistoryParams(cursor) {
   return params;
 }
 
+function occurrenceParams(cursor) {
+  const params = sharedFilterParams();
+  params.set("limit", "100");
+  if (cursor) params.set("cursor", cursor);
+  const stateValue = $("#state-filter").value;
+  if (stateValue === "active" || stateValue === "cleared")
+    params.set("state", stateValue);
+  return params;
+}
+
+function alertHistoryParams(cursor) {
+  const params = sharedFilterParams();
+  params.set("limit", "50");
+  if (cursor) params.set("cursor", cursor);
+  for (const [field, id] of [
+    ["definitionId", "history-definition-filter"],
+    ["eventType", "history-event-filter"],
+    ["state", "history-state-filter"],
+  ]) {
+    const value = $(`#${id}`).value;
+    if (value) params.set(field, value);
+  }
+  return params;
+}
+
+function deliveryParams(cursor) {
+  const params = sharedFilterParams();
+  params.set("limit", "50");
+  params.set("includeTotal", "false");
+  if (cursor) params.set("cursor", cursor);
+  const deliveryState = $("#delivery-state-filter").value;
+  if (deliveryState) params.set("state", deliveryState);
+  return params;
+}
+
 function hasHistoryFilters() {
   return (
     $("#state-filter").value === "cleared" ||
-    ["source-filter", "from-filter", "to-filter"].some(
-      (id) => $(`#${id}`).value,
-    )
+    Boolean($("#unified-from").value || $("#unified-to").value)
   );
-}
-
-function renderPathOptions() {
-  const select = $("#path-filter");
-  const selected = select.value;
-  const paths = [
-    ...new Set(state.definitions.map((item) => item.pathPattern)),
-  ].sort();
-  select.innerHTML = `<option value="">All paths</option>${paths.map((path) => `<option value="${escapeHtml(path)}">${escapeHtml(path)}</option>`).join("")}`;
-  if (paths.includes(selected)) select.value = selected;
 }
 
 function renderAlertHistoryDefinitionOptions() {
@@ -905,27 +929,121 @@ function renderAlertHistoryDefinitionOptions() {
 }
 
 async function loadDeliveries(append = false) {
-  const params = new URLSearchParams({ limit: "50" });
-  if (append && state.deliveryCursor)
-    params.set("cursor", state.deliveryCursor);
+  const request = ++state.deliveryRequest;
+  const revision = state.filterRevision;
+  const filterKey = deliveryParams().toString();
+  append &&= state.deliveryFilterKey === filterKey;
+  const params = deliveryParams(append ? state.deliveryCursor : undefined);
   const page = await api(`/deliveries?${params}`);
+  if (request !== state.deliveryRequest || revision !== state.filterRevision)
+    return;
+  state.deliveryFilterKey = filterKey;
   state.deliveries = append
     ? mergeById(state.deliveries, pageItems(page))
     : pageItems(page);
   state.deliveryCursor = page.nextCursor;
-  state.deliveryTotal = page.total ?? state.deliveries.length;
-  elements.deliveryTabCount.textContent = state.deliveryTotal;
   renderDeliveries(state.deliveries);
 }
-async function loadAlertHistory(append = false) {
+async function loadAlertHistory(append = false, preserveLoadedHistory = false) {
+  const request = ++state.historyRequest;
+  const revision = state.filterRevision;
+  const filterKey = alertHistoryParams().toString();
+  append &&= state.historyFilterKey === filterKey;
+  preserveLoadedHistory &&= state.historyFilterKey === filterKey;
   const page = await api(
     `/alert-history?${alertHistoryParams(append ? state.alertHistoryCursor : undefined)}`,
   );
+  if (request !== state.historyRequest || revision !== state.filterRevision)
+    return;
+  state.historyFilterKey = filterKey;
+  state.historyLoaded = true;
+  const previousCursor = state.alertHistoryCursor;
   state.alertHistory = append
     ? mergeById(state.alertHistory, pageItems(page))
-    : pageItems(page);
-  state.alertHistoryCursor = page.nextCursor;
+    : preserveLoadedHistory
+      ? mergeById(pageItems(page), state.alertHistory)
+      : pageItems(page);
+  state.alertHistoryCursor =
+    preserveLoadedHistory && previousCursor ? previousCursor : page.nextCursor;
   renderAlertHistory();
+}
+function loadVisibleView(preserveLoadedHistory = false) {
+  if (state.view === "history")
+    void loadAlertHistory(false, preserveLoadedHistory).catch(showError);
+  if (state.view === "deliveries") void loadDeliveries().catch(showError);
+  if (state.selectedDelivery) void refreshDeliveryDetail().catch(showError);
+}
+async function loadSummary() {
+  const request = ++state.summaryRequest;
+  const summary = await api("/summary");
+  if (request !== state.summaryRequest) return;
+  elements.pendingCount.textContent = summary.alerts?.pendingDelivery ?? "—";
+  const undelivered = summary.alerts?.undeliveredDelivery;
+  elements.deliveryTabCount.hidden = !Number.isInteger(undelivered);
+  elements.deliveryTabCount.textContent = undelivered ?? "";
+  elements.deliveryTabCount.title = `${undelivered ?? 0} undelivered deliveries, including failures`;
+  elements.connectivityNote.textContent = summary.connectivity?.state
+    ? `Internet ${summary.connectivity.internetAvailability?.state ?? "unknown"} · connectivity ${summary.connectivity.state.toLowerCase()}`
+    : "Connectivity status unavailable";
+  state.lastSummary = summary;
+  state.lastStatus = { ...state.lastStatus, ...summary };
+  if (state.lastStatus.services) renderNotifierTests(state.lastStatus.services);
+  renderSnooze();
+  renderQuietHoursOverride();
+}
+async function loadDiagnostics() {
+  const request = ++state.statusRequest;
+  const status = await api("/status");
+  if (request !== state.statusRequest) return;
+  // Keep the independently refreshed controls and badge count.
+  state.lastStatus = { ...status, ...state.lastSummary };
+  renderDiagnostics(status);
+}
+
+// Coalesce refreshes into the latest queue, retaining the four-request limit.
+// Optional metadata never holds up the alert list or its live updates.
+let metadataQueue = [];
+let metadataLoading = false;
+async function loadMetadataInBackground() {
+  metadataQueue = [...state.definitions];
+  if (metadataLoading) return;
+  metadataLoading = true;
+  try {
+    while (metadataQueue.length) {
+      const updated = await Promise.all(
+        metadataQueue.splice(0, 4).map(loadDisplayUnits),
+      );
+      if (!updated.some(Boolean)) continue;
+      renderLiveValues();
+      if (state.view === "history" && state.historyLoaded) renderAlertHistory();
+    }
+    for (const path of displayMetadata.keys())
+      if (!state.definitions.some((item) => item.pathPattern === path))
+        displayMetadata.delete(path);
+  } finally {
+    metadataLoading = false;
+  }
+}
+let ruleCatalogRequest = 0;
+async function loadRuleCatalog() {
+  const request = ++ruleCatalogRequest;
+  const catalog = await alertRules.catalog();
+  const defaults = catalog.entries.length
+    ? await api("/policy-defaults")
+    : undefined;
+  if (request !== ruleCatalogRequest) return;
+  state.ruleCatalog = catalog;
+  state.ruleDefaults = defaults;
+  state.definitions = alertRules.merge(
+    state.storedDefinitions ?? [],
+    catalog,
+    defaults,
+  );
+  $("#rule-catalog-status").textContent = catalog.message ?? "";
+  $("#rule-catalog-status").hidden = !catalog.message;
+  elements.definitionCount.textContent = state.definitions.length;
+  renderAlertHistoryDefinitionOptions();
+  renderDefinitions();
 }
 async function load(preserveLoadedHistory = false) {
   if (state.loading) {
@@ -933,92 +1051,58 @@ async function load(preserveLoadedHistory = false) {
     return;
   }
   state.loading = true;
+  const revision = state.filterRevision;
   elements.error.hidden = true;
   elements.login.hidden = true;
+  // Controls remain read-only until the independent access lookup succeeds.
+  void loadAccess();
+  void loadSummary().catch(showError);
+  if ($(".system-diagnostics").open) void loadDiagnostics().catch(showError);
+  loadVisibleView(preserveLoadedHistory);
   try {
-    await loadAccess();
-    const [
-      definitions,
-      activeOccurrences,
-      occurrences,
-      notifiers,
-      status,
-      deliveryPage,
-      alertHistoryPage,
-    ] = await Promise.all([
+    const historyFiltered = hasHistoryFilters();
+    const searchParams = new URLSearchParams({ limit: "100" });
+    const search = $("#unified-search").value.trim();
+    if (search) searchParams.set("search", search);
+    const [definitions, activeOccurrences, occurrences] = await Promise.all([
       allPages("/definitions"),
       allPages("/occurrences?state=active"),
-      hasHistoryFilters()
+      historyFiltered
         ? allPages(`/occurrences?${occurrenceParams()}`)
-        : api("/occurrences?limit=100"),
-      api("/notifiers"),
-      api("/status").catch(() => ({})),
-      api("/deliveries?limit=50"),
-      api(`/alert-history?${alertHistoryParams()}`),
+        : search
+          ? allPages(`/occurrences?${searchParams}`)
+          : api("/occurrences?limit=100"),
     ]);
-    const catalog = await alertRules.catalog();
-    let defaults;
-    if (catalog.entries.length) defaults = await api("/policy-defaults");
-    state.definitions = alertRules.merge(definitions, catalog, defaults);
-    $("#rule-catalog-status").textContent = catalog.message ?? "";
-    $("#rule-catalog-status").hidden = !catalog.message;
-    for (let index = 0; index < definitions.length; index += 4)
-      await Promise.all(
-        definitions.slice(index, index + 4).map(loadDisplayUnits),
-      );
-    for (const path of displayMetadata.keys())
-      if (!definitions.some((item) => item.pathPattern === path))
-        displayMetadata.delete(path);
-    liveValues.setPaths(
-      definitions
+    if (revision !== state.filterRevision) return;
+    state.storedDefinitions = definitions;
+    state.definitions = alertRules.merge(
+      definitions,
+      state.ruleCatalog ?? { entries: [], unavailable: true },
+      state.ruleDefaults,
+    );
+    state.activeDefinitionIds = new Set(
+      activeOccurrences.map((item) => item.definitionId),
+    );
+    state.occurrences = historyFiltered
+      ? pageItems(occurrences)
+      : mergeById(activeOccurrences, pageItems(occurrences));
+    renderAlertHistoryDefinitionOptions();
+    elements.activeCount.textContent = activeOccurrences.length;
+    elements.definitionCount.textContent = state.definitions.length;
+    elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    renderDefinitions();
+    liveValues.setPaths([
+      "environment.mode",
+      ...definitions
         .filter(
           (item) =>
             item.sourceType !== "rule" &&
             !item.pathPattern.startsWith("alerts."),
         )
         .map((item) => item.pathPattern.replace(/^notifications\./, "")),
-    );
-    state.activeDefinitionIds = new Set(
-      activeOccurrences.map((item) => item.definitionId),
-    );
-    renderPathOptions();
-    renderAlertHistoryDefinitionOptions();
-    state.occurrences = hasHistoryFilters()
-      ? pageItems(occurrences)
-      : mergeById(activeOccurrences, pageItems(occurrences));
-    state.notifiers = pageItems(notifiers);
-    state.deliveries = pageItems(deliveryPage);
-    state.deliveryTotal = deliveryPage.total ?? state.deliveries.length;
-    state.deliveryCursor = deliveryPage.nextCursor;
-    const previousHistoryCursor = state.alertHistoryCursor;
-    state.alertHistory = preserveLoadedHistory
-      ? mergeById(pageItems(alertHistoryPage), state.alertHistory)
-      : pageItems(alertHistoryPage);
-    state.alertHistoryCursor =
-      preserveLoadedHistory && previousHistoryCursor
-        ? previousHistoryCursor
-        : alertHistoryPage.nextCursor;
-    elements.activeCount.textContent = activeOccurrences.length;
-    elements.definitionCount.textContent = state.definitions.length;
-    const pendingDeliveryCount =
-      status.alerts?.pendingDelivery ??
-      state.deliveries.filter(
-        (item) => !["delivered", "failed_terminal"].includes(item.state),
-      ).length;
-    elements.pendingCount.textContent = pendingDeliveryCount;
-    elements.deliveryTabCount.textContent = state.deliveryTotal;
-    elements.connectivityNote.textContent = status.connectivity?.state
-      ? `${status.health?.state ?? "unknown"} · Internet ${status.connectivity.internetAvailability?.state ?? "unknown"} · connectivity ${status.connectivity.state.toLowerCase()}`
-      : "delivery intents waiting";
-    state.lastStatus = status;
-    renderDiagnostics(status);
-    renderSnooze();
-    renderQuietHoursOverride();
-    elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    renderDefinitions();
-    renderAlertHistory();
-    renderDeliveries(state.deliveries);
-    if (state.selectedDelivery) await refreshDeliveryDetail();
+    ]);
+    void loadMetadataInBackground().catch(showError);
+    void loadRuleCatalog().catch(showError);
   } catch (error) {
     showError(error);
   } finally {
@@ -1407,7 +1491,13 @@ function updateInheritanceSummary() {
   $("#policy-reset").disabled = count === 0;
 }
 
-function openPolicy(id) {
+async function openPolicy(id) {
+  try {
+    state.notifiers = pageItems(await api("/notifiers"));
+  } catch (error) {
+    showError(error);
+    return;
+  }
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
   const policy = definition.policy ?? {};
@@ -1557,7 +1647,7 @@ async function resetPolicy() {
       item.id === id ? updated : item,
     );
     renderDefinitions();
-    openPolicy(id);
+    await openPolicy(id);
     elements.policyResult.textContent = "Now using global defaults.";
   } catch (error) {
     elements.policyResult.textContent = error.message;
@@ -1566,9 +1656,21 @@ async function resetPolicy() {
 }
 
 function selectView(view, moveFocus = false) {
+  const previousView = state.view;
+  state.view = view;
   $("#alerts-panel").hidden = view !== "alerts";
   $("#alert-history-panel").hidden = view !== "history";
   $("#deliveries-panel").hidden = view !== "deliveries";
+  const dateLabel = {
+    alerts: "Started",
+    history: "Updated",
+    deliveries: "Queued",
+  }[view];
+  $("label[for=unified-from]").textContent = `${dateLabel} after`;
+  $("label[for=unified-to]").textContent = `${dateLabel} before`;
+  document.querySelectorAll("[data-filter-view]").forEach((node) => {
+    node.hidden = node.dataset.filterView !== view;
+  });
   for (const [name, button] of [
     ["alerts", $("#alerts-tab")],
     ["history", $("#alert-history-tab")],
@@ -1585,8 +1687,18 @@ function selectView(view, moveFocus = false) {
     "",
     view === "alerts" ? location.pathname : `#${view}`,
   );
+  // The initial load handles deep links; later selections fetch fresh tab data.
+  if (previousView !== undefined && previousView !== view) {
+    clearTimeout(filterTimer);
+    elements.error.hidden = true;
+    if (view === "alerts") void load();
+    else loadVisibleView();
+  }
 }
 
+$(".system-diagnostics").addEventListener("toggle", (event) => {
+  if (event.target.open) void loadDiagnostics().catch(showError);
+});
 $("#refresh").addEventListener("click", () => {
   alertRules.invalidate();
   void load();
@@ -1601,33 +1713,35 @@ elements.notifierTests.addEventListener("click", (event) => {
   const button = event.target.closest("[data-test-notifier]");
   if (button) void runNotifierTest(button);
 });
-$("#history-filters").addEventListener("submit", (event) => {
+let filterTimer;
+function applyViewFilters() {
+  state.filterRevision++;
+  elements.error.hidden = true;
+  if (state.view === "history") void loadAlertHistory().catch(showError);
+  else if (state.view === "deliveries") void loadDeliveries().catch(showError);
+  else void load();
+}
+$("#unified-filters").addEventListener("submit", (event) => {
   event.preventDefault();
-  void load();
+  clearTimeout(filterTimer);
+  applyViewFilters();
 });
-$("#alert-history-filters").addEventListener("submit", (event) => {
-  event.preventDefault();
-  void loadAlertHistory();
+$("#unified-search").addEventListener("input", () => {
+  clearTimeout(filterTimer);
+  state.filterRevision++;
+  if (state.view === "alerts" && !hasHistoryFilters()) renderDefinitions();
+  filterTimer = setTimeout(applyViewFilters, 250);
 });
-$("#history-event-filter").addEventListener("change", () =>
-  loadAlertHistory().catch(showError),
-);
-$("#history-severity-filter").addEventListener("change", () =>
-  loadAlertHistory().catch(showError),
-);
-$("#history-definition-filter").addEventListener("change", () =>
-  loadAlertHistory().catch(showError),
-);
-$("#alert-history-clear").addEventListener("click", () => {
-  $("#alert-history-filters").reset();
-  void loadAlertHistory();
+$("#unified-filters").addEventListener("change", (event) => {
+  if (event.target.id !== "unified-search") {
+    clearTimeout(filterTimer);
+    applyViewFilters();
+  }
 });
-$("#state-filter").addEventListener("change", () => void load());
-$("#alert-search").addEventListener("input", renderDefinitions);
-$("#severity-filter").addEventListener("change", () => void load());
-$("#filters-clear").addEventListener("click", () => {
-  $("#history-filters").reset();
-  void load();
+$("#unified-clear").addEventListener("click", () => {
+  clearTimeout(filterTimer);
+  $("#unified-filters").reset();
+  applyViewFilters();
 });
 elements.moreDeliveries.addEventListener("click", () =>
   loadDeliveries(true).catch(showError),
@@ -1750,13 +1864,15 @@ $("#delete-failed").addEventListener("click", async () => {
     button.disabled = false;
   }
 });
-selectView(
-  location.hash === "#deliveries"
+function viewFromHash() {
+  return location.hash === "#deliveries"
     ? "deliveries"
     : location.hash === "#history"
       ? "history"
-      : "alerts",
-);
+      : "alerts";
+}
+window.addEventListener("hashchange", () => selectView(viewFromHash()));
+selectView(viewFromHash());
 connectLiveUpdates();
 void load();
 

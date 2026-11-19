@@ -69,7 +69,7 @@ describe("occurrence storage", () => {
     expect(db.migrationApplied).toBe(false);
     expect(db.getAlert(before!.id).messageSample).toEqual(sample);
     expect(db.db.prepare("PRAGMA user_version").get()).toEqual({
-      user_version: 4,
+      user_version: 5,
     });
   });
 
@@ -115,10 +115,158 @@ describe("occurrence storage", () => {
     expect(raised?.payload).toEqual({ message });
   });
 
+  it("searches occurrence and event history by path, source, message, and event text", () => {
+    const db = database();
+    const occurrence = db.ingest(
+      active({ message: "Anchor dragging", source: "gps.primary" }),
+      ["ntfy"],
+    )!;
+    expect(
+      db.queryOccurrences({ search: "ANCHOR" }).items.map((row) => row.id),
+    ).toContain(occurrence.id);
+    expect(db.queryOccurrences({ search: "gps.primary" }).items).toHaveLength(
+      1,
+    );
+    expect(db.queryOccurrences({ search: "no-such-value" }).items).toHaveLength(
+      0,
+    );
+    const events = db.queryAlertHistory({ search: "dragging" }).items;
+    expect(events.some((row) => row.alertId === occurrence.id)).toBe(true);
+    expect(db.queryAlertHistory({ search: "not-found" }).items).toHaveLength(0);
+    expect(db.queryAlertHistory({ search: "RAISED" }).items).not.toHaveLength(
+      0,
+    );
+  });
+
+  it("does not match an old raised message against the occurrence's newer message", () => {
+    const db = database();
+    db.ingest(
+      active({
+        message: "Original location",
+        sourcePayload: { message: "Original location" },
+      }),
+      [],
+    );
+    const raised = db.queryAlertHistory({ eventType: "raised" }).items[0];
+    db.ingest(
+      active({
+        message: "New location",
+        sourcePayload: { message: "New location" },
+      }),
+      [],
+    );
+    expect(
+      db
+        .queryAlertHistory({ search: "New location" })
+        .items.map((row) => row.id),
+    ).not.toContain(raised.id);
+    expect(
+      db
+        .queryAlertHistory({ search: "Original location" })
+        .items.map((row) => row.id),
+    ).toContain(raised.id);
+  });
+
+  it("filters history by the displayed event severity through escalation and clear", () => {
+    const db = database();
+    db.ingest(
+      active({
+        severity: "warn",
+        sourcePayload: { state: "warn", message: "Low depth" },
+      }),
+      [],
+    );
+    db.ingest(
+      active({ severity: "alarm", sourcePayload: { state: "alarm" } }),
+      [],
+    );
+    db.ingest(
+      active({
+        state: "cleared",
+        severity: "normal",
+        sourcePayload: { state: "normal" },
+      }),
+      [],
+    );
+    for (const severity of ["warn", "alarm", "normal"] as const) {
+      const expected = db
+        .queryAlertHistory()
+        .items.filter((row) => row.severity === severity);
+      expect(expected.length).toBeGreaterThan(0);
+      expect(
+        db.queryAlertHistory({ severity }).items.map((row) => row.id),
+      ).toEqual(expected.map((row) => row.id));
+    }
+  });
+
+  it("preserves non-ASCII text while folding ASCII search case", () => {
+    const db = database();
+    db.ingest(active({ message: "ÉCHOUAGE" }), ["ntfy"]);
+    expect(db.queryOccurrences({ search: "Échouage" }).items).toHaveLength(1);
+    expect(db.queryAlertHistory({ search: "Échouage" }).items).not.toHaveLength(
+      0,
+    );
+    expect(
+      db.queryDeliveries(10, undefined, true, { search: "Échouage" }).total,
+    ).toBe(1);
+  });
+
+  it("combines literal search with dates, state and pagination before limiting history", () => {
+    const db = database();
+    for (let index = 0; index < 5; index++) {
+      db.ingest(
+        active({
+          sourceKey: `notifications.test.search${index}`,
+          path: `notifications.test.search${index}`,
+          message: index % 2 ? "Unrelated" : "Reserve 50%_remaining",
+          source: "gps.backup",
+        }),
+        [],
+        new Date(`2026-11-0${index + 1}T00:00:00Z`),
+      );
+    }
+    const filters = {
+      search: "50%_",
+      from: new Date("2026-11-01T00:00:00Z"),
+      to: new Date("2026-11-05T00:00:00Z"),
+      state: "active" as const,
+      severity: "alarm" as const,
+      limit: 1,
+    };
+    const occurrences: string[] = [];
+    const events: number[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = db.queryOccurrences({ ...filters, cursor });
+      occurrences.push(...page.items.map((row) => row.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    do {
+      const page = db.queryAlertHistory({
+        ...filters,
+        eventType: "raised",
+        cursor,
+      });
+      events.push(...page.items.map((row) => row.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(occurrences).toHaveLength(3);
+    expect(new Set(occurrences).size).toBe(3);
+    expect(events).toHaveLength(3);
+    expect(new Set(events).size).toBe(3);
+    expect(
+      db.queryAlertHistory({ ...filters, state: "cleared" }).items,
+    ).toEqual([]);
+    expect(db.queryOccurrences({ search: "' OR 1=1 --" }).items).toEqual([]);
+    expect(
+      db.queryAlertHistory({ search: "gps.backup", eventType: "raised" }).items,
+    ).toHaveLength(5);
+  });
+
   it("creates the complete current schema directly", () => {
     const db = database();
 
-    expect(db.schemaVersion()).toBe(4);
+    expect(db.schemaVersion()).toBe(5);
     const occurrenceColumns = db.db
       .prepare("PRAGMA table_info(alert_occurrences)")
       .all()
@@ -508,7 +656,7 @@ describe("occurrence storage", () => {
 
     db.reset();
 
-    expect(db.schemaVersion()).toBe(4);
+    expect(db.schemaVersion()).toBe(5);
     expect(db.listDefinitions()).toEqual([]);
     expect(db.listOccurrences()).toEqual([]);
     expect(db.listDeliveries()).toEqual([]);

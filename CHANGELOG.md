@@ -7,6 +7,18 @@ Versioning while it remains pre-1.0.
 
 ### Core alerts migration
 
+- Load rule catalogs and their delivery defaults without blocking the alert list.
+  Following a history or delivery hash link within the open dashboard selects
+  and loads that tab, preserving lazy history loading.
+
+- Skip metadata zone discovery when Signal K's `manageNotifications` setting is
+  explicitly false. Hide stored zones without retained occurrences while preserving
+  their settings; retain actual legacy alerts on the same paths, history, queued deliveries and
+  the Alert Rules catalog.
+- Keep v0.8.0's delivery-history index at schema v4 and upgrade v3/v4 databases
+  transactionally to v5 for core alerts. Back up the database before upgrading;
+  rollback to v0.8.0 or older requires the pre-upgrade backup.
+
 - Apply Signal K path permissions to core acknowledge/silence actions as well as
   legacy notifications. ACL installations must grant `put` on the allowed
   `alerts.*` paths separately from `notifications.*`. Read-only views remain
@@ -25,7 +37,7 @@ Versioning while it remains pre-1.0.
   source status and durable per-service delivery. Native acknowledgment and
   silence use the core API; Wyoming follows core silence and attention state.
 - Preserve existing history and pending deliveries through database schema
-  version 4. Native `alerts.*` paths have separate delivery policies from legacy
+  version 5. Native `alerts.*` paths have separate delivery policies from legacy
   notification paths. See [migration notes](docs/core-alerts-migration.md) for the
   pinned development server and testing instructions.
 - Use core terminal removal reasons to send recovery for completed conditions and
@@ -36,6 +48,58 @@ Versioning while it remains pre-1.0.
   including speech. The updated rules plugin formats messages in the admin's units;
   Alert Center no longer reinterprets differences or SI fallback values in that text.
   Legacy notification unit conversion remains available.
+
+### Features
+
+- Use one search and filter toolbar across Alerts, Alert history, and Deliveries.
+  Search text, severity, and date bounds carry between tabs; each tab keeps its
+  relevant status or update filters. Search includes names, messages, paths, and
+  sources, plus service names and errors in Deliveries. Matching retained records
+  are found before pagination, and delivery results retain pending-work priority.
+  History severity filters now match the severity displayed for each event,
+  and delivery message/severity filters use the recorded delivery snapshot.
+  No database migration or configuration change is required.
+
+### Fixes
+
+- Ignore routine waypoint arrival-circle and perpendicular-passed notifications
+  by default, alongside per-target collision alarms. Existing explicit
+  `ignoredPaths` lists remain unchanged. Remove either exact course path from
+  the list to track and deliver it; other course notifications remain tracked.
+
+## [0.8.0] - 2026-11-12
+
+### Features
+
+- Add a sun/moon appearance menu to Alert Center. Auto (the default) follows
+  Signal K's day/night mode, falling back to the device's appearance when
+  unavailable. Light and Dark overrides are saved per browser and server,
+  without changing the shared mode. Dark styling covers alerts, history,
+  delivery details, settings, and status banners.
+
+### Fixes
+
+- Keep automatic appearance in sync when Signal K's day/night mode changes
+  rapidly, including falling back to the device after an invalid or cleared mode.
+- Show the alert list as soon as its alert data arrives, without waiting for
+  units metadata, login status, or diagnostics. Load units in the background
+  and fetch history and deliveries only when their tab is selected. The delivery
+  badge now counts undelivered items (including failures), while the tab retains
+  the full delivery history. Detailed diagnostics load only when expanded.
+- Use indexed pending counts and delivery-history pagination. The dashboard skips
+  lifetime totals; API clients still receive them unless they set
+  `includeTotal=false`. A lightweight `/summary` endpoint avoids historical and
+  service aggregates during page loading.
+- Automatically upgrade storage to schema version 4 with a delivery-history index.
+  The first startup may take longer while the index builds. History, settings, and
+  pending work are preserved; no reset or configuration change is needed.
+
+### Upgrade and rollback
+
+- Stop Signal K and back up the Alert Center SQLite database before upgrading.
+  Version 0.7.0 rejects the upgraded schema; rolling back requires both the older
+  package and the pre-upgrade database backup. Restoring that backup also discards
+  history and delivery progress recorded after it was taken.
 
 ## [0.7.0] - 2026-11-11
 

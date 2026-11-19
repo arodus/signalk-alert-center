@@ -43,7 +43,7 @@ test("clearly marks snooze as bypassed while underway", async ({
 }) => {
   await request.delete(`${api}/snooze`);
   await request.post(`${api}/snooze`, { data: { durationSeconds: 900 } });
-  await page.route(`**${api}/status`, async (route) => {
+  await page.route(`**${api}/summary`, async (route) => {
     const response = await route.fetch();
     const status = await response.json();
     await route.fulfill({

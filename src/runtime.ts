@@ -79,6 +79,7 @@ import { captureMessageSample } from "./signalk/message-sample";
 import {
   extractNotificationEntries,
   iterateSnapshotNotificationEntries,
+  serverManagesNotifications,
   SignalKNotificationInput,
 } from "./signalk/notifications";
 import { BoundedIngestionQueue } from "./signalk/ingestion-queue";
@@ -234,6 +235,21 @@ export class AlertCenterRuntime {
     }
   }
 
+  summary() {
+    return {
+      alerts: {
+        pendingDelivery: this.database?.pendingDeliveryCount() ?? 0,
+        undeliveredDelivery: this.database?.undeliveredDeliveryCount() ?? 0,
+      },
+      snooze: this.snoozeStatus(),
+      quietHours: this.suppression?.getQuietHoursControl() ?? { enabled: true },
+      connectivity: {
+        state: this.connectivity?.state ?? "OFF",
+        internetAvailability: this.internet?.status() ?? { state: "unknown" },
+      },
+    };
+  }
+
   status() {
     const alertStats = this.database?.alertStats();
     const database = this.database?.operationalStatus();
@@ -360,7 +376,7 @@ export class AlertCenterRuntime {
             },
           },
       alerts: {
-        definitions: this.database?.definitionCount() ?? 0,
+        definitions: this.database ? this.visibleDefinitions().length : 0,
         total: alertStats?.total ?? 0,
         active: alertStats?.active ?? 0,
         pendingActivation: alertStats?.pendingActivation ?? 0,
@@ -1050,7 +1066,14 @@ export class AlertCenterRuntime {
     this.emitChange("alerts");
   }
 
+  private visibleDefinitions(): AlertDefinitionRecord[] {
+    return this.db().listDefinitions({
+      hideDormantZones: !serverManagesNotifications(this.app),
+    });
+  }
+
   private seedDefinitions(): void {
+    if (!serverManagesNotifications(this.app)) return;
     this.policies().seedDefinitions(
       listConfiguredZones(this.app).filter(
         (zone) => !this.isIgnoredPath(`notifications.${zone.path}`),
@@ -1601,9 +1624,9 @@ export class AlertCenterRuntime {
   private repository(): AlertCenterRepository {
     return {
       listDefinitions: (query: DefinitionQuery) => {
-        let items = this.db()
-          .listDefinitions()
-          .map((item) => this.definitionView(item));
+        let items = this.visibleDefinitions().map((item) =>
+          this.definitionView(item),
+        );
         if (query.sourceType)
           items = items.filter((item) => item.sourceType === query.sourceType);
         if (query.zone)
@@ -1747,7 +1770,18 @@ export class AlertCenterRuntime {
       },
       listAlertHistory: (query) => this.db().queryAlertHistory(query),
       listDeliveries: (query) => {
-        const page = this.db().queryDeliveries(query.limit, query.cursor);
+        const page = this.db().queryDeliveries(
+          query.limit,
+          query.cursor,
+          query.includeTotal,
+          {
+            search: query.search,
+            state: query.state,
+            severity: query.severity,
+            from: query.from,
+            to: query.to,
+          },
+        );
         return {
           items: page.items.map((delivery) => this.deliveryView(delivery)),
           nextCursor: page.nextCursor,
@@ -2259,8 +2293,8 @@ export class AlertCenterRuntime {
       () => this.runScheduler(),
       () =>
         this.database
-          ?.listDefinitions()
-          .map((item) => this.definitionView(item)) ?? [],
+          ? this.visibleDefinitions().map((item) => this.definitionView(item))
+          : [],
       async (id) => {
         const result = await repository.acknowledgeOccurrence(id);
         return Boolean(result && result !== "inactive");
@@ -2270,6 +2304,7 @@ export class AlertCenterRuntime {
         return Boolean(result && result !== "inactive");
       },
       canChangeOccurrence,
+      () => this.summary(),
     );
     registerAlertCenterRoutes(compatible, {
       defaultPolicy: () => this.policies().defaultPolicy(),

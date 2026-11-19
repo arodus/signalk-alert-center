@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { currentSchemaVersion, deliveryHistoryIndex } from "./schema";
 
 type Row = Record<string, unknown>;
 
@@ -254,7 +255,7 @@ export function migrateMessageSamples(database: DatabaseSync): boolean {
   const version = Number(
     (database.prepare("PRAGMA user_version").get() as Row).user_version,
   );
-  if (version > 4)
+  if (version > currentSchemaVersion)
     throw new Error("Alert Center database was created by a newer version");
   if (version >= 2) return false;
   let changed = false;
@@ -278,14 +279,25 @@ export function migrateSuppression(database: DatabaseSync): boolean {
   return true;
 }
 
-/** Version 4: core identity and confirmed resolution survive plugin restarts.
+/** Version 4: bounded pending-first delivery history, inside the schema transaction. */
+export function migrateDeliveryHistoryIndex(database: DatabaseSync): boolean {
+  const version = Number(
+    (database.prepare("PRAGMA user_version").get() as Row).user_version,
+  );
+  if (version >= 4) return false;
+  database.exec(deliveryHistoryIndex);
+  database.exec("PRAGMA user_version = 4");
+  return true;
+}
+
+/** Version 5: core identity and confirmed resolution survive plugin restarts.
  * Runs inside the schema transaction; legacy rows and pending deliveries stay intact.
  */
 export function migrateCoreAlerts(database: DatabaseSync): boolean {
   const version = Number(
     (database.prepare("PRAGMA user_version").get() as Row).user_version,
   );
-  if (version >= 4) return false;
+  if (version >= 5) return false;
   if (!columns(database, "alert_occurrences").has("core_alert_id"))
     database.exec(
       "ALTER TABLE alert_occurrences ADD COLUMN core_alert_id TEXT",
@@ -299,7 +311,7 @@ export function migrateCoreAlerts(database: DatabaseSync): boolean {
       "ALTER TABLE alert_occurrences ADD COLUMN core_reannounce_pending INTEGER NOT NULL DEFAULT 0",
     );
   database.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS occurrences_core_id ON alert_occurrences(core_alert_id) WHERE core_alert_id IS NOT NULL; PRAGMA user_version = 4",
+    "CREATE UNIQUE INDEX IF NOT EXISTS occurrences_core_id ON alert_occurrences(core_alert_id) WHERE core_alert_id IS NOT NULL; PRAGMA user_version = 5",
   );
   return true;
 }

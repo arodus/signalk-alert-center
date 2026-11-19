@@ -257,6 +257,63 @@ describe("alert-center routes", () => {
     expect(busy.body).toMatchObject({ error: { code: "TEST_IN_PROGRESS" } });
   });
 
+  it("passes unified search, state, severity, and date filters to paginated APIs", async () => {
+    const current = fixture();
+    await current.invoke("GET", "/deliveries", {
+      query: {
+        search: "anchor",
+        state: "failed_retryable",
+        severity: "alarm",
+        from: "2026-11-01T00:00:00.000Z",
+        to: "2026-11-18T00:00:00.000Z",
+      },
+    });
+    expect(current.queries.at(-1)).toMatchObject({
+      search: "anchor",
+      state: "failed_retryable",
+      severity: "alarm",
+      from: new Date("2026-11-01T00:00:00.000Z"),
+      to: new Date("2026-11-18T00:00:00.000Z"),
+    });
+    await current.invoke("GET", "/alert-history", {
+      query: { search: "stowage", eventType: "raised" },
+    });
+    expect(current.queries.at(-1)).toMatchObject({
+      search: "stowage",
+      eventType: "raised",
+    });
+    await current.invoke("GET", "/occurrences", {
+      query: { search: "battery" },
+    });
+    expect(current.queries.at(-1)).toMatchObject({ search: "battery" });
+    for (const query of [
+      { state: "invalid" },
+      { search: ["anchor", "battery"] },
+      { from: "not-a-date" },
+      { includeTotal: "perhaps" },
+      { severity: "critical" },
+      { from: "2026-11-18T00:00:00Z", to: "2026-11-01T00:00:00Z" },
+    ]) {
+      const invalid = await current.invoke("GET", "/deliveries", { query });
+      expect(invalid.statusCode).toBe(400);
+    }
+  });
+
+  it("validates optional lifetime totals without changing delivery pagination", async () => {
+    const current = fixture();
+    await current.invoke("GET", "/deliveries", {
+      query: { includeTotal: "false", limit: "2" },
+    });
+    expect(current.queries.at(-1)).toMatchObject({
+      includeTotal: false,
+      limit: 2,
+    });
+    const invalid = await current.invoke("GET", "/deliveries", {
+      query: { includeTotal: "maybe" },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
   it("pages delivery summaries, details, attempts, retries, and deletes", async () => {
     const current = fixture();
     const list = await current.invoke("GET", "/deliveries", {
@@ -270,6 +327,7 @@ describe("alert-center routes", () => {
     expect(current.queries.at(-1)).toEqual({
       limit: 25,
       cursor: "previous",
+      includeTotal: true,
     });
 
     const detail = await current.invoke("GET", "/deliveries/:id", {
@@ -562,7 +620,14 @@ describe("legacy alert routes", () => {
       async (id) => id === "active",
       async () => false,
       (_request, id) => (id === "active" ? true : undefined),
+      () => ({ alerts: { pendingDelivery: 2, undeliveredDelivery: 3 } }),
     );
+
+    const summaryResponse = new FakeResponse();
+    handlers.get("GET /summary")!({}, summaryResponse);
+    expect(summaryResponse.body).toEqual({
+      alerts: { pendingDelivery: 2, undeliveredDelivery: 3 },
+    });
 
     const invoke = async (path: string, id: string) => {
       const response = new FakeResponse();
@@ -741,6 +806,7 @@ describe("occurrence authorization", () => {
         acknowledge,
         silence,
         () => false,
+        () => ({}),
       );
       const response = new FakeResponse();
       handlers.get(`POST /alerts/:id/${action}`)!(

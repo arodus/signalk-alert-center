@@ -2,7 +2,8 @@ import { SuppressionStore } from "../src/suppression/store";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AlertDatabase } from "../src/storage/db";
 import {
   CoreAlert,
@@ -436,35 +437,141 @@ describe("core alerts migration", () => {
     expect(queue.depth).toBe(2);
   });
 
-  it("migrates version 3 without losing legacy delivery state, then retains core IDs across restarts", () => {
-    const directory = mkdtempSync(join(tmpdir(), "core-migration-"));
-    directories.push(directory);
-    const filename = join(directory, "alerts.sqlite");
-    let db = new AlertDatabase(filename);
-    const legacy = db.ingest(
-      {
-        sourceKey: "notifications.old",
-        path: "notifications.old",
-        state: "active",
-        severity: "emergency",
-      },
-      ["crew"],
-    )!;
-    const delivery = db.listDeliveries()[0];
-    db.db.exec(
-      "DROP INDEX occurrences_core_id; ALTER TABLE alert_occurrences DROP COLUMN core_alert_id; ALTER TABLE alert_occurrences DROP COLUMN core_resolution_confirmed; ALTER TABLE alert_occurrences DROP COLUMN core_reannounce_pending; PRAGMA user_version=3",
-    );
-    db.close();
-    db = new AlertDatabase(filename);
-    expect(db.schemaVersion()).toBe(4);
-    expect(db.getDelivery(delivery.id)?.state).toBe("pending");
-    expect(db.getAlert(legacy.id).coreAlert).toBeUndefined();
-    const native = ingest(db);
-    db.close();
-    db = new AlertDatabase(filename);
-    databases.push(db);
-    expect(db.migrationApplied).toBe(false);
-    expect(ingest(db).id).toBe(native.id);
-    expect(db.listDeliveries()).toHaveLength(3);
-  });
+  it.each([3, 4])(
+    "migrates version %i without losing legacy state, then retains core IDs across restarts",
+    (version) => {
+      const directory = mkdtempSync(join(tmpdir(), "core-migration-"));
+      directories.push(directory);
+      const filename = join(directory, "alerts.sqlite");
+      let db = new AlertDatabase(filename);
+      const legacy = db.ingest(
+        {
+          sourceKey: "notifications.old",
+          path: "notifications.old",
+          state: "active",
+          severity: "emergency",
+        },
+        ["crew"],
+      )!;
+      const delivery = db.listDeliveries()[0];
+      db.claimDelivery(delivery.id);
+      db.recordDeliveryFailure(delivery.id, "NETWORK", "Offline fixture", true);
+      db.setPolicy(legacy.definitionId!, {
+        enabled: true,
+        oneTime: true,
+        minimumSeverity: "alarm",
+        connectivity: { mode: "queue" },
+        activationDelaySeconds: 0,
+        notifierIds: ["crew"],
+        notifierRepeatOverrides: {},
+        overrideFields: ["notifierIds"],
+      });
+      const saved = {
+        occurrence: db.getAlert(legacy.id),
+        policy: db.getPolicy(legacy.definitionId!),
+        events: db.listAlertEvents(legacy.id),
+        attempts: db.listDeliveryAttempts(delivery.id),
+        deliveries: db.listDeliveries(),
+      };
+      if (version === 3)
+        db.db.exec("DROP INDEX deliveries_history_priority_idx");
+      db.db.exec(
+        `DROP INDEX occurrences_core_id; ALTER TABLE alert_occurrences DROP COLUMN core_alert_id; ALTER TABLE alert_occurrences DROP COLUMN core_resolution_confirmed; ALTER TABLE alert_occurrences DROP COLUMN core_reannounce_pending; PRAGMA user_version=${version}`,
+      );
+      db.close();
+      db = new AlertDatabase(filename);
+      expect(db.schemaVersion()).toBe(5);
+      expect(db.migrationApplied).toBe(true);
+      expect(db.getDelivery(delivery.id)?.state).toBe("failed_retryable");
+      expect({
+        occurrence: db.getAlert(legacy.id),
+        policy: db.getPolicy(legacy.definitionId!),
+        events: db.listAlertEvents(legacy.id),
+        attempts: db.listDeliveryAttempts(delivery.id),
+        deliveries: db.listDeliveries(),
+      }).toEqual(saved);
+      expect(
+        db.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name='deliveries_history_priority_idx'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(db.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(db.getAlert(legacy.id).coreAlert).toBeUndefined();
+      const native = ingest(db);
+      db.close();
+      db = new AlertDatabase(filename);
+      databases.push(db);
+      expect(db.migrationApplied).toBe(false);
+      expect(ingest(db).id).toBe(native.id);
+      expect(db.listDeliveries()).toHaveLength(3);
+    },
+  );
+  it.each([3, 4])(
+    "rolls back an interrupted v%i to v5 upgrade and retries on restart",
+    (version) => {
+      const directory = mkdtempSync(join(tmpdir(), "core-migration-rollback-"));
+      directories.push(directory);
+      const filename = join(directory, "alerts.sqlite");
+      const db = new AlertDatabase(filename);
+      db.db.exec(`DROP INDEX occurrences_core_id;
+      ALTER TABLE alert_occurrences DROP COLUMN core_alert_id;
+      ALTER TABLE alert_occurrences DROP COLUMN core_resolution_confirmed;
+      ALTER TABLE alert_occurrences DROP COLUMN core_reannounce_pending;
+      PRAGMA user_version=${version}`);
+      if (version === 3)
+        db.db.exec("DROP INDEX deliveries_history_priority_idx");
+      db.close();
+      const originalExec = DatabaseSync.prototype.exec;
+      let interrupted: DatabaseSync | undefined;
+      const fault = vi
+        .spyOn(DatabaseSync.prototype, "exec")
+        .mockImplementation(function (this: DatabaseSync, sql: string) {
+          originalExec.call(this, sql);
+          if (sql.includes("PRAGMA user_version = 5")) {
+            interrupted = this;
+            throw new Error("Synthetic core migration interruption");
+          }
+        });
+      try {
+        expect(() => new AlertDatabase(filename)).toThrow(
+          "Synthetic core migration interruption",
+        );
+      } finally {
+        fault.mockRestore();
+      }
+      expect(interrupted!.prepare("PRAGMA user_version").get()).toMatchObject({
+        user_version: version,
+      });
+      expect(
+        interrupted!
+          .prepare("PRAGMA table_info(alert_occurrences)")
+          .all()
+          .map((row) => row.name),
+      ).not.toContain("core_alert_id");
+      expect(
+        interrupted!
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name='occurrences_core_id'",
+          )
+          .get(),
+      ).toBeUndefined();
+      expect(
+        Boolean(
+          interrupted!
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE name='deliveries_history_priority_idx'",
+            )
+            .get(),
+        ),
+      ).toBe(version === 4);
+      interrupted!.close();
+      const recovered = new AlertDatabase(filename);
+      databases.push(recovered);
+      expect(recovered.schemaVersion()).toBe(5);
+      expect(recovered.migrationApplied).toBe(true);
+      expect(ingest(recovered).coreAlert?.id).toBe("core-1");
+    },
+  );
 });

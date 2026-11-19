@@ -16,6 +16,15 @@ const asRecord = (value: unknown): UnknownRecord | undefined =>
     ? (value as UnknownRecord)
     : undefined;
 
+/** Whether Signal K's built-in notification manager (including its zones engine) owns notifications. */
+export function serverManagesNotifications(app: unknown): boolean {
+  const root = asRecord(app);
+  const config = asRecord(root?.config);
+  const settings = asRecord(config?.settings);
+  const notifications = asRecord(settings?.notifications);
+  return notifications?.manageNotifications !== false;
+}
+
 const parseTimestamp = (value: unknown): Date | undefined => {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const timestamp = new Date(value);

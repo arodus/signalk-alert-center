@@ -55,10 +55,14 @@ are marked suppressed and recorded in history.
 
 ## Restart and upgrade
 
-Schema version 4 adds core identity, confirmed-resolution and deferred
-reannouncement fields transactionally. It preserves legacy rows, policies,
-delivery attempts and pending work. Back up the database before testing an
-unreleased build; older plugin builds cannot open schema version 4.
+Schema version 4 remains the delivery-history index introduced in v0.8.0.
+Schema version 5 adds core identity, confirmed-resolution and deferred
+reannouncement fields in a transaction. Upgrades from v3 run v4 and v5 together;
+v4 databases run only v5. History, saved policies, delivery attempts and pending
+work survive the upgrade and restart. An interrupted migration rolls back and
+retries on startup. Back up the database before testing this unreleased build;
+v0.8.0 and older builds cannot open schema version 5. Rollback requires the older
+package and the pre-upgrade database backup.
 
 Subscribe first, capture the current core `list()` immediately, then reconcile
 before processing queued deltas, overdue activation or wake work. `list()` is the
@@ -75,6 +79,23 @@ alerts. Core latching semantics take precedence over the
 legacy one-time policy for native alerts. Keep equivalent legacy producers and
 new rules from both raising the same physical condition during a test cutover.
 
+## Zone notification ownership
+
+When `settings.notifications.manageNotifications` is explicitly `false`, Alert
+Center skips metadata zone discovery and hides stored zone definitions that have
+no retained occurrences. This is a visibility filter: metadata and saved policies
+are not deleted, and direct definition/history access remains available. Definitions
+with actual legacy occurrences stay visible, including another producer using the
+same path as a stored zone. History and pending deliveries continue normally.
+Alert Rules' catalog remains visible. Missing settings retain the default behavior.
+
+Signal K's merged [PR #3103](https://github.com/SignalK/signalk-server/pull/3103)
+also makes this setting stop its built-in zones engine on restart. The pinned core
+acceptance server predates that change; Alert Center's filtering does not stop an
+older server or a separate `@signalk/zones` plugin from publishing notifications.
+Disabling notification management also disables the server's built-in legacy
+acknowledge/silence handling; use an appropriate external lifecycle handler.
+
 ## Per-rule delivery settings
 
 The dashboard reads `GET /plugins/signalk-alert-rules/rules` with the existing
@@ -83,7 +104,7 @@ disabled and invalid rules. Opening Alert Center, refreshing it or returning to
 its browser tab refreshes the catalog; other dashboard reloads reuse it for up
 to 15 seconds. No background server polling, additional token or access to the
 rules plugin's private files is needed. Read permission is sufficient to view
-the catalog; saving delivery settings requires read/write permission.
+the catalog; saving delivery settings requires an admin login.
 
 Rule discovery is a read-only dashboard operation. It does not create database
 occurrences, history, delivery work, audio or wake requests. Never-fired rules

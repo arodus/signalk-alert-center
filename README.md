@@ -88,6 +88,24 @@ pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
+### Appearance
+
+Use the sun/moon button in the top-right header to choose **Auto**, **Light**, or
+**Dark**. Auto is the default: it follows Signal K's
+`vessels.self.environment.mode` (`day` or `night`) and falls back to your device's
+appearance when that value is unavailable or unrecognised. The menu shows which
+source is being followed. Changes arrive through the existing live Signal K
+connection; no App Dock installation is required.
+
+Light and Dark override both Signal K and device changes. The choice is saved
+per browser profile and server address, survives reloads, and is shared between
+tabs for that server. It never changes the boat's shared mode or other devices.
+Choose Auto to resume following Signal K; clearing browser site data also resets
+the preference to Auto. If browser storage is blocked, the menu explains that the
+choice lasts only for the current page.
+
+![Alert Center in dark mode with the appearance menu open](./docs/screenshots/alert-center-dark.png)
+
 ### Access and permissions
 
 Reading alerts and history follows Signal K's read-only access settings, including
@@ -144,9 +162,53 @@ You can configure:
 
 ### Alert and delivery history
 
+A shared toolbar keeps search text, severity, and date bounds when switching
+between **Alerts**, **Alert history**, and **Deliveries**. **Clear** resets all
+filters. Search matches literal text (including `%` and `_`) in alert names,
+paths, sources, and messages. Matching ignores ASCII case; other characters match
+exactly. Deliveries also searches service names, operations,
+status codes, and errors; Alert history includes lifecycle event details. Searches
+run before pagination, so older matching records remain discoverable.
+
+Alerts searches retained occurrences as well as definitions that have never fired,
+while displaying current active occurrences first. A matching past occurrence can
+therefore find an alert whose current message has changed. The **Cleared history
+only** and date filters restrict this view to matching occurrences. Severity means
+current severity in Alerts, displayed event severity in Alert history, and the
+recorded delivery severity in Deliveries. Date bounds are inclusive and refer to
+occurrence start, lifecycle update, and delivery queue time respectively. Pending
+deliveries remain ahead of completed work even while filtering.
+
+The `/occurrences` and `/alert-history` APIs accept `search`; `/deliveries` accepts
+`search`, `state`, `severity`, `from`, and `to`. Filters combine with AND, totals
+count matching deliveries, and cursors must be reused with the same filters.
+
 **Alert history** is a chronological record of Signal K alert changes. It is
 separate from **Deliveries**, which tracks attempts to send those alerts to
-notification services.
+notification services. These tabs load when selected. The Deliveries badge counts
+undelivered items, including queued, retrying, paused, and permanently failed
+attempts; completed and suppressed deliveries remain in the full history but are
+excluded from the badge. The alert list loads independently, with preferred units
+filled in as background metadata requests complete. Detailed diagnostics load when
+the System diagnostics section is expanded.
+
+When Signal K’s `settings.notifications.manageNotifications` is explicitly `false`,
+Alert Center skips metadata zone discovery and hides stored zones with no retained
+occurrences.
+Saved policies, history and pending delivery remain intact. Actual legacy
+notifications (including on a stored zone path) and the Alert Rules catalog remain
+visible. See [zone ownership and upgrade notes](docs/core-alerts-migration.md#zone-notification-ownership).
+
+The dashboard uses a lightweight `/summary` endpoint and requests delivery pages
+with `includeTotal=false` to avoid counting the full history. Other API clients
+retain the existing `/status` response and lifetime delivery totals by default.
+Database schema version 4 adds the delivery-history index; schema version 5 adds
+core alert identity and lifecycle fields transactionally. Upgrades from v3 and v4
+are supported; the first startup may take longer while SQLite builds the index. Existing history, settings, and pending
+work are preserved, and no reset is required. Stop Signal K and back up the
+Alert Center SQLite database before upgrading. Version 0.8.0 and older cannot open the
+upgraded database; rollback requires the older package and the pre-upgrade backup,
+which does not contain history or delivery progress recorded after that backup.
 
 ![Chronological Signal K alert changes, separate from delivery attempts](./docs/screenshots/alert-history.png)
 
@@ -273,7 +335,7 @@ npm ci
 npm run build
 npm pack
 cd ~/.signalk
-npm install /path/to/signalk-alert-center-0.6.0.tgz
+npm install /path/to/signalk-alert-center-0.8.0.tgz
 ```
 
 Restart Signal K after installation. Docker installations should run the final
@@ -335,26 +397,34 @@ local state-recheck interval remain configurable in Alert Center.
 ## Notification paths to leave out
 
 Under **Storage & advanced → Notification paths to leave out**, enter one
-pattern per line. By default, Alert Center ignores per-target collision alarms:
+pattern per line. By default, Alert Center ignores per-target collision alarms
+and routine waypoint arrival notifications:
 
 ```json
 {
-  "ignoredPaths": ["navigation.closestApproach.*"]
+  "ignoredPaths": [
+    "navigation.closestApproach.*",
+    "navigation.course.arrivalCircleEntered",
+    "navigation.course.perpendicularPassed"
+  ]
 }
 ```
 
 Patterns match the whole notification path, with or without the leading
 `notifications.`. Matching is case-sensitive. Only `*` is special: it matches
 one or more characters, including dots between nested path segments. For example,
-the default matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
+the collision pattern matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
 and `navigation.closestApproach.radar:bridge:1`. An exact path matches only itself.
-Clear the list (or set `ignoredPaths: []`) to track all notification paths.
+The two course paths are exact matches; other course notifications remain tracked.
+Remove either course entry to track and deliver that notification, or clear the
+list (or set `ignoredPaths: []`) to track all notification paths.
 
 Matching updates and clears are skipped before queueing or creating definitions,
 history, deliveries, or connectivity requests. The same filter applies to startup
 snapshots and zone discovery. Other Signal K apps still receive these alerts.
 
-This default also applies after upgrading if `ignoredPaths` has never been set.
+These defaults also apply after upgrading if `ignoredPaths` has never been set.
+An explicitly saved list, including an empty list, is used unchanged.
 Existing definitions, history, per-alert settings, and queued delivery work are
 preserved. Existing occurrences stop receiving updates and clears while their
 path is ignored; ignoring a path does not cancel pending deliveries or wake work.

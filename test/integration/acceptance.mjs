@@ -188,6 +188,27 @@ const activeRemoval = await fetch(
 );
 assert.equal(activeRemoval.status, 409);
 
+const summary = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/summary`,
+);
+assert.equal(typeof summary.alerts.undeliveredDelivery, "number");
+assert.equal(
+  summary.alerts.undeliveredDelivery >= summary.alerts.pendingDelivery,
+  true,
+);
+assert.equal(Object.hasOwn(summary, "database"), false);
+const withoutTotal = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/deliveries?limit=1&includeTotal=false`,
+);
+assert.equal(Object.hasOwn(withoutTotal, "total"), false);
+const withTotal = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/deliveries?limit=1`,
+);
+assert.equal(typeof withTotal.total, "number");
+assert.deepEqual(
+  withoutTotal.items.map((item) => item.id),
+  withTotal.items.map((item) => item.id),
+);
 const status = await json(`${signalkUrl}/plugins/signalk-alert-center/status`);
 assert.equal(status.alerts.total >= 1, true);
 assert.equal(
@@ -195,7 +216,7 @@ assert.equal(
   true,
 );
 assert.equal(status.database.healthy, true);
-assert.equal(status.database.schemaVersion, 4);
+assert.equal(status.database.schemaVersion, 5);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);
@@ -672,6 +693,12 @@ const raiseIgnoredFixture = (path) =>
   });
 const collisionPath =
   "notifications.navigation.closestApproach.urn:mrn:imo:mmsi:244954000";
+const coursePaths = [
+  "notifications.navigation.course.arrivalCircleEntered",
+  "notifications.navigation.course.perpendicularPassed",
+];
+const defaultIgnoredPaths = [collisionPath, ...coursePaths];
+const otherCoursePath = "notifications.navigation.course.offCourse";
 const customIgnoredPath = "notifications.test.ignored.radar.bridge.1";
 const allowedPath = "notifications.test.allowed.voltage";
 try {
@@ -683,20 +710,41 @@ try {
     (status) => status.reconciliation.state === "complete",
     "default ignore startup",
   );
-  await raiseIgnoredFixture(collisionPath);
+  for (const path of defaultIgnoredPaths) await raiseIgnoredFixture(path);
+  await raiseIgnoredFixture(otherCoursePath);
   await raiseIgnoredFixture(allowedPath);
   await eventually(
     () => json(`${ignoredApi}/occurrences?source=ignored-paths.acceptance`),
-    (page) => page.items.some((item) => item.path === allowedPath),
+    (page) =>
+      [allowedPath, otherCoursePath].every((path) =>
+        page.items.some((item) => item.path === path),
+      ),
     "allowed notification persisted",
   );
+  // Reconcile the same ignored paths from the server snapshot after restart.
+  await saveIgnoredConfig(defaultConfig);
+  await eventually(
+    () => json(`${ignoredApi}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "default ignored snapshot reconciliation",
+  );
+  for (const path of defaultIgnoredPaths)
+    assert.equal(
+      (
+        await fetch(
+          `${ignoredApi}/definitions/${encodeURIComponent(`path:${path}`)}`,
+        )
+      ).status,
+      404,
+    );
+  const defaultOccurrences = await json(
+    `${ignoredApi}/occurrences?source=ignored-paths.acceptance`,
+  );
   assert.equal(
-    (
-      await fetch(
-        `${ignoredApi}/definitions/${encodeURIComponent(`path:${collisionPath}`)}`,
-      )
-    ).status,
-    404,
+    defaultOccurrences.items.some((item) =>
+      defaultIgnoredPaths.includes(item.path),
+    ),
+    false,
   );
 
   const customConfig = {
@@ -708,6 +756,14 @@ try {
     () => json(`${ignoredApi}/status`),
     (status) => status.reconciliation.state === "complete",
     "custom ignore startup",
+  );
+  await eventually(
+    () => json(`${ignoredApi}/occurrences?source=ignored-paths.acceptance`),
+    (page) =>
+      coursePaths.every((path) =>
+        page.items.some((item) => item.path === path),
+      ),
+    "explicit collision-only list resumes waypoint snapshot ingestion",
   );
   await raiseIgnoredFixture(customIgnoredPath);
   await raiseIgnoredFixture(`${allowedPath}.second`);

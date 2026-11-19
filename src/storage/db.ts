@@ -18,6 +18,8 @@ import {
   DeliveryAttemptPage,
   DeliveryPage,
   DeliveryRecord,
+  DeliveryState,
+  Severity,
   IngestOptions,
   NormalizedAlert,
   OccurrencePage,
@@ -26,8 +28,9 @@ import {
   WyomingPlaybackRecord,
   WyomingPlaybackState,
 } from "../alerts/types";
-import { currentSchemaVersion, schema } from "./schema";
+import { currentSchemaVersion, deliveryPrioritySql, schema } from "./schema";
 import {
+  migrateDeliveryHistoryIndex,
   migrateCoreAlerts,
   migrateLegacyRepeatSchema,
   migrateMessageSamples,
@@ -44,6 +47,14 @@ const coreDeliveryReady = `NOT EXISTS (
 )`;
 
 type Row = Record<string, unknown>;
+
+export interface DeliverySearchFilters {
+  search?: string;
+  state?: DeliveryState;
+  severity?: Severity;
+  from?: Date;
+  to?: Date;
+}
 
 export interface ServiceOperationalStatus {
   id: string;
@@ -242,24 +253,21 @@ const wyomingPlaybackRecord = (row: Row): WyomingPlaybackRecord => {
   };
 };
 
+// Use the same event severity for filtering and display, including escalation
+// and clear events whose severity differs from the occurrence's peak.
+const alertHistorySeveritySql = `CASE
+  WHEN e.event_type='severity_changed' AND json_type(e.payload_json, '$.to')='text'
+    THEN json_extract(e.payload_json, '$.to')
+  WHEN json_extract(e.payload_json, '$.state') IN ('normal', 'alert', 'warn', 'alarm', 'emergency')
+    THEN json_extract(e.payload_json, '$.state')
+  ELSE o.max_severity END`;
+
 const alertHistoryRecord = (row: Row): AlertHistoryRecord => {
   const payload = json(row.payload_json);
   const payloadRecord =
     payload && typeof payload === "object"
       ? (payload as Record<string, unknown>)
       : undefined;
-  const payloadSeverity =
-    typeof payloadRecord?.state === "string" &&
-    ["normal", "alert", "warn", "alarm", "emergency"].includes(
-      payloadRecord.state,
-    )
-      ? payloadRecord.state
-      : undefined;
-  const severity =
-    row.event_type === "severity_changed" &&
-    typeof payloadRecord?.to === "string"
-      ? payloadRecord.to
-      : (payloadSeverity ?? row.max_severity);
   return {
     id: Number(row.id),
     alertId: String(row.alert_id),
@@ -270,7 +278,7 @@ const alertHistoryRecord = (row: Row): AlertHistoryRecord => {
     sourceKey: String(row.source_key),
     source: row.source ? String(row.source) : undefined,
     state: row.current_state as AlertHistoryRecord["state"],
-    severity: severity as AlertHistoryRecord["severity"],
+    severity: row.event_severity as AlertHistoryRecord["severity"],
     message:
       row.event_type === "message_changed" &&
       typeof payloadRecord?.to === "string"
@@ -325,6 +333,9 @@ export class AlertDatabase {
       const soundMigrationApplied = soundMigrationResults.some(Boolean);
       const samplesMigrationApplied = migrateMessageSamples(this.db);
       const suppressionMigrationApplied = migrateSuppression(this.db);
+      const deliveryHistoryMigrationApplied = migrateDeliveryHistoryIndex(
+        this.db,
+      );
       const coreMigrationApplied = migrateCoreAlerts(this.db);
       this.db.exec("COMMIT");
       this.migrationApplied =
@@ -332,6 +343,7 @@ export class AlertDatabase {
         playbackMigrationApplied ||
         samplesMigrationApplied ||
         suppressionMigrationApplied ||
+        deliveryHistoryMigrationApplied ||
         coreMigrationApplied ||
         soundMigrationApplied;
     } catch (error) {
@@ -596,10 +608,22 @@ export class AlertDatabase {
     };
   }
 
-  listDefinitions(): AlertDefinitionRecord[] {
+  // Zone provenance does not exclude actual notifications from other producers.
+  // Hide metadata-only rows without deleting their policies or history access.
+  listDefinitions({ hideDormantZones = false } = {}): AlertDefinitionRecord[] {
     return (
       this.db
-        .prepare("SELECT id FROM alert_definitions ORDER BY name, id")
+        .prepare(
+          `SELECT id FROM alert_definitions
+          ${
+            hideDormantZones
+              ? `WHERE source_type != 'zone' OR EXISTS (
+            SELECT 1 FROM alert_occurrences WHERE definition_id=alert_definitions.id
+          )`
+              : ""
+          }
+          ORDER BY name, id`,
+        )
         .all() as Row[]
     ).map((row) => this.getDefinition(String(row.id)));
   }
@@ -1721,6 +1745,30 @@ export class AlertDatabase {
   queryAlertHistory(query: AlertHistoryQuery = {}): AlertHistoryPage {
     const clauses: string[] = [];
     const parameters: Array<string | number> = [];
+    const search = query.search?.trim();
+    if (search) {
+      const fields = [
+        "f.name",
+        "o.path",
+        "o.source_key",
+        "o.source",
+        `COALESCE(json_extract(e.message_sample_json, '$.message'),
+          CASE
+            WHEN e.event_type='message_changed' AND json_type(e.payload_json, '$.to')='text'
+              THEN json_extract(e.payload_json, '$.to')
+            WHEN json_type(e.payload_json, '$.message')='text'
+              THEN json_extract(e.payload_json, '$.message')
+            ELSE o.message END)`,
+        "e.event_type",
+        "replace(e.event_type, '_', ' ')",
+        "e.payload_json",
+        "e.message_sample_json",
+      ];
+      clauses.push(
+        `(${fields.map((field) => `instr(lower(COALESCE(${field}, '')), lower(?)) > 0`).join(" OR ")})`,
+      );
+      parameters.push(...fields.map(() => search));
+    }
     if (query.definitionId) {
       clauses.push("o.definition_id=?");
       parameters.push(query.definitionId);
@@ -1738,7 +1786,7 @@ export class AlertDatabase {
       parameters.push(query.state);
     }
     if (query.severity) {
-      clauses.push("o.max_severity=?");
+      clauses.push(`(${alertHistorySeveritySql})=?`);
       parameters.push(query.severity);
     }
     if (query.eventType) {
@@ -1771,7 +1819,8 @@ export class AlertDatabase {
       .prepare(
         `SELECT e.*, o.definition_id, o.occurrence_number, o.source_key,
            o.path, o.source, o.current_state, o.max_severity, o.message,
-           o.started_at, o.cleared_at, f.name AS definition_name
+           o.started_at, o.cleared_at, f.name AS definition_name,
+           ${alertHistorySeveritySql} AS event_severity
          FROM alert_events e
          JOIN alert_occurrences o ON o.id=e.alert_id
          LEFT JOIN alert_definitions f ON f.id=o.definition_id
@@ -1798,6 +1847,21 @@ export class AlertDatabase {
   queryOccurrences(query: OccurrenceQuery = {}): OccurrencePage {
     const clauses: string[] = [];
     const parameters: Array<string | number> = [];
+    const search = query.search?.trim();
+    if (search) {
+      clauses.push(`(
+        instr(lower(COALESCE(path, '')), lower(?)) > 0 OR
+        instr(lower(COALESCE(source_key, '')), lower(?)) > 0 OR
+        instr(lower(COALESCE(source, '')), lower(?)) > 0 OR
+        instr(lower(COALESCE(message, '')), lower(?)) > 0 OR
+        EXISTS (
+          SELECT 1 FROM alert_definitions f
+          WHERE f.id = alert_occurrences.definition_id
+            AND instr(lower(f.name), lower(?)) > 0
+        )
+      )`);
+      parameters.push(search, search, search, search, search);
+    }
     if (query.definitionId) {
       clauses.push("definition_id=?");
       parameters.push(query.definitionId);
@@ -1997,7 +2061,16 @@ export class AlertDatabase {
   pendingDeliveryCount(): number {
     const row = this.db
       .prepare(
-        "SELECT COUNT(*) AS count FROM deliveries WHERE state NOT IN ('delivered', 'failed_terminal', 'suppressed')",
+        "SELECT COUNT(*) AS count FROM deliveries WHERE state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')",
+      )
+      .get() as Row;
+    return Number(row.count);
+  }
+
+  undeliveredDeliveryCount(): number {
+    const row = this.db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM deliveries WHERE state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'failed_terminal', 'paused')",
       )
       .get() as Row;
     return Number(row.count);
@@ -2195,54 +2268,184 @@ export class AlertDatabase {
   }
 
   listRecentDeliveries(limit = 100): DeliveryRecord[] {
-    return this.queryDeliveries(limit).items;
+    return this.queryDeliveries(limit, undefined, false).items;
   }
 
-  queryDeliveries(limit = 30, cursor?: string): DeliveryPage {
+  queryDeliveries(
+    limit = 30,
+    cursor?: string,
+    includeTotal = true,
+    filters: DeliverySearchFilters = {},
+  ): DeliveryPage {
     const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-    const total = Number(
-      (this.db.prepare("SELECT COUNT(*) AS count FROM deliveries").get() as Row)
-        .count ?? 0,
-    );
-    let cursorPriority: number | undefined;
-    let cursorRowId: number | undefined;
+    if (
+      filters.search?.trim() ||
+      filters.state ||
+      filters.severity ||
+      filters.from ||
+      filters.to
+    )
+      return this.queryFilteredDeliveries(
+        boundedLimit,
+        cursor,
+        includeTotal,
+        filters,
+      );
+    const totals = includeTotal
+      ? {
+          total: Number(
+            (
+              this.db
+                .prepare("SELECT COUNT(*) AS count FROM deliveries")
+                .get() as Row
+            ).count,
+          ),
+        }
+      : {};
+    let priority = 0;
+    let beforeRowId: number | undefined;
     if (cursor) {
       const row = this.db
         .prepare(
-          `SELECT rowid,
-                  CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                       THEN 0 ELSE 1 END AS priority
-           FROM deliveries WHERE id=?`,
+          `SELECT rowid, ${deliveryPrioritySql} AS priority FROM deliveries WHERE id=?`,
         )
         .get(cursor) as Row | undefined;
-      if (!row) return { items: [], total };
-      cursorPriority = Number(row.priority);
-      cursorRowId = Number(row.rowid);
+      if (!row) return { items: [], ...totals };
+      priority = Number(row.priority);
+      beforeRowId = Number(row.rowid);
     }
-    const rows = this.db
-      .prepare(
-        `${deliveryContextSelect}
-         WHERE ? IS NULL
-            OR CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                    THEN 0 ELSE 1 END > ?
-            OR (CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                     THEN 0 ELSE 1 END = ? AND d.rowid < ?)
-         ORDER BY CASE WHEN d.state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused')
-                       THEN 0 ELSE 1 END,
-                  d.rowid DESC LIMIT ?`,
-      )
-      .all(
-        cursorPriority ?? null,
-        cursorPriority ?? null,
-        cursorPriority ?? null,
-        cursorRowId ?? null,
-        boundedLimit + 1,
-      ) as Row[];
-    const selected = rows.slice(0, boundedLimit).map(deliveryRecord);
+    // Seek each priority range separately. The index includes the implicit rowid;
+    // neither a whole-history sort nor context joins are needed to choose a page.
+    const ids: string[] = [];
+    for (; priority <= 1 && ids.length <= boundedLimit; priority++) {
+      const rows = this.db
+        .prepare(
+          `SELECT id FROM deliveries WHERE ${deliveryPrioritySql} = ?
+         ${beforeRowId === undefined ? "" : "AND rowid < ?"}
+         ORDER BY rowid DESC LIMIT ?`,
+        )
+        .all(
+          ...(beforeRowId === undefined
+            ? [priority, boundedLimit + 1 - ids.length]
+            : [priority, beforeRowId, boundedLimit + 1 - ids.length]),
+        ) as Row[];
+      ids.push(...rows.map((row) => String(row.id)));
+      beforeRowId = undefined;
+    }
+    const context = this.db.prepare(`${deliveryContextSelect} WHERE d.id=?`);
+    const items = ids
+      .slice(0, boundedLimit)
+      .map((id) => deliveryRecord(context.get(id) as Row));
     return {
-      items: selected,
-      nextCursor: rows.length > boundedLimit ? selected.at(-1)?.id : undefined,
-      total,
+      items,
+      nextCursor: ids.length > boundedLimit ? items.at(-1)?.id : undefined,
+      ...totals,
+    };
+  }
+
+  private queryFilteredDeliveries(
+    limit: number,
+    cursor: string | undefined,
+    includeTotal: boolean,
+    filters: DeliverySearchFilters,
+  ): DeliveryPage {
+    const fromSql = `FROM deliveries d
+      LEFT JOIN alert_occurrences o ON o.id=d.alert_id
+      LEFT JOIN alert_definitions f ON f.id=o.definition_id`;
+    const clauses: string[] = [];
+    const params: string[] = [];
+    const search = filters.search?.trim();
+    if (search) {
+      const fields = [
+        "f.name",
+        "o.path",
+        "o.source_key",
+        "o.source",
+        "CASE WHEN d.snapshot_at IS NOT NULL THEN d.snapshot_message ELSE o.message END",
+        "d.transport_instance_id",
+        "d.operation",
+        "d.state",
+        "replace(d.state, '_', ' ')",
+        "d.last_error_code",
+        "d.last_error_message",
+      ];
+      clauses.push(
+        `(${fields.map((field) => `instr(lower(COALESCE(${field}, '')), lower(?)) > 0`).join(" OR ")})`,
+      );
+      params.push(...fields.map(() => search));
+    }
+    if (filters.state) {
+      clauses.push("d.state=?");
+      params.push(filters.state);
+    }
+    if (filters.severity) {
+      clauses.push(
+        "(CASE WHEN d.snapshot_at IS NOT NULL THEN d.snapshot_severity ELSE o.max_severity END)=?",
+      );
+      params.push(filters.severity);
+    }
+    if (filters.from) {
+      clauses.push("d.created_at >= ?");
+      params.push(filters.from.toISOString());
+    }
+    if (filters.to) {
+      clauses.push("d.created_at <= ?");
+      params.push(filters.to.toISOString());
+    }
+    const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+    const totals = includeTotal
+      ? {
+          total: Number(
+            (
+              this.db
+                .prepare(`SELECT COUNT(*) AS count ${fromSql}${where}`)
+                .get(...params) as Row
+            ).count,
+          ),
+        }
+      : {};
+    let priority = 0;
+    let beforeRowId: number | undefined;
+    if (cursor) {
+      const row = this.db
+        .prepare(
+          `SELECT rowid, ${deliveryPrioritySql} AS priority FROM deliveries WHERE id=?`,
+        )
+        .get(cursor) as Row | undefined;
+      if (!row) return { items: [], ...totals };
+      priority = Number(row.priority);
+      beforeRowId = Number(row.rowid);
+    }
+    const prioritySql = deliveryPrioritySql.replace(/\bstate\b/g, "d.state");
+    const ids: string[] = [];
+    for (; priority <= 1 && ids.length <= limit; priority++) {
+      const predicates = [
+        `${prioritySql} = ?`,
+        ...clauses,
+        ...(beforeRowId === undefined ? [] : ["d.rowid < ?"]),
+      ];
+      const rows = this.db
+        .prepare(
+          `SELECT d.id ${fromSql} WHERE ${predicates.join(" AND ")}
+           ORDER BY d.rowid DESC LIMIT ?`,
+        )
+        .all(
+          priority,
+          ...params,
+          ...(beforeRowId === undefined ? [] : [beforeRowId]),
+          limit + 1 - ids.length,
+        ) as Row[];
+      ids.push(...rows.map((row) => String(row.id)));
+      beforeRowId = undefined;
+    }
+    const context = this.db.prepare(`${deliveryContextSelect} WHERE d.id=?`);
+    const items = ids
+      .slice(0, limit)
+      .map((id) => deliveryRecord(context.get(id) as Row));
+    return {
+      items,
+      nextCursor: ids.length > limit ? items.at(-1)?.id : undefined,
+      ...totals,
     };
   }
 

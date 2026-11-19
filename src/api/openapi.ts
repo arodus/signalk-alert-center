@@ -35,11 +35,20 @@ const occurrenceWriteDescription =
   "Requires Signal K readwrite or admin access and ACL put permission on the occurrence's exact alerts.* (core) or notifications.* (legacy) path in vessels.self. Returns 403 before any upstream or local change when permission is denied or the permission checker is unavailable.";
 const page = (item: string, includeTotal = false) => ({
   type: "object",
-  required: ["items", ...(includeTotal ? ["total"] : [])],
+  required: ["items"],
   properties: {
     items: { type: "array", items: { $ref: item } },
     nextCursor: { type: "string" },
-    ...(includeTotal ? { total: { type: "integer", minimum: 0 } } : {}),
+    ...(includeTotal
+      ? {
+          total: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Lifetime delivery total; omitted when includeTotal=false.",
+          },
+        }
+      : {}),
   },
 });
 
@@ -64,6 +73,8 @@ export function getAlertCenterOpenApi() {
       "/alerts": {
         get: {
           summary: "List the legacy alert-definition catalog",
+          description:
+            "When manageNotifications is explicitly false, metadata-only zones without retained occurrences are hidden. Stored policies and direct definition/history access are preserved.",
           deprecated: true,
           responses: {
             "200": response("Alert definitions", {
@@ -152,10 +163,74 @@ export function getAlertCenterOpenApi() {
           },
         },
       },
+      "/summary": {
+        get: {
+          summary: "Get lightweight dashboard counts and current controls",
+          description:
+            "Uses indexed unfinished-delivery counts without aggregating historical occurrences or service diagnostics.",
+          responses: {
+            "200": response("Dashboard summary", {
+              $ref: "#/components/schemas/DashboardSummary",
+            }),
+            ...errors,
+          },
+        },
+      },
       "/deliveries": {
         get: {
           summary: "List recent delivery intents and their latest outcome",
-          parameters: pageParameters,
+          description:
+            "Filters combine with AND. Search also matches service names, operation, state and errors. Severity and message use the recorded delivery snapshot; from/to are inclusive queue-time bounds. Pending work precedes completed history. Reuse cursors only with unchanged filters.",
+          parameters: [
+            ...pageParameters,
+            {
+              name: "search",
+              in: "query",
+              description:
+                "Literal substring search across names, paths, sources and messages, applied before pagination. ASCII case and leading/trailing whitespace are ignored; percent and underscore are literal characters.",
+              schema: { type: "string" },
+            },
+            {
+              name: "state",
+              in: "query",
+              schema: {
+                type: "string",
+                enum: [
+                  "pending",
+                  "waiting_connectivity",
+                  "sending",
+                  "delivered",
+                  "failed_retryable",
+                  "failed_terminal",
+                  "paused",
+                  "suppressed",
+                ],
+              },
+            },
+            {
+              name: "severity",
+              in: "query",
+              schema: { $ref: "#/components/schemas/Severity" },
+            },
+            {
+              name: "from",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              name: "to",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              name: "includeTotal",
+              in: "query",
+              required: false,
+              description:
+                "Set false to skip counting matching deliveries across all pages (all retained deliveries when unfiltered). Items and cursor pagination are unchanged.",
+              schema: { type: "boolean", default: true },
+            },
+          ],
           responses: {
             "200": response(
               "Delivery page",
@@ -257,8 +332,9 @@ export function getAlertCenterOpenApi() {
       },
       "/definitions": {
         get: {
-          summary:
-            "List all known alert definitions, including never-fired zones",
+          summary: "List known alert definitions and enabled metadata zones",
+          description:
+            "When manageNotifications is explicitly false, metadata-only zones without retained occurrences are hidden. Definitions with actual legacy occurrences remain visible, including on the same zone path. Saved policies and history are preserved.",
           parameters: [
             ...pageParameters,
             { name: "zone", in: "query", schema: { type: "string" } },
@@ -403,6 +479,13 @@ export function getAlertCenterOpenApi() {
             "List alert lifecycle updates without notification-delivery data",
           parameters: [
             ...pageParameters,
+            {
+              name: "search",
+              in: "query",
+              description:
+                "Literal substring search across names, paths, sources and messages, applied before pagination. ASCII case and leading/trailing whitespace are ignored; percent and underscore are literal characters.",
+              schema: { type: "string" },
+            },
             { name: "definitionId", in: "query", schema: { type: "string" } },
             { name: "path", in: "query", schema: { type: "string" } },
             { name: "source", in: "query", schema: { type: "string" } },
@@ -443,6 +526,13 @@ export function getAlertCenterOpenApi() {
             "List alert occurrences in stable reverse chronological order",
           parameters: [
             ...pageParameters,
+            {
+              name: "search",
+              in: "query",
+              description:
+                "Literal substring search across names, paths, sources and messages, applied before pagination. ASCII case and leading/trailing whitespace are ignored; percent and underscore are literal characters.",
+              schema: { type: "string" },
+            },
             { name: "definitionId", in: "query", schema: { type: "string" } },
             { name: "path", in: "query", schema: { type: "string" } },
             { name: "source", in: "query", schema: { type: "string" } },
@@ -591,6 +681,43 @@ export function getAlertCenterOpenApi() {
             enabled: { type: "boolean" },
             updatedAt: { type: "string", format: "date-time" },
             source: { type: "string" },
+          },
+        },
+        DashboardSummary: {
+          type: "object",
+          required: ["alerts", "quietHours", "connectivity"],
+          properties: {
+            alerts: {
+              type: "object",
+              required: ["pendingDelivery", "undeliveredDelivery"],
+              properties: {
+                pendingDelivery: {
+                  type: "integer",
+                  minimum: 0,
+                  description:
+                    "Queued, waiting, sending, retrying, or paused deliveries.",
+                },
+                undeliveredDelivery: {
+                  type: "integer",
+                  minimum: 0,
+                  description:
+                    "Pending deliveries plus terminal failures. Delivered and suppressed items are excluded.",
+                },
+              },
+            },
+            snooze: { $ref: "#/components/schemas/Snooze" },
+            quietHours: { $ref: "#/components/schemas/QuietHoursControl" },
+            connectivity: {
+              type: "object",
+              required: ["state", "internetAvailability"],
+              properties: {
+                state: { type: "string" },
+                internetAvailability: {
+                  type: "object",
+                  additionalProperties: true,
+                },
+              },
+            },
           },
         },
         OperationalStatus: {

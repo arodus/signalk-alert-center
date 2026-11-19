@@ -1,4 +1,8 @@
-export const DEFAULT_IGNORED_PATHS = ["navigation.closestApproach.*"];
+export const DEFAULT_IGNORED_PATHS = [
+  "navigation.closestApproach.*",
+  "navigation.course.arrivalCircleEntered",
+  "navigation.course.perpendicularPassed",
+];
 
 /** Compile literal, whole-path patterns once per runtime start. Only * is special. */
 export function ignoredPathMatcher(
