@@ -142,6 +142,98 @@
         </button>
       </nav>
 
+      <form
+        id="unified-filters"
+        class="filter-row unified-filters"
+        role="search"
+        aria-label="Filter alert center records"
+      >
+        <label class="visually-hidden" for="unified-search">Search</label>
+        <input
+          id="unified-search"
+          type="search"
+          autocomplete="off"
+          placeholder="Search alerts, messages, paths, sources, services…"
+        />
+        <label for="unified-severity">Severity</label>
+        <select id="unified-severity" name="severity">
+          <option value="">All severities</option>
+          <option value="emergency">Emergency</option>
+          <option value="alarm">Alarm</option>
+          <option value="warn">Warning</option>
+          <option value="alert">Alert</option>
+          <option value="normal">Normal</option>
+        </select>
+        <span class="view-filter" data-filter-view="alerts">
+          <label for="state-filter">Show</label>
+          <select id="state-filter">
+            <option value="">All alerts and zones</option>
+            <option value="zones-active">Zones and active alerts</option>
+            <option value="active">Active alerts only</option>
+            <option value="cleared">Cleared history only</option>
+          </select>
+        </span>
+        <span class="view-filter" data-filter-view="history" hidden>
+          <label for="history-event-filter">Update</label>
+          <select id="history-event-filter">
+            <option value="">All updates</option>
+            <option value="raised">Raised</option>
+            <option value="cleared">Cleared</option>
+            <option value="severity_changed">Severity changed</option>
+            <option value="message_changed">Message changed</option>
+            <option value="updated">Updated</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="silenced">Silenced</option>
+          </select>
+        </span>
+        <span class="view-filter" data-filter-view="deliveries" hidden>
+          <label for="delivery-state-filter">Status</label>
+          <select id="delivery-state-filter">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="waiting_connectivity">
+              Waiting for connectivity
+            </option>
+            <option value="sending">Sending</option>
+            <option value="failed_retryable">Retrying</option>
+            <option value="failed_terminal">Permanently failed</option>
+            <option value="paused">Paused</option>
+            <option value="delivered">Delivered</option>
+            <option value="suppressed">Suppressed</option>
+          </select>
+        </span>
+        <details class="advanced-filters" id="unified-more">
+          <summary>More filters</summary>
+          <div class="advanced-filter-fields">
+            <label for="unified-from">From</label>
+            <input id="unified-from" type="datetime-local" />
+            <label for="unified-to">To</label>
+            <input id="unified-to" type="datetime-local" />
+            <span class="advanced-history" data-filter-view="history" hidden>
+              <label for="history-definition-filter">Alert</label>
+              <select id="history-definition-filter">
+                <option value="">All alerts</option>
+              </select>
+              <label for="history-state-filter">Current state</label>
+              <select id="history-state-filter">
+                <option value="">Any state</option>
+                <option value="active">Active</option>
+                <option value="cleared">Cleared</option>
+              </select>
+            </span>
+          </div>
+        </details>
+        <button type="submit" class="button button-primary button-small">
+          Apply
+        </button>
+        <button
+          id="unified-clear"
+          class="button button-quiet button-small"
+          type="button"
+        >
+          Clear
+        </button>
+      </form>
       <section
         id="alerts-panel"
         class="workspace tab-panel"
@@ -157,61 +249,6 @@
             </p>
           </div>
         </div>
-        <form id="history-filters" class="filter-row">
-          <label for="state-filter">Show</label
-          ><select id="state-filter" name="state">
-            <option value="" selected>All alerts and zones</option>
-            <option value="zones-active">Zones and active alerts</option>
-            <option value="active">Active alerts only</option>
-            <option value="cleared">Cleared history only</option>
-          </select>
-          <label for="alert-search" class="visually-hidden"
-            >Search alerts</label
-          >
-          <input
-            id="alert-search"
-            type="search"
-            placeholder="Search alerts, messages, or paths"
-          />
-          <label for="severity-filter">Severity</label
-          ><select id="severity-filter" name="severity">
-            <option value="">All</option>
-            <option>emergency</option>
-            <option>alarm</option>
-            <option>warn</option>
-            <option>alert</option>
-            <option>normal</option>
-          </select>
-          <details class="advanced-filters">
-            <summary>More filters</summary>
-            <div class="advanced-filter-fields">
-              <label for="path-filter">Signal K path</label>
-              <select id="path-filter" name="path">
-                <option value="">All paths</option>
-              </select>
-              <label for="source-filter">Signal K source</label>
-              <input
-                id="source-filter"
-                name="source"
-                placeholder="Exact source, for example gps.primary"
-              />
-              <label for="from-filter">Started after</label>
-              <input id="from-filter" name="from" type="datetime-local" />
-              <label for="to-filter">Started before</label>
-              <input id="to-filter" name="to" type="datetime-local" />
-            </div>
-          </details>
-          <button class="button button-primary button-small" type="submit">
-            Apply
-          </button>
-          <button
-            id="filters-clear"
-            class="button button-quiet button-small"
-            type="button"
-          >
-            Clear
-          </button>
-        </form>
         <p id="list-summary" class="field-help" role="status"></p>
         <p id="action-result" class="field-help" role="status"></p>
         <div id="definition-list" class="table-shell" aria-live="polite"></div>
@@ -233,67 +270,6 @@
             </p>
           </div>
         </div>
-        <form id="alert-history-filters" class="filter-row">
-          <label for="history-definition-filter">Alert</label>
-          <select id="history-definition-filter" name="definitionId">
-            <option value="">All alerts</option>
-          </select>
-          <label for="history-event-filter">Update</label>
-          <select id="history-event-filter" name="eventType">
-            <option value="">All updates</option>
-            <option value="raised">Raised</option>
-            <option value="cleared">Cleared</option>
-            <option value="severity_changed">Severity changed</option>
-            <option value="message_changed">Message changed</option>
-            <option value="updated">Updated</option>
-            <option value="acknowledged">Acknowledged</option>
-            <option value="silenced">Silenced</option>
-          </select>
-          <label for="history-severity-filter">Severity</label>
-          <select id="history-severity-filter" name="severity">
-            <option value="">All</option>
-            <option>emergency</option>
-            <option>alarm</option>
-            <option>warn</option>
-            <option>alert</option>
-            <option>normal</option>
-          </select>
-          <details class="advanced-filters">
-            <summary>More filters</summary>
-            <div class="advanced-filter-fields">
-              <label for="history-source-filter">Signal K source</label>
-              <input
-                id="history-source-filter"
-                name="source"
-                placeholder="Exact source"
-              />
-              <label for="history-state-filter">Current state</label>
-              <select id="history-state-filter" name="state">
-                <option value="">Any state</option>
-                <option value="active">Active</option>
-                <option value="cleared">Cleared</option>
-              </select>
-              <label for="history-from-filter">Updated after</label>
-              <input
-                id="history-from-filter"
-                name="from"
-                type="datetime-local"
-              />
-              <label for="history-to-filter">Updated before</label>
-              <input id="history-to-filter" name="to" type="datetime-local" />
-            </div>
-          </details>
-          <button class="button button-primary button-small" type="submit">
-            Apply
-          </button>
-          <button
-            id="alert-history-clear"
-            class="button button-quiet button-small"
-            type="button"
-          >
-            Clear
-          </button>
-        </form>
         <div id="alert-history-list" class="table-shell" aria-live="polite">
           <div class="empty">Loading alert history…</div>
         </div>

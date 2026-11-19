@@ -18,6 +18,7 @@ const state = {
   selectedDelivery: undefined,
   loading: false,
   view: undefined,
+  filterRevision: 0,
   historyRequest: 0,
   deliveryRequest: 0,
   statusRequest: 0,
@@ -532,11 +533,16 @@ function bindOccurrenceActions(root = elements.drawerBody) {
   );
 }
 
+// SQLite lower() folds ASCII only. Keep local definition matching consistent.
+function searchText(value = "") {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
 function renderDefinitions() {
   const showActive = $("#state-filter").value === "active";
   const showZonesActive = $("#state-filter").value === "zones-active";
-  const severity = $("#severity-filter").value;
-  const search = $("#alert-search").value.trim().toLocaleLowerCase();
+  const severity = $("#unified-severity").value;
+  const search = searchText($("#unified-search").value.trim());
   const historyFiltered = hasHistoryFilters();
   const visible = state.definitions
     .flatMap((definition) => {
@@ -569,27 +575,29 @@ function renderDefinitions() {
         !showZonesActive || active || definitionZones(definition).length > 0,
     )
     .filter(
-      ({ definition }) =>
-        !$("#path-filter").value ||
-        definition.pathPattern === $("#path-filter").value,
-    )
-    .filter(
       (entry) =>
         !severity ||
         (historyFiltered
           ? entry.latest?.currentSeverity
           : definitionStatus(entry)) === severity,
     )
-    .filter(({ definition, latest }) =>
-      [
-        definition.name,
-        definition.pathPattern,
-        latest?.message,
-        latest?.sourceKey,
-      ]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(search),
+    .filter(
+      ({ definition }) =>
+        !search ||
+        historyFiltered ||
+        [definition.name, definition.pathPattern].some((value) =>
+          searchText(value).includes(search),
+        ) ||
+        state.occurrences.some(
+          (occurrence) =>
+            occurrence.definitionId === definition.id &&
+            [
+              occurrence.message,
+              occurrence.sourceKey,
+              occurrence.source,
+              occurrence.path,
+            ].some((value) => searchText(value).includes(search)),
+        ),
     )
     .sort(
       (left, right) =>
@@ -723,7 +731,7 @@ function renderDeliveries(deliveries) {
             </tr>`;
           })
           .join("")}</tbody></table>`
-    : '<div class="empty"><strong>No deliveries yet</strong><p>Delivery attempts appear here after an alert sends to a notification service.</p></div>';
+    : '<div class="empty"><strong>No deliveries found</strong><p>No deliveries match the current filters.</p></div>';
   elements.moreDeliveries.hidden = !state.deliveryCursor;
   document.querySelectorAll("[data-delivery-id]").forEach((row) => {
     const open = () => openDelivery(row.dataset.deliveryId);
@@ -799,37 +807,15 @@ function renderAlertHistory() {
     });
   });
 }
-function occurrenceParams(cursor) {
-  const params = new URLSearchParams({ limit: "100" });
-  if (cursor) params.set("cursor", cursor);
-  for (const id of ["state", "severity", "path", "source"]) {
-    const value = $(`#${id}-filter`).value.trim();
-    if (id === "state" && value === "zones-active") continue;
-    if (value) params.set(id, value);
-  }
-  for (const id of ["from", "to"]) {
-    const value = $(`#${id}-filter`).value;
-    if (value) params.set(id, new Date(value).toISOString());
-  }
-  return params;
-}
-
-function alertHistoryParams(cursor) {
-  const params = new URLSearchParams({ limit: "50" });
-  if (cursor) params.set("cursor", cursor);
+function sharedFilterParams() {
+  const params = new URLSearchParams();
+  const search = $("#unified-search").value.trim();
+  if (search) params.set("search", search);
+  const severity = $("#unified-severity").value;
+  if (severity) params.set("severity", severity);
   for (const [field, id] of [
-    ["definitionId", "history-definition-filter"],
-    ["eventType", "history-event-filter"],
-    ["severity", "history-severity-filter"],
-    ["source", "history-source-filter"],
-    ["state", "history-state-filter"],
-  ]) {
-    const value = $(`#${id}`).value.trim();
-    if (value) params.set(field, value);
-  }
-  for (const [field, id] of [
-    ["from", "history-from-filter"],
-    ["to", "history-to-filter"],
+    ["from", "unified-from"],
+    ["to", "unified-to"],
   ]) {
     const value = $(`#${id}`).value;
     if (value) params.set(field, new Date(value).toISOString());
@@ -837,23 +823,46 @@ function alertHistoryParams(cursor) {
   return params;
 }
 
+function occurrenceParams(cursor) {
+  const params = sharedFilterParams();
+  params.set("limit", "100");
+  if (cursor) params.set("cursor", cursor);
+  const stateValue = $("#state-filter").value;
+  if (stateValue === "active" || stateValue === "cleared")
+    params.set("state", stateValue);
+  return params;
+}
+
+function alertHistoryParams(cursor) {
+  const params = sharedFilterParams();
+  params.set("limit", "50");
+  if (cursor) params.set("cursor", cursor);
+  for (const [field, id] of [
+    ["definitionId", "history-definition-filter"],
+    ["eventType", "history-event-filter"],
+    ["state", "history-state-filter"],
+  ]) {
+    const value = $(`#${id}`).value;
+    if (value) params.set(field, value);
+  }
+  return params;
+}
+
+function deliveryParams(cursor) {
+  const params = sharedFilterParams();
+  params.set("limit", "50");
+  params.set("includeTotal", "false");
+  if (cursor) params.set("cursor", cursor);
+  const deliveryState = $("#delivery-state-filter").value;
+  if (deliveryState) params.set("state", deliveryState);
+  return params;
+}
+
 function hasHistoryFilters() {
   return (
     $("#state-filter").value === "cleared" ||
-    ["source-filter", "from-filter", "to-filter"].some(
-      (id) => $(`#${id}`).value,
-    )
+    Boolean($("#unified-from").value || $("#unified-to").value)
   );
-}
-
-function renderPathOptions() {
-  const select = $("#path-filter");
-  const selected = select.value;
-  const paths = [
-    ...new Set(state.definitions.map((item) => item.pathPattern)),
-  ].sort();
-  select.innerHTML = `<option value="">All paths</option>${paths.map((path) => `<option value="${escapeHtml(path)}">${escapeHtml(path)}</option>`).join("")}`;
-  if (paths.includes(selected)) select.value = selected;
 }
 
 function renderAlertHistoryDefinitionOptions() {
@@ -869,11 +878,14 @@ function renderAlertHistoryDefinitionOptions() {
 
 async function loadDeliveries(append = false) {
   const request = ++state.deliveryRequest;
-  const params = new URLSearchParams({ limit: "50", includeTotal: "false" });
-  if (append && state.deliveryCursor)
-    params.set("cursor", state.deliveryCursor);
+  const revision = state.filterRevision;
+  const filterKey = deliveryParams().toString();
+  append &&= state.deliveryFilterKey === filterKey;
+  const params = deliveryParams(append ? state.deliveryCursor : undefined);
   const page = await api(`/deliveries?${params}`);
-  if (request !== state.deliveryRequest) return;
+  if (request !== state.deliveryRequest || revision !== state.filterRevision)
+    return;
+  state.deliveryFilterKey = filterKey;
   state.deliveries = append
     ? mergeById(state.deliveries, pageItems(page))
     : pageItems(page);
@@ -882,10 +894,16 @@ async function loadDeliveries(append = false) {
 }
 async function loadAlertHistory(append = false, preserveLoadedHistory = false) {
   const request = ++state.historyRequest;
+  const revision = state.filterRevision;
+  const filterKey = alertHistoryParams().toString();
+  append &&= state.historyFilterKey === filterKey;
+  preserveLoadedHistory &&= state.historyFilterKey === filterKey;
   const page = await api(
     `/alert-history?${alertHistoryParams(append ? state.alertHistoryCursor : undefined)}`,
   );
-  if (request !== state.historyRequest) return;
+  if (request !== state.historyRequest || revision !== state.filterRevision)
+    return;
+  state.historyFilterKey = filterKey;
   state.historyLoaded = true;
   const previousCursor = state.alertHistoryCursor;
   state.alertHistory = append
@@ -960,6 +978,7 @@ async function load(preserveLoadedHistory = false) {
     return;
   }
   state.loading = true;
+  const revision = state.filterRevision;
   elements.error.hidden = true;
   elements.login.hidden = true;
   // Controls remain read-only until the independent access lookup succeeds.
@@ -969,13 +988,19 @@ async function load(preserveLoadedHistory = false) {
   loadVisibleView(preserveLoadedHistory);
   try {
     const historyFiltered = hasHistoryFilters();
+    const searchParams = new URLSearchParams({ limit: "100" });
+    const search = $("#unified-search").value.trim();
+    if (search) searchParams.set("search", search);
     const [definitions, activeOccurrences, occurrences] = await Promise.all([
       allPages("/definitions"),
       allPages("/occurrences?state=active"),
       historyFiltered
         ? allPages(`/occurrences?${occurrenceParams()}`)
-        : api("/occurrences?limit=100"),
+        : search
+          ? allPages(`/occurrences?${searchParams}`)
+          : api("/occurrences?limit=100"),
     ]);
+    if (revision !== state.filterRevision) return;
     state.definitions = definitions;
     state.activeDefinitionIds = new Set(
       activeOccurrences.map((item) => item.definitionId),
@@ -983,7 +1008,6 @@ async function load(preserveLoadedHistory = false) {
     state.occurrences = historyFiltered
       ? pageItems(occurrences)
       : mergeById(activeOccurrences, pageItems(occurrences));
-    renderPathOptions();
     renderAlertHistoryDefinitionOptions();
     elements.activeCount.textContent = activeOccurrences.length;
     elements.definitionCount.textContent = definitions.length;
@@ -1536,6 +1560,16 @@ function selectView(view, moveFocus = false) {
   $("#alerts-panel").hidden = view !== "alerts";
   $("#alert-history-panel").hidden = view !== "history";
   $("#deliveries-panel").hidden = view !== "deliveries";
+  const dateLabel = {
+    alerts: "Started",
+    history: "Updated",
+    deliveries: "Queued",
+  }[view];
+  $("label[for=unified-from]").textContent = `${dateLabel} after`;
+  $("label[for=unified-to]").textContent = `${dateLabel} before`;
+  document.querySelectorAll("[data-filter-view]").forEach((node) => {
+    node.hidden = node.dataset.filterView !== view;
+  });
   for (const [name, button] of [
     ["alerts", $("#alerts-tab")],
     ["history", $("#alert-history-tab")],
@@ -1554,8 +1588,10 @@ function selectView(view, moveFocus = false) {
   );
   // The initial load handles deep links; later selections fetch fresh tab data.
   if (previousView !== undefined && previousView !== view) {
+    clearTimeout(filterTimer);
     elements.error.hidden = true;
-    loadVisibleView();
+    if (view === "alerts") void load();
+    else loadVisibleView();
   }
 }
 
@@ -1567,33 +1603,35 @@ elements.notifierTests.addEventListener("click", (event) => {
   const button = event.target.closest("[data-test-notifier]");
   if (button) void runNotifierTest(button);
 });
-$("#history-filters").addEventListener("submit", (event) => {
+let filterTimer;
+function applyViewFilters() {
+  state.filterRevision++;
+  elements.error.hidden = true;
+  if (state.view === "history") void loadAlertHistory().catch(showError);
+  else if (state.view === "deliveries") void loadDeliveries().catch(showError);
+  else void load();
+}
+$("#unified-filters").addEventListener("submit", (event) => {
   event.preventDefault();
-  void load();
+  clearTimeout(filterTimer);
+  applyViewFilters();
 });
-$("#alert-history-filters").addEventListener("submit", (event) => {
-  event.preventDefault();
-  void loadAlertHistory().catch(showError);
+$("#unified-search").addEventListener("input", () => {
+  clearTimeout(filterTimer);
+  state.filterRevision++;
+  if (state.view === "alerts" && !hasHistoryFilters()) renderDefinitions();
+  filterTimer = setTimeout(applyViewFilters, 250);
 });
-$("#history-event-filter").addEventListener("change", () =>
-  loadAlertHistory().catch(showError),
-);
-$("#history-severity-filter").addEventListener("change", () =>
-  loadAlertHistory().catch(showError),
-);
-$("#history-definition-filter").addEventListener("change", () =>
-  loadAlertHistory().catch(showError),
-);
-$("#alert-history-clear").addEventListener("click", () => {
-  $("#alert-history-filters").reset();
-  void loadAlertHistory().catch(showError);
+$("#unified-filters").addEventListener("change", (event) => {
+  if (event.target.id !== "unified-search") {
+    clearTimeout(filterTimer);
+    applyViewFilters();
+  }
 });
-$("#state-filter").addEventListener("change", () => void load());
-$("#alert-search").addEventListener("input", renderDefinitions);
-$("#severity-filter").addEventListener("change", () => void load());
-$("#filters-clear").addEventListener("click", () => {
-  $("#history-filters").reset();
-  void load();
+$("#unified-clear").addEventListener("click", () => {
+  clearTimeout(filterTimer);
+  $("#unified-filters").reset();
+  applyViewFilters();
 });
 elements.moreDeliveries.addEventListener("click", () =>
   loadDeliveries(true).catch(showError),

@@ -517,7 +517,7 @@ h2 {
   background: var(--panel);
   box-shadow: 0 12px 28px rgb(13 42 45 / 16%);
 }
-#alert-search {
+#unified-search {
   flex: 1;
   min-width: 190px;
   padding: 9px 10px;
@@ -525,6 +525,25 @@ h2 {
   border-radius: 4px;
   background: var(--panel);
   font: inherit;
+}
+.unified-filters {
+  padding: 10px 16px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-top: 0;
+  background: var(--panel);
+}
+.view-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.view-filter[hidden],
+.advanced-history[hidden] {
+  display: none;
+}
+.advanced-history {
+  display: contents;
 }
 .empty strong {
   display: block;

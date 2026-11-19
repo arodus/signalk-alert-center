@@ -165,14 +165,55 @@ export function getAlertCenterOpenApi() {
       "/deliveries": {
         get: {
           summary: "List recent delivery intents and their latest outcome",
+          description:
+            "Filters combine with AND. Search also matches service names, operation, state and errors. Severity and message use the recorded delivery snapshot; from/to are inclusive queue-time bounds. Pending work precedes completed history. Reuse cursors only with unchanged filters.",
           parameters: [
             ...pageParameters,
+            {
+              name: "search",
+              in: "query",
+              description:
+                "Literal substring search across names, paths, sources and messages, applied before pagination. ASCII case and leading/trailing whitespace are ignored; percent and underscore are literal characters.",
+              schema: { type: "string" },
+            },
+            {
+              name: "state",
+              in: "query",
+              schema: {
+                type: "string",
+                enum: [
+                  "pending",
+                  "waiting_connectivity",
+                  "sending",
+                  "delivered",
+                  "failed_retryable",
+                  "failed_terminal",
+                  "paused",
+                  "suppressed",
+                ],
+              },
+            },
+            {
+              name: "severity",
+              in: "query",
+              schema: { $ref: "#/components/schemas/Severity" },
+            },
+            {
+              name: "from",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              name: "to",
+              in: "query",
+              schema: { type: "string", format: "date-time" },
+            },
             {
               name: "includeTotal",
               in: "query",
               required: false,
               description:
-                "Set false to skip counting the lifetime delivery history. Items and cursor pagination are unchanged.",
+                "Set false to skip counting matching deliveries across all pages (all retained deliveries when unfiltered). Items and cursor pagination are unchanged.",
               schema: { type: "boolean", default: true },
             },
           ],
@@ -423,6 +464,13 @@ export function getAlertCenterOpenApi() {
             "List alert lifecycle updates without notification-delivery data",
           parameters: [
             ...pageParameters,
+            {
+              name: "search",
+              in: "query",
+              description:
+                "Literal substring search across names, paths, sources and messages, applied before pagination. ASCII case and leading/trailing whitespace are ignored; percent and underscore are literal characters.",
+              schema: { type: "string" },
+            },
             { name: "definitionId", in: "query", schema: { type: "string" } },
             { name: "path", in: "query", schema: { type: "string" } },
             { name: "source", in: "query", schema: { type: "string" } },
@@ -463,6 +511,13 @@ export function getAlertCenterOpenApi() {
             "List alert occurrences in stable reverse chronological order",
           parameters: [
             ...pageParameters,
+            {
+              name: "search",
+              in: "query",
+              description:
+                "Literal substring search across names, paths, sources and messages, applied before pagination. ASCII case and leading/trailing whitespace are ignored; percent and underscore are literal characters.",
+              schema: { type: "string" },
+            },
             { name: "definitionId", in: "query", schema: { type: "string" } },
             { name: "path", in: "query", schema: { type: "string" } },
             { name: "source", in: "query", schema: { type: "string" } },
