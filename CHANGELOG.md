@@ -5,67 +5,72 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
-### Core alerts migration
-
-- Load rule catalogs and their delivery defaults without blocking the alert list.
-  Following a history or delivery hash link within the open dashboard selects
-  and loads that tab, preserving lazy history loading.
-
-- Skip metadata zone discovery when Signal K's `manageNotifications` setting is
-  explicitly false. Hide stored zones without retained occurrences while preserving
-  their settings; retain actual legacy alerts on the same paths, history, queued deliveries and
-  the Alert Rules catalog.
-- Keep v0.8.0's delivery-history index at schema v4 and upgrade v3/v4 databases
-  transactionally to v5 for core alerts. Back up the database before upgrading;
-  rollback to v0.8.0 or older requires the pre-upgrade backup.
-
-- Apply Signal K path permissions to core acknowledge/silence actions as well as
-  legacy notifications. ACL installations must grant `put` on the allowed
-  `alerts.*` paths separately from `notifications.*`. Read-only views remain
-  free of action/settings controls, and denied actions explain missing access.
-  Global snooze and the rule-editor link remain admin-only in the dashboard.
-
-- Recommend Signal K Alert Rules as the companion plugin for creating alert rules.
-- List every Alert Rules rule in the dashboard, including never-fired, disabled
-  and invalid rules, and configure its delivery before the first occurrence.
-  Wildcard instances share the rule's saved delivery settings while retaining
-  separate alert history. Settings survive restart and apply with the dashboard
-  closed. Rule conditions and thresholds remain in the linked Alert Rules app.
-
-- Consume the proposed Signal K core alerts API alongside legacy notifications,
-  preserving core IDs, grouped momentary alerts, condition/acknowledgment state,
-  source status and durable per-service delivery. Native acknowledgment and
-  silence use the core API; Wyoming follows core silence and attention state.
-- Preserve existing history and pending deliveries through database schema
-  version 5. Native `alerts.*` paths have separate delivery policies from legacy
-  notification paths. See [migration notes](docs/core-alerts-migration.md) for the
-  pinned development server and testing instructions.
-- Use core terminal removal reasons to send recovery for completed conditions and
-  acknowledgments, while marking displaced alerts without claiming recovery.
-  Queued initial deliveries and history remain durable. Missing or unknown reasons
-  remain unclassified unless recovery was independently confirmed.
-- Preserve Alert Rules' message units in the dashboard and all delivery services,
-  including speech. The updated rules plugin formats messages in the admin's units;
-  Alert Center no longer reinterprets differences or SI fallback values in that text.
-  Legacy notification unit conversion remains available.
+## [0.9.0] - 2026-11-19
 
 ### Features
 
+- Support Signal K core alerts alongside legacy notifications, with durable
+  per-service delivery, grouped momentary alerts, and separate condition,
+  acknowledgement, silence, and source status. Acknowledge and silence through
+  the core API; Wyoming follows core silence and attention state.
+- List Alert Rules definitions before they fire, including disabled and invalid
+  rules. Configure delivery once per rule; wildcard instances share those
+  settings while retaining separate history. Settings survive restart and work
+  with the dashboard closed. Alert Rules remains responsible for conditions and
+  thresholds and is recommended as an optional companion plugin.
 - Use one search and filter toolbar across Alerts, Alert history, and Deliveries.
   Search text, severity, and date bounds carry between tabs; each tab keeps its
   relevant status or update filters. Search includes names, messages, paths, and
   sources, plus service names and errors in Deliveries. Matching retained records
   are found before pagination, and delivery results retain pending-work priority.
-  History severity filters now match the severity displayed for each event,
-  and delivery message/severity filters use the recorded delivery snapshot.
-  No database migration or configuration change is required.
+  History severity filters match the displayed event severity; delivery filters
+  use recorded message and severity snapshots.
 
 ### Fixes
 
+- Load rule catalogs and delivery defaults without blocking the alert list.
+  History and delivery links within the open dashboard select and load their tab.
+- Respect Signal K's disabled notification management when discovering metadata
+  zones. Hide stored zones without retained occurrences while preserving their
+  settings. Actual legacy alerts, history, queued deliveries, and the Alert Rules
+  catalog remain available.
+- Use core terminal removal reasons to confirm recovery for completed conditions
+  and acknowledgements. Displaced alerts retain history and queued initial
+  deliveries without claiming recovery; superseded acknowledgement/recovery
+  work and repeats are suppressed. Missing or unknown reasons remain unclassified
+  unless recovery was independently confirmed.
+- Preserve Alert Rules' formatted messages and units in the dashboard and all
+  delivery services, including speech. Legacy notification unit conversion remains
+  available.
 - Ignore routine waypoint arrival-circle and perpendicular-passed notifications
   by default, alongside per-target collision alarms. Existing explicit
   `ignoredPaths` lists remain unchanged. Remove either exact course path from
   the list to track and deliver it; other course notifications remain tracked.
+- Refresh the README to describe the implemented core-alert support, rule
+  settings, manual installation, and upgrade requirements.
+
+### Compatibility, upgrade, and rollback
+
+- Core support activates when the server exposes the compatible core alerts API.
+  Legacy notification support remains available on Signal K Server 2.31.1.
+  See [compatibility notes](docs/core-alerts-migration.md) for the tested core
+  server and Alert Rules revisions. Compatibility with other core API revisions
+  has not been verified.
+- Stop Signal K and back up the Alert Center SQLite database before upgrading.
+  Schema 3 and 4 databases migrate transactionally to schema 5, preserving history,
+  policies, attempts, pending deliveries, and the delivery-history index.
+  Interrupted migrations roll back and retry on startup; no reset is required.
+- Version 0.8.0 and older cannot open schema 5. Rollback requires both the older
+  package and the pre-upgrade database backup. Restoring that backup discards
+  history and delivery progress recorded after it was taken.
+- Core `alerts.*` paths use separate delivery policies and permissions from legacy
+  `notifications.*` paths. ACL installations must grant `put` on allowed core
+  paths separately. Restricted admins are checked too; settings, rule-editor
+  links, maintenance, and dashboard snooze controls remain admin-only.
+- Legacy policies are not transferred automatically. Core history is not replayed
+  for alerts that began and ended while Alert Center was stopped; missing active
+  alerts do not prove recovery. Alert Rules messages use the producer's units for
+  all recipients, without per-recipient conversion.
 
 ## [0.8.0] - 2026-11-12
 

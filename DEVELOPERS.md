@@ -180,7 +180,7 @@ Regenerate the images after a material UI change.
 
 ## Schema changes
 
-The current schema remains version one. A change that would otherwise require a
+The current schema is version 5. A change that would otherwise require a
 database reset must include a focused, transactional, restart-safe migration for
 the immediately preceding supported schema. Tests must create the old shape on
 disk, reopen it through `AlertDatabase`, verify preserved records, and verify that

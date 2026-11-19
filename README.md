@@ -1,14 +1,5 @@
 # Signal K Alert Center
 
-Development builds also integrate with the proposed Signal K core alerts API.
-See [core alerts migration](docs/core-alerts-migration.md) for the tested PR
-branch, preserved legacy behavior, upgrade details and removal-reason handling.
-
-Alert Rules definitions are listed before they fire. Configure delivery once
-per rule; wildcard instances share that policy while keeping separate history.
-The dashboard uses your existing Signal K login to read rules, and saved delivery
-settings continue to work when the dashboard is closed.
-
 One place for your boat's alerts, history, and notification delivery. See live
 readings and configured Signal K zones, keep history across restarts, and queue
 notifications while offline for delivery when connectivity returns.
@@ -77,16 +68,37 @@ Open **Webapps → Signal K Alert Center** after enabling the plugin.
 
 The main table combines all known alert definitions:
 
-- Signal K paths that have been observed under `notifications.*`;
+- Signal K core alerts and legacy `notifications.*` paths;
+- Alert Rules definitions, including rules that have never fired;
 - paths defined by Signal K `meta.zones`, even before they fire;
 - the current state and severity, with active alerts first.
 
 Select an alert to see its latest occurrence, the five most recent occurrences,
-and its event history. **Acknowledge** and **Silence** use Signal K's notification
-API when the source supports those operations. They do not erase history or
+and its event history. **Acknowledge** and **Silence** use Signal K's core alerts
+or notification API when the source supports those operations. They do not erase history or
 pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
+
+### Core alerts and Alert Rules
+
+Alert Center supports Signal K core alerts alongside legacy notifications when
+the server provides the core alerts API. Core condition, acknowledgement,
+silence, and source status remain visible, with history and delivery tracked
+independently for each occurrence.
+
+[Signal K Alert Rules](https://github.com/hatlabs/signalk-alert-rules) is an
+optional companion for creating rules. Its definitions appear before they fire,
+including disabled and invalid rules. Configure delivery once per rule; wildcard
+instances share those settings while keeping separate history. Saved delivery
+settings survive restarts and work with the dashboard closed. Edit conditions
+and thresholds in Alert Rules.
+
+Core alerts use separate policies and permissions from legacy notifications;
+existing legacy policies are not transferred automatically. Alerts that both
+begin and end while Alert Center is stopped are not backfilled from core history.
+See [core alerts compatibility and migration](docs/core-alerts-migration.md) for
+the tested server API, lifecycle details, and migration limits.
 
 ### Appearance
 
@@ -199,17 +211,6 @@ Saved policies, history and pending delivery remain intact. Actual legacy
 notifications (including on a stored zone path) and the Alert Rules catalog remain
 visible. See [zone ownership and upgrade notes](docs/core-alerts-migration.md#zone-notification-ownership).
 
-The dashboard uses a lightweight `/summary` endpoint and requests delivery pages
-with `includeTotal=false` to avoid counting the full history. Other API clients
-retain the existing `/status` response and lifetime delivery totals by default.
-Database schema version 4 adds the delivery-history index; schema version 5 adds
-core alert identity and lifecycle fields transactionally. Upgrades from v3 and v4
-are supported; the first startup may take longer while SQLite builds the index. Existing history, settings, and pending
-work are preserved, and no reset is required. Stop Signal K and back up the
-Alert Center SQLite database before upgrading. Version 0.8.0 and older cannot open the
-upgraded database; rollback requires the older package and the pre-upgrade backup,
-which does not contain history or delivery progress recorded after that backup.
-
 ![Chronological Signal K alert changes, separate from delivery attempts](./docs/screenshots/alert-history.png)
 
 Failed deliveries can be deleted individually or in
@@ -307,6 +308,22 @@ physical speaker was audible.
 
 ## Installation and first run
 
+Requires Node.js 22.5 or newer. Legacy notification support is tested against
+Signal K Server 2.31.1; core alerts additionally require a server exposing the
+compatible core alerts API described in the [compatibility notes](docs/core-alerts-migration.md).
+
+### Upgrading to 0.9.0
+
+Stop Signal K and back up the Alert Center SQLite database before upgrading.
+The automatic schema-5 migration preserves history, settings, delivery attempts,
+and pending work. Databases on schema 3 or 4 are upgraded transactionally; an
+interrupted migration rolls back and retries on startup. No database reset is
+required.
+
+Version 0.8.0 and older cannot open schema 5. Rolling back requires both the older
+package and the pre-upgrade database backup; restoring that backup discards any
+history and delivery progress recorded since it was taken.
+
 ### From the Signal K App Store
 
 1. Open the Signal K **App Store**.
@@ -325,18 +342,17 @@ The default database is stored in the plugin's Signal K data directory. You do
 not need to enter an absolute path. Existing supported database layouts are
 migrated in place on startup.
 
-### Install without publishing to npm
+### Manual installation
 
-Download or clone this repository on the Signal K host, build it, and install the
-resulting package archive into the Signal K data directory:
+Download the package archive for the version you want from
+[GitHub Releases](https://github.com/arodus/signalk-alert-center/releases), then
+install it into the Signal K data directory:
 
 ```sh
-npm ci
-npm run build
-npm pack
-cd ~/.signalk
-npm install /path/to/signalk-alert-center-0.8.0.tgz
+npm install --prefix ~/.signalk /path/to/signalk-alert-center-0.9.0.tgz
 ```
+
+To build from source, see the [developer guide](./DEVELOPERS.md).
 
 Restart Signal K after installation. Docker installations should run the final
 `npm install` command inside the Signal K container or bake the archive into a
@@ -466,13 +482,14 @@ service selected for that alert.
 
 ## Operational notes
 
-- Alert Center subscribes to `notifications.*` and reconciles the current Signal K
-  notification tree at startup.
+- Alert Center reconciles core alerts and the legacy notification tree at
+  startup, then processes live updates. Missing core alerts are recorded as
+  removed without assuming the condition recovered.
 - A `normal`, `nominal`, cleared, or null notification transition clears the
   current occurrence but does not delete its history.
 - Delivery is persisted before network activity begins. Pending work is recovered
   after a Signal K or plugin restart.
-- Every Signal K severity-state change creates a new durable delivery cycle for
+- Every legacy notification severity-state change creates a new durable delivery cycle for
   services targeted by the earlier state. Each cycle keeps its own severity and
   message snapshot, even when the previous cycle is still queued or retrying.
   This includes escalation and de-escalation; a clear creates one recovery
