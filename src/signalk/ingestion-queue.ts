@@ -1,3 +1,8 @@
+import {
+  coreAlertSignature,
+  isCoreAlert,
+  normalizeCoreAlert,
+} from "./core-alerts";
 import { normalizeNotification } from "../alerts/normalize";
 import { SignalKNotificationInput } from "./notifications";
 
@@ -45,14 +50,18 @@ export class BoundedIngestionQueue {
 
   enqueue(entry: SignalKNotificationInput): EnqueueResult {
     this.received += 1;
-    const normalized = normalizeNotification(
-      entry.path,
-      entry.value,
-      entry.source,
-      entry.sourceTimestamp,
-    );
+    const normalized =
+      entry.kind === "core" && isCoreAlert(entry.value)
+        ? normalizeCoreAlert(entry.value)
+        : normalizeNotification(
+            entry.path,
+            entry.value,
+            entry.source,
+            entry.sourceTimestamp,
+          );
     const key = normalized.sourceKey;
     const signature = JSON.stringify([
+      normalized.coreAlert ? coreAlertSignature(normalized.coreAlert) : null,
       normalized.state,
       normalized.severity,
       normalized.message ?? null,

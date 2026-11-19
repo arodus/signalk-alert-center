@@ -169,7 +169,7 @@ test("refresh updates permissions and a path ACL denial is explained", async ({
         error: {
           code: "FORBIDDEN",
           message:
-            "You do not have permission to acknowledge this alert. Ask a Signal K administrator to grant access to this notification path.",
+            "You do not have permission to acknowledge this alert. Ask a Signal K administrator to grant access to this alert path.",
         },
       },
     }),

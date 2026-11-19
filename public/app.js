@@ -326,12 +326,13 @@ function alertName(definition) {
   const name = definition.name ?? definition.pathPattern;
   if (name !== definition.pathPattern) return name;
   return name
-    .replace(/^notifications\./, "")
+    .replace(/^(notifications|alerts)\./, "")
     .split(".")
     .map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2"))
     .join(" › ");
 }
 function definitionOrigin(sourceType) {
+  if (sourceType === "rule") return "Alert Rules";
   return (
     {
       zone: "Signal K threshold",
@@ -396,10 +397,19 @@ window.addEventListener("pageshow", (event) => {
 });
 function displayedMessage(item, live = false, message = item?.message) {
   if (!item) return message;
+  if (item.coreAlert?.$source === "signalk-alert-rules") return message;
   const definition = state.definitions.find(
     (entry) =>
       entry.id === item.definitionId || entry.pathPattern === item.path,
   );
+  // History and delivery summaries need not carry the full core snapshot.
+  if (
+    (item.source === "signalk-alert-rules" &&
+      item.sourceKey?.startsWith("core:")) ||
+    (definition?.sourceType === "rule" &&
+      definition.metadata?.rule?.provider === "signalk-alert-rules")
+  )
+    return message;
   const metadata =
     displayMetadata.get(definition?.pathPattern)?.metadata ??
     definition?.metadata ??
@@ -418,6 +428,7 @@ function displayedMessage(item, live = false, message = item?.message) {
 }
 
 function liveValueText(definition) {
+  if (definition.sourceType === "rule") return "—";
   const path = definition.pathPattern.replace(/^notifications\./, "");
   const reading = liveValues.values.get(path);
   if (!reading) return "—";
@@ -428,6 +439,7 @@ function liveValueText(definition) {
   return `${formatZoneNumber(displayed.zone.lower)}${displayed.units ? ` ${displayed.units}` : ""}`;
 }
 function liveAgeText(definition) {
+  if (definition.sourceType === "rule") return "—";
   const reading = liveValues.values.get(
     definition.pathPattern.replace(/^notifications\./, ""),
   );
@@ -459,6 +471,8 @@ function renderLiveValues() {
     if (occurrence && isZoneMessage(occurrence.message)) {
       summary.textContent = [
         displayedMessage(occurrence, Boolean(row.dataset.occurrenceId)),
+        definition.ruleStatus,
+        definition.sourceType === "rule" ? occurrence.path : "",
         definitionZones(definition).length
           ? `Configured zone · ${definitionZones(definition).length} thresholds`
           : "",
@@ -475,7 +489,12 @@ const liveAgeTimer = setInterval(() => {
 window.addEventListener("pagehide", () => clearInterval(liveAgeTimer));
 
 async function loadDisplayUnits(definition) {
-  if (!definition) return;
+  if (
+    !definition ||
+    definition.pathPattern.startsWith("alerts.") ||
+    definition.sourceType === "rule"
+  )
+    return;
   const cached = displayMetadata.get(definition.pathPattern);
   if (cached && Date.now() - cached.at < 60_000) {
     definition.metadata = { ...definition.metadata, ...cached.metadata };
@@ -510,6 +529,22 @@ async function loadDisplayUnits(definition) {
   } catch {
     // Keep the detail usable when live metadata is unavailable.
   }
+}
+function occurrenceState(occurrence) {
+  const core = occurrence?.coreAlert;
+  if (!core) return occurrence?.state ?? "inactive";
+  const labels = {
+    unacknowledged: "Unacknowledged",
+    acknowledged: "Acknowledged",
+    "rtn-unacknowledged": "Ended · awaiting acknowledgment",
+    normal:
+      core.clearReason === "displaced"
+        ? "Displaced · recovery not confirmed"
+        : occurrence.coreResolutionConfirmed
+          ? "Resolved"
+          : "Removed · reason unconfirmed",
+  };
+  return `${labels[core.state] ?? core.state}${core.stale ? " · stale source" : ""}`;
 }
 function occurrenceActions(occurrence) {
   if (occurrence.state !== "active") return "";
@@ -585,9 +620,11 @@ function renderDefinitions() {
       ({ definition }) =>
         !search ||
         historyFiltered ||
-        [definition.name, definition.pathPattern].some((value) =>
-          searchText(value).includes(search),
-        ) ||
+        [
+          definition.name,
+          definition.pathPattern,
+          definition.metadata?.rule?.slug,
+        ].some((value) => searchText(value).includes(search)) ||
         state.occurrences.some(
           (occurrence) =>
             occurrence.definitionId === definition.id &&
@@ -611,7 +648,7 @@ function renderDefinitions() {
         alertName(left.definition).localeCompare(alertName(right.definition)),
     );
   $("#list-summary").textContent =
-    `${visible.length} shown · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
+    `${visible.length} shown · ${state.definitions.filter((item) => item.sourceType === "rule").length} rules · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
             <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>Last triggered</th><th>State</th><th data-required-access="readwrite"><span class="visually-hidden">Actions</span></th></tr></thead>
@@ -621,6 +658,8 @@ function renderDefinitions() {
             const hasHistory = Boolean(latest || item.fireCount);
             const alertSummary = [
               displayedMessage(latest, active),
+              item.ruleStatus,
+              active && item.sourceType === "rule" ? latest.path : "",
               definitionZones(item).length
                 ? `Configured zone · ${definitionZones(item).length} thresholds`
                 : "",
@@ -640,7 +679,7 @@ function renderDefinitions() {
             <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
             <td data-label="Age" class="live-age" title="Time since the sensor reading">${escapeHtml(liveAgeText(item))}</td>
             <td data-label="Last triggered" class="last-triggered-cell">${item.lastFiredAt ? `<time datetime="${escapeHtml(item.lastFiredAt)}">${escapeHtml(formatDate(item.lastFiredAt))}</time>` : '<span class="muted">Never</span>'}</td>
-            <td data-label="State" class="alert-state-cell ${escapeHtml(status)}" title="${escapeHtml(statusTitle)}">${escapeHtml(status)}</td>
+            <td data-label="State" class="alert-state-cell ${escapeHtml(latest?.coreAlert ? (active ? latest.currentSeverity : "inactive") : status)}" title="${escapeHtml(statusTitle)}">${escapeHtml(status)}</td>
             <td data-label="Actions" class="action-cell" data-required-access="readwrite"><div class="table-actions">${active ? occurrenceActions(occurrence) : ""}</div></td>
           </tr>`;
           })
@@ -665,6 +704,16 @@ function renderDefinitions() {
   bindOccurrenceActions(elements.definitions);
 }
 function definitionStatus({ definition, active, latest }) {
+  if (active && latest?.coreAlert) return occurrenceState(latest);
+  if (definition.sourceType === "rule")
+    return definition.ruleStatus === "Rule disabled"
+      ? "Disabled"
+      : definition.ruleStatus === "Invalid rule"
+        ? "Invalid rule"
+        : latest
+          ? "inactive"
+          : "Never fired";
+  if (latest?.coreAlert) return occurrenceState(latest);
   return active
     ? latest.currentSeverity
     : definitionZones(definition).length
@@ -673,7 +722,10 @@ function definitionStatus({ definition, active, latest }) {
 }
 
 function audioWasSkipped(item) {
-  return item.remoteId === "suppressed:method";
+  return (
+    item.remoteId === "suppressed:method" ||
+    item.remoteId === "suppressed:core-state"
+  );
 }
 function renderSkipReason(item) {
   return audioWasSkipped(item)
@@ -972,6 +1024,27 @@ async function loadMetadataInBackground() {
     metadataLoading = false;
   }
 }
+let ruleCatalogRequest = 0;
+async function loadRuleCatalog() {
+  const request = ++ruleCatalogRequest;
+  const catalog = await alertRules.catalog();
+  const defaults = catalog.entries.length
+    ? await api("/policy-defaults")
+    : undefined;
+  if (request !== ruleCatalogRequest) return;
+  state.ruleCatalog = catalog;
+  state.ruleDefaults = defaults;
+  state.definitions = alertRules.merge(
+    state.storedDefinitions ?? [],
+    catalog,
+    defaults,
+  );
+  $("#rule-catalog-status").textContent = catalog.message ?? "";
+  $("#rule-catalog-status").hidden = !catalog.message;
+  elements.definitionCount.textContent = state.definitions.length;
+  renderAlertHistoryDefinitionOptions();
+  renderDefinitions();
+}
 async function load(preserveLoadedHistory = false) {
   if (state.loading) {
     state.reloadQueued = true;
@@ -1001,7 +1074,12 @@ async function load(preserveLoadedHistory = false) {
           : api("/occurrences?limit=100"),
     ]);
     if (revision !== state.filterRevision) return;
-    state.definitions = definitions;
+    state.storedDefinitions = definitions;
+    state.definitions = alertRules.merge(
+      definitions,
+      state.ruleCatalog ?? { entries: [], unavailable: true },
+      state.ruleDefaults,
+    );
     state.activeDefinitionIds = new Set(
       activeOccurrences.map((item) => item.definitionId),
     );
@@ -1010,16 +1088,21 @@ async function load(preserveLoadedHistory = false) {
       : mergeById(activeOccurrences, pageItems(occurrences));
     renderAlertHistoryDefinitionOptions();
     elements.activeCount.textContent = activeOccurrences.length;
-    elements.definitionCount.textContent = definitions.length;
+    elements.definitionCount.textContent = state.definitions.length;
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     renderDefinitions();
     liveValues.setPaths([
       "environment.mode",
-      ...definitions.map((item) =>
-        item.pathPattern.replace(/^notifications\./, ""),
-      ),
+      ...definitions
+        .filter(
+          (item) =>
+            item.sourceType !== "rule" &&
+            !item.pathPattern.startsWith("alerts."),
+        )
+        .map((item) => item.pathPattern.replace(/^notifications\./, "")),
     ]);
     void loadMetadataInBackground().catch(showError);
+    void loadRuleCatalog().catch(showError);
   } catch (error) {
     showError(error);
   } finally {
@@ -1065,11 +1148,14 @@ async function mutateOccurrence(id, action) {
     await load();
     if (state.selectedOccurrence === id) await openOccurrence(id);
     const localAction = action === "acknowledge" ? "Acknowledged" : "Silenced";
-    elements.drawerResult.textContent = result.message
-      ? `${localAction} locally. ${result.message}`
-      : result.upstream === "applied"
-        ? `${localAction} locally and in Signal K.`
-        : `${localAction} locally.`;
+    elements.drawerResult.textContent =
+      result.status === "failed"
+        ? result.message || "Signal K did not confirm the action."
+        : result.message
+          ? `${localAction} locally. ${result.message}`
+          : result.upstream === "applied"
+            ? `${localAction} locally and in Signal K.`
+            : `${localAction} locally.`;
     $("#action-result").textContent = elements.drawerResult.textContent;
   } catch (error) {
     showError(error);
@@ -1167,7 +1253,7 @@ function recentOccurrencesMarkup(occurrences, selectedId) {
       ? `<div class="recent-occurrence-list">${occurrences
           .map(
             (occurrence) =>
-              `<button class="recent-occurrence${occurrence.id === selectedId ? " is-selected" : ""}" data-recent-occurrence-id="${escapeHtml(occurrence.id)}" type="button"${occurrence.id === selectedId ? ' aria-current="true"' : ""}><span><strong>Occurrence ${occurrence.occurrenceNumber}</strong><time>${formatDate(occurrence.startedAt)}</time></span><span><span class="alert-severity ${escapeHtml(occurrence.currentSeverity)}">${escapeHtml(occurrence.currentSeverity)}</span><small>${escapeHtml(occurrence.state)}</small></span></button>`,
+              `<button class="recent-occurrence${occurrence.id === selectedId ? " is-selected" : ""}" data-recent-occurrence-id="${escapeHtml(occurrence.id)}" type="button"${occurrence.id === selectedId ? ' aria-current="true"' : ""}><span><strong>Occurrence ${occurrence.occurrenceNumber}</strong><time>${formatDate(occurrence.startedAt)}</time></span><span><span class="alert-severity ${escapeHtml(occurrence.currentSeverity)}">${escapeHtml(occurrence.currentSeverity)}</span><small>${escapeHtml(occurrenceState(occurrence))}</small></span></button>`,
           )
           .join("")}</div>`
       : '<div class="empty compact-empty">This alert has never fired.</div>'
@@ -1182,6 +1268,15 @@ function bindRecentOccurrenceLinks() {
       ),
     );
 }
+function ruleDetails(definition) {
+  const rule = definition?.metadata?.rule;
+  if (!rule) return "";
+  const scope = definition.pathPattern.includes("*")
+    ? "Delivery settings apply to every instance of this rule. Each instance keeps its own alert history."
+    : "Delivery settings apply to this rule, including its first occurrence.";
+  return `<p class="field-help">${escapeHtml(definition.ruleStatus ?? "Rule status unavailable")} · ${scope}</p><p data-required-access="admin"><a href="/admin/#/e/signalk_alert_rules#rule=${encodeURIComponent(rule.slug)}" target="_blank" rel="noopener">Open rule in Alert Rules</a></p>`;
+}
+
 async function openDefinition(id) {
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
@@ -1191,15 +1286,17 @@ async function openDefinition(id) {
   elements.drawer.classList.add("is-open");
   elements.drawer.setAttribute("aria-hidden", "false");
   try {
-    const page = await api(
-      `/occurrences?definitionId=${encodeURIComponent(id)}&limit=5`,
-    );
+    const page = definition.catalogOnly
+      ? { items: [] }
+      : await api(
+          `/occurrences?definitionId=${encodeURIComponent(id)}&limit=5`,
+        );
     const recent = pageItems(page);
     if (recent.length) return openOccurrence(recent[0].id);
     await loadDisplayUnits(definition);
     state.selectedOccurrence = undefined;
     state.selectedDefinition = id;
-    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
+    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
     elements.drawerResult.textContent = "";
     elements.events.innerHTML =
       '<div class="empty">No occurrence timeline.</div>';
@@ -1227,7 +1324,7 @@ async function openOccurrence(id) {
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrence.state)}</dd></div><div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
     bindOccurrenceActions();
@@ -1412,13 +1509,15 @@ async function openPolicy(id) {
   elements.policyResult.textContent = "";
   const remove = $("#policy-remove");
   const hasActive = state.activeDefinitionIds.has(id);
-  remove.disabled = hasActive;
+  remove.disabled = hasActive || definition.catalogOnly === true;
   remove.title = hasActive
     ? "Clear the active alert in Signal K before removing its stored data"
     : "Permanently remove this alert, its settings, and its complete history";
-  $("#policy-remove-help").textContent = hasActive
-    ? "This alert is active. Clear it in Signal K before removing its stored data."
-    : "Permanently deletes this alert's settings and complete stored history. If Signal K still defines or publishes it, it will be discovered again using the current global defaults.";
+  $("#policy-remove-help").textContent = definition.catalogOnly
+    ? "This rule has no stored history or settings to remove. Manage the rule in Alert Rules."
+    : hasActive
+      ? "This alert is active. Clear it in Signal K before removing its stored data."
+      : "Permanently deletes this alert's settings and complete stored history. If Signal K still defines or publishes it, it will be discovered again using the current global defaults.";
   $("#notifier-options").innerHTML = state.notifiers.length
     ? state.notifiers
         .map((notifier) => {
@@ -1488,7 +1587,9 @@ async function savePolicy(event) {
   const notifierIds = [
     ...document.querySelectorAll('input[name="notifier"]:checked'),
   ].map((item) => item.value);
+  const definition = state.definitions.find((item) => item.id === id);
   const body = {
+    ...(definition?.ruleDescriptor ? { rule: definition.ruleDescriptor } : {}),
     overrideFields: selectedOverrideFields(),
     enabled: $("#policy-enabled").checked,
     activationDelaySeconds: Number($("#activation-delay").value),
@@ -1523,7 +1624,7 @@ async function savePolicy(event) {
       body: JSON.stringify(body),
     });
     state.definitions = state.definitions.map((item) =>
-      item.id === id ? updated : item,
+      item.id === id ? { ...item, ...updated, catalogOnly: false } : item,
     );
     renderDefinitions();
     elements.policyResult.textContent = "Policy saved.";
@@ -1598,7 +1699,16 @@ function selectView(view, moveFocus = false) {
 $(".system-diagnostics").addEventListener("toggle", (event) => {
   if (event.target.open) void loadDiagnostics().catch(showError);
 });
-$("#refresh").addEventListener("click", () => void load());
+$("#refresh").addEventListener("click", () => {
+  alertRules.invalidate();
+  void load();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    alertRules.invalidate();
+    void load();
+  }
+});
 elements.notifierTests.addEventListener("click", (event) => {
   const button = event.target.closest("[data-test-notifier]");
   if (button) void runNotifierTest(button);
@@ -1754,13 +1864,15 @@ $("#delete-failed").addEventListener("click", async () => {
     button.disabled = false;
   }
 });
-selectView(
-  location.hash === "#deliveries"
+function viewFromHash() {
+  return location.hash === "#deliveries"
     ? "deliveries"
     : location.hash === "#history"
       ? "history"
-      : "alerts",
-);
+      : "alerts";
+}
+window.addEventListener("hashchange", () => selectView(viewFromHash()));
+selectView(viewFromHash());
 connectLiveUpdates();
 void load();
 

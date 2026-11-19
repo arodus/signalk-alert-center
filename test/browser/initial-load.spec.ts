@@ -90,6 +90,39 @@ async function mockDashboard(page: Page) {
 
 test.beforeEach(async ({ page }) => mockDashboard(page));
 
+test("renders alerts while the rule catalog and its delivery defaults are pending", async ({
+  page,
+}) => {
+  let catalogRoute: Route | undefined;
+  let defaultsRoute: Route | undefined;
+  await page.route("**/plugins/signalk-alert-rules/rules", (route) => {
+    catalogRoute = route;
+  });
+  await page.route(`**${plugin}/policy-defaults`, (route) => {
+    defaultsRoute = route;
+  });
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator('[data-definition-id="depth-0"]')).toBeVisible();
+  await expect.poll(() => Boolean(catalogRoute)).toBe(true);
+  await catalogRoute!.fulfill({
+    json: [
+      {
+        slug: "never-fired",
+        alertPath: "test.catalog",
+        rule: { name: "Catalog alert" },
+      },
+    ],
+  });
+  await expect.poll(() => Boolean(defaultsRoute)).toBe(true);
+  await expect(page.locator('[data-definition-id="depth-0"]')).toBeVisible();
+  await defaultsRoute!.fulfill({
+    json: { notifierIds: [], connectivity: { mode: "queue" } },
+  });
+  await expect(
+    page.locator('[data-definition-id="rule:signalk-alert-rules:never-fired"]'),
+  ).toBeVisible();
+});
+
 test("renders and refreshes alerts while metadata, access, and summary are pending", async ({
   page,
 }) => {
@@ -269,6 +302,27 @@ for (const view of ["history", "deliveries"] as const) {
     await expect.poll(() => calls.length).toBe(4);
   });
 
+  test(`loads ${view} after hash navigation within the open dashboard`, async ({
+    page,
+  }) => {
+    const calls: string[] = [];
+    await page.route(`**${plugin}/${endpoint}?*`, (route) => {
+      calls.push(route.request().url());
+      return route.fulfill({ json: { items: [item("Hash entry")] } });
+    });
+    await page.goto("/signalk-alert-center/");
+    await expect(page.locator("#definition-list tbody tr")).toHaveCount(9);
+    expect(calls).toHaveLength(0);
+    await page.goto(`/signalk-alert-center/#${view}`);
+    await expect(page.locator(`#${tab}`)).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.locator(`#${panel}`)).toBeVisible();
+    await expect(page.locator(`#${panel}`)).toContainText("Hash entry");
+    expect(calls).toHaveLength(1);
+  });
+
   test(`opens a direct ${view} link and retries after a failed tab request`, async ({
     page,
   }) => {
@@ -439,7 +493,7 @@ test("loads full diagnostics only while expanded", async ({ page }) => {
     return route.fulfill({
       json: {
         health: { state: "healthy" },
-        database: { healthy: true, schemaVersion: 4, expectedSchemaVersion: 4 },
+        database: { healthy: true, schemaVersion: 5, expectedSchemaVersion: 5 },
         services: [
           {
             id: "Mock",
@@ -458,7 +512,7 @@ test("loads full diagnostics only while expanded", async ({ page }) => {
   expect(diagnosticsCalls).toBe(0);
   await page.locator(".system-diagnostics summary").click();
   await expect(page.locator("#health-state")).toHaveText("healthy");
-  await expect(page.locator("#diagnostics-list")).toContainText("schema 4/4");
+  await expect(page.locator("#diagnostics-list")).toContainText("schema 5/5");
   expect(diagnosticsCalls).toBe(1);
   await page.locator("#refresh").click();
   await expect.poll(() => diagnosticsCalls).toBe(2);

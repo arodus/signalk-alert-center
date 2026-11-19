@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
   extractNotificationEntries,
+  serverManagesNotifications,
   snapshotNotificationEntries,
 } from "../src/signalk/notifications";
+
+describe("Signal K notification ownership", () => {
+  it("defaults to the built-in manager unless explicitly disabled", () => {
+    expect(serverManagesNotifications({})).toBe(true);
+    expect(
+      serverManagesNotifications({
+        config: { settings: { notifications: { manageNotifications: true } } },
+      }),
+    ).toBe(true);
+    expect(
+      serverManagesNotifications({
+        config: { settings: { notifications: { manageNotifications: false } } },
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("Signal K notification input", () => {
   it("preserves update source and timestamp", () => {

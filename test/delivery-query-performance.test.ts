@@ -249,7 +249,7 @@ it("migrates version 3 transactionally and preserves history across repeated res
   const migrated = new AlertDatabase(filename);
   expect(migrated.migrationApplied).toBe(true);
   expect(migrated.db.prepare("PRAGMA user_version").get()).toMatchObject({
-    user_version: 4,
+    user_version: 5,
   });
   expect(
     migrated.listDeliveries().map((item) => [item.id, item.state]),
