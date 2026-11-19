@@ -5,6 +5,17 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Features
+
+- Use one search and filter toolbar across Alerts, Alert history, and Deliveries.
+  Search text, severity, and date bounds carry between tabs; each tab keeps its
+  relevant status or update filters. Search includes names, messages, paths, and
+  sources, plus service names and errors in Deliveries. Matching retained records
+  are found before pagination, and delivery results retain pending-work priority.
+  History severity filters now match the severity displayed for each event,
+  and delivery message/severity filters use the recorded delivery snapshot.
+  No database migration or configuration change is required.
+
 ### Fixes
 
 - Ignore routine waypoint arrival-circle and perpendicular-passed notifications

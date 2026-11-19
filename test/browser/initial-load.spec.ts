@@ -189,7 +189,7 @@ for (const failure of ["unavailable", "timeout"]) {
     await expect(page.locator("#definition-list tbody tr")).toHaveCount(9, {
       timeout: 2000,
     });
-    await page.locator("#alert-search").fill("Depth 8");
+    await page.locator("#unified-search").fill("Depth 8");
     await expect(page.locator("#definition-list tbody tr")).toHaveCount(1);
     if (failure === "timeout") {
       // Cross the real fetch timeout while exercising the visible list.
@@ -478,4 +478,136 @@ test("loads full diagnostics only while expanded", async ({ page }) => {
   await expect(page.locator("#delivery-tab-count")).toHaveText("4");
   await expect(page.locator("#notifier-tests button")).toBeDisabled();
   expect(diagnosticsCalls).toBe(2);
+});
+
+test("searches older sources before pagination and refreshes cleared results while typing", async ({
+  page,
+}) => {
+  const searches: URLSearchParams[] = [];
+  await page.route(`**${plugin}/occurrences?*`, (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (!params.has("search")) return route.fulfill({ json: { items: [] } });
+    searches.push(params);
+    const second = params.has("cursor");
+    const match = params.get("search") === "older-source";
+    return route.fulfill({
+      json: {
+        items:
+          match && second
+            ? [{ ...occurrences[1], source: "older-source" }]
+            : [],
+        nextCursor: match && !second ? "older" : undefined,
+      },
+    });
+  });
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(9);
+  await page.locator("#unified-search").fill("older-source");
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(1);
+  expect(searches.some((params) => params.get("cursor") === "older")).toBe(
+    true,
+  );
+  await page.locator("#state-filter").selectOption("cleared");
+  await expect
+    .poll(() => searches.some((params) => params.get("state") === "cleared"))
+    .toBe(true);
+  await page.locator("#unified-search").fill("missing-source");
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(0);
+  await page.locator("#unified-search").fill("older-source");
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(1);
+});
+
+test("carries shared filters between tabs and refreshes Alerts when returning", async ({
+  page,
+}) => {
+  await page.route(`**${plugin}/occurrences?*`, (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    return route.fulfill({
+      json: {
+        items:
+          params.has("search") || params.get("state") === "active"
+            ? occurrences.slice(0, 1)
+            : occurrences,
+      },
+    });
+  });
+  const calls: URL[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes(plugin)) calls.push(new URL(request.url()));
+  });
+  await page.goto("/signalk-alert-center/");
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(9);
+  await page.locator("#alert-history-tab").click();
+  await page.locator("#unified-search").fill("Depth 0");
+  await page.locator("#unified-severity").selectOption("alarm");
+  await page.locator("#unified-more summary").click();
+  await page.locator("#unified-from").fill("2026-01-01T00:00");
+  await page.locator("#unified-more summary").click();
+  await page.locator("#history-event-filter").selectOption("raised");
+  await expect
+    .poll(() =>
+      calls.some(
+        (url) =>
+          url.pathname.endsWith("/alert-history") &&
+          url.searchParams.has("from") &&
+          url.searchParams.get("search") === "Depth 0" &&
+          url.searchParams.get("eventType") === "raised",
+      ),
+    )
+    .toBe(true);
+  await page.locator("#deliveries-tab").click();
+  await page.locator("#delivery-state-filter").selectOption("paused");
+  await expect
+    .poll(() =>
+      calls.some(
+        (url) =>
+          url.pathname.endsWith("/deliveries") &&
+          url.searchParams.get("state") === "paused" &&
+          url.searchParams.get("severity") === "alarm" &&
+          url.searchParams.get("search") === "Depth 0" &&
+          !url.searchParams.has("eventType"),
+      ),
+    )
+    .toBe(true);
+  await page.locator("#alerts-tab").click();
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(1);
+  await expect(page.locator("#definition-list")).toContainText("Depth 0");
+  await page.locator("#unified-clear").click();
+  await expect(page.locator("#definition-list tbody tr")).toHaveCount(9);
+  await page.locator("#deliveries-tab").click();
+  await expect(page.locator("#delivery-state-filter")).toHaveValue("");
+  await expect(page.locator("#unified-search")).toHaveValue("");
+  await expect(page.locator("#unified-severity")).toHaveValue("");
+});
+
+test("discards history from the previous search before the debounce expires", async ({
+  page,
+}) => {
+  let pending: Route | undefined;
+  await page.route(`**${plugin}/alert-history?*`, (route) => {
+    if (new URL(route.request().url()).searchParams.has("search"))
+      return route.fulfill({ json: { items: [] } });
+    pending = route;
+  });
+  await page.goto("/signalk-alert-center/#history");
+  await expect.poll(() => Boolean(pending)).toBe(true);
+  await page.locator("#unified-search").fill("new search");
+  await pending!.fulfill({
+    json: {
+      items: [
+        {
+          id: 1,
+          alertId: "old",
+          name: "Stale search result",
+          eventType: "raised",
+        },
+      ],
+    },
+  });
+  await expect(page.locator("#alert-history-list")).not.toContainText(
+    "Stale search result",
+  );
+  await expect(page.locator("#alert-history-list")).toContainText(
+    "No alert updates found",
+  );
 });

@@ -1592,6 +1592,13 @@ export class AlertCenterRuntime {
           query.limit,
           query.cursor,
           query.includeTotal,
+          {
+            search: query.search,
+            state: query.state,
+            severity: query.severity,
+            from: query.from,
+            to: query.to,
+          },
         );
         return {
           items: page.items.map((delivery) => this.deliveryView(delivery)),

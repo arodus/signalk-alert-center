@@ -150,6 +150,27 @@ You can configure:
 
 ### Alert and delivery history
 
+A shared toolbar keeps search text, severity, and date bounds when switching
+between **Alerts**, **Alert history**, and **Deliveries**. **Clear** resets all
+filters. Search matches literal text (including `%` and `_`) in alert names,
+paths, sources, and messages. Matching ignores ASCII case; other characters match
+exactly. Deliveries also searches service names, operations,
+status codes, and errors; Alert history includes lifecycle event details. Searches
+run before pagination, so older matching records remain discoverable.
+
+Alerts searches retained occurrences as well as definitions that have never fired,
+while displaying current active occurrences first. A matching past occurrence can
+therefore find an alert whose current message has changed. The **Cleared history
+only** and date filters restrict this view to matching occurrences. Severity means
+current severity in Alerts, displayed event severity in Alert history, and the
+recorded delivery severity in Deliveries. Date bounds are inclusive and refer to
+occurrence start, lifecycle update, and delivery queue time respectively. Pending
+deliveries remain ahead of completed work even while filtering.
+
+The `/occurrences` and `/alert-history` APIs accept `search`; `/deliveries` accepts
+`search`, `state`, `severity`, `from`, and `to`. Filters combine with AND, totals
+count matching deliveries, and cursors must be reused with the same filters.
+
 **Alert history** is a chronological record of Signal K alert changes. It is
 separate from **Deliveries**, which tracks attempts to send those alerts to
 notification services. These tabs load when selected. The Deliveries badge counts

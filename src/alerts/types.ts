@@ -88,6 +88,7 @@ export interface AlertHistoryRecord extends AlertEventRecord {
 }
 
 export interface AlertHistoryQuery {
+  search?: string;
   definitionId?: string;
   path?: string;
   source?: string;
@@ -285,6 +286,7 @@ export interface IngestOptions {
 }
 
 export interface OccurrenceQuery {
+  search?: string;
   definitionId?: string;
   path?: string;
   source?: string;

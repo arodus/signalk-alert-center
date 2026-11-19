@@ -69,17 +69,18 @@ test("uses compact Signal K styling without overflowing the viewport", async ({
   ).toBe(true);
 });
 
-test("shows alerts, opens details, edits settings, and filters exact sources", async ({
+test("shows alerts, opens details, edits settings, and searches sources", async ({
   page,
 }) => {
   await page.goto("/signalk-alert-center/");
   await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
   expect(
-    await page.locator("#severity-filter option").allTextContents(),
-  ).toEqual(["All", "emergency", "alarm", "warn", "alert", "normal"]);
-  expect(
-    await page.locator("#history-severity-filter option").allTextContents(),
-  ).toEqual(["All", "emergency", "alarm", "warn", "alert", "normal"]);
+    await page
+      .locator("#unified-severity option")
+      .evaluateAll((options) =>
+        options.map((option) => (option as HTMLOptionElement).value),
+      ),
+  ).toEqual(["", "emergency", "alarm", "warn", "alert", "normal"]);
   await expect(page.locator("#health-state")).toHaveText("Not checked");
   const diagnostics = page.locator(".system-diagnostics");
   await expect(diagnostics).not.toHaveAttribute("open", "");
@@ -141,10 +142,11 @@ test("shows alerts, opens details, edits settings, and filters exact sources", a
   await page.getByRole("button", { name: "Cancel" }).click();
   await page.locator("#drawer-close").click();
 
-  const alertsPanel = page.locator("#alerts-panel");
-  await alertsPanel.getByText("More filters").click();
-  await page.locator("#source-filter").fill("demo.fridge.sensor");
-  await alertsPanel.getByRole("button", { name: "Apply" }).click();
+  await page.locator("#unified-search").fill("demo.fridge.sensor");
+  await page
+    .locator("#unified-filters")
+    .getByRole("button", { name: "Apply" })
+    .click();
   await expect(fridge).toBeVisible();
   await expect(page.locator("#definition-list")).not.toContainText(
     "High water detected",
@@ -407,7 +409,7 @@ test("shows an empty Deliveries tab", async ({ page }) => {
   await page.goto("/signalk-alert-center/#deliveries");
   await expect(page.locator("#deliveries-panel")).toBeVisible();
   await expect(page.locator("#delivery-list")).toContainText(
-    "No deliveries yet",
+    "No deliveries found",
   );
 });
 

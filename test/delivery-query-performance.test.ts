@@ -63,6 +63,11 @@ it("counts all undelivered states, excludes suppressed work, and keeps complete 
     ),
   );
   expect(db.queryDeliveries(2).total).toBe(8);
+  expect(
+    db
+      .queryDeliveries(10, undefined, true, { search: "failed retryable" })
+      .items.map((item) => item.state),
+  ).toEqual(["failed_retryable"]);
   expect(db.queryDeliveries(2, "missing-cursor", false)).toEqual({ items: [] });
   expect(db.deleteFailedDelivery(deliveries[5].id)).toBe("deleted");
   expect(db.undeliveredDeliveryCount()).toBe(5);
@@ -129,6 +134,107 @@ it("uses indexed counts and bounded cursor seeks with 100,000 completed deliveri
     );
     expect(detail).not.toMatch(/SCAN|TEMP B-TREE/);
   }
+});
+
+it("filters delivery search and status before pagination without changing the unfiltered path", () => {
+  const { db, deliveries } = fixture();
+  databases.push(db);
+  const matching = db.queryDeliveries(2, undefined, false, {
+    search: "performance",
+  });
+  expect(matching.items).toHaveLength(2);
+  expect(matching.nextCursor).toBeTruthy();
+  const following = db.queryDeliveries(10, matching.nextCursor, false, {
+    search: "performance",
+  });
+  expect(following.items).toHaveLength(6);
+  const onlyPending = db.queryDeliveries(20, undefined, true, {
+    state: "pending",
+    search: "synthetic",
+    severity: "alarm",
+  });
+  expect(onlyPending.items).toHaveLength(1);
+  expect(onlyPending.total).toBe(1);
+  const missing = db.queryDeliveries(20, undefined, false, {
+    search: "no-such-value",
+  });
+  expect(missing.items).toHaveLength(0);
+  expect(missing).not.toHaveProperty("total");
+  expect(db.queryDeliveries(100, undefined, false).items).toHaveLength(8);
+  expect(deliveries).toHaveLength(8);
+});
+
+it("preserves every priority range, totals, dates and literal search across filtered pages", () => {
+  const { db, deliveries } = fixture();
+  databases.push(db);
+  const from = new Date("2026-11-01T00:00:00Z");
+  const to = new Date("2026-11-18T00:00:00Z");
+  db.db.prepare("UPDATE deliveries SET created_at=?").run(from.toISOString());
+  for (const state of states) {
+    const result = db.queryDeliveries(1, undefined, true, { state, from, to });
+    expect(result.items.map((item) => item.state)).toEqual([state]);
+    expect(result.total).toBe(1);
+    expect(result.nextCursor).toBeUndefined();
+  }
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = db.queryDeliveries(2, cursor, true, {
+      search: " PERFORMANCE ",
+      from,
+      to,
+    });
+    expect(page.total).toBe(8);
+    seen.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  expect(seen).toEqual(
+    [...deliveries.slice(0, 5).reverse(), ...deliveries.slice(5).reverse()].map(
+      (item) => item.id,
+    ),
+  );
+  expect(
+    db.queryDeliveries(20, undefined, true, {
+      to: new Date(from.getTime() - 1),
+    }).total,
+  ).toBe(0);
+  expect(
+    db.queryDeliveries(20, undefined, true, {
+      from: new Date(from.getTime() + 1),
+    }).total,
+  ).toBe(0);
+  expect(db.queryDeliveries(20, undefined, true, { search: "%_" }).total).toBe(
+    0,
+  );
+  expect(
+    db.queryDeliveries(20, "missing", true, { search: "performance" }),
+  ).toEqual({ items: [], total: 8 });
+});
+
+it("searches and filters the delivery snapshot instead of the updated occurrence", () => {
+  const { db, alert, deliveries } = fixture();
+  databases.push(db);
+  db.db
+    .prepare(
+      "UPDATE alert_occurrences SET message='New message', max_severity='emergency' WHERE id=?",
+    )
+    .run(alert.id);
+  db.db
+    .prepare(
+      "UPDATE deliveries SET snapshot_at=?, snapshot_message='Original 50%_message', snapshot_severity='warn' WHERE id=?",
+    )
+    .run(new Date().toISOString(), deliveries[0].id);
+  const page = db.queryDeliveries(20, undefined, true, {
+    search: "50%_",
+    severity: "warn",
+  });
+  expect(page.items.map((item) => item.id)).toEqual([deliveries[0].id]);
+  expect(page.items[0].alert?.message).toBe("Original 50%_message");
+  expect(
+    db
+      .queryDeliveries(20, undefined, false, { search: "New message" })
+      .items.map((item) => item.id),
+  ).not.toContain(deliveries[0].id);
 });
 
 it("migrates version 3 transactionally and preserves history across repeated restarts", () => {

@@ -219,7 +219,7 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
   await page.route("**/plugins/signalk-alert-center/occurrences?*", (route) => {
     const params = new URL(route.request().url()).searchParams;
     expect(params.getAll("limit")).toHaveLength(1);
-    if (params.has("source")) {
+    if (params.has("search")) {
       return route.fulfill({
         json: {
           items: params.has("cursor")
@@ -229,6 +229,7 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
                   id: "older-match",
                   definitionId: "overview-103",
                   state: "cleared",
+                  source: "older-source",
                 },
               ]
             : [],
@@ -267,13 +268,13 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
   await page.screenshot({
     path: `test-results/alerts-overview-${test.info().project.name}.png`,
   });
-  await page.locator("#severity-filter").selectOption("normal");
+  await page.locator("#unified-severity").selectOption("normal");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toHaveAttribute(
     "data-definition-id",
     "overview-zone",
   );
-  await page.locator("#severity-filter").selectOption("");
+  await page.locator("#unified-severity").selectOption("");
   await page.locator("#state-filter").selectOption("active");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toHaveAttribute(
@@ -282,12 +283,12 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
   );
   await page.locator("#state-filter").selectOption("");
   await page
-    .locator("#history-filters")
+    .locator("#unified-filters")
     .getByText("More filters", { exact: true })
     .click();
-  await page.locator("#source-filter").fill("older-source");
+  await page.locator("#unified-search").fill("older-source");
   await page
-    .locator("#history-filters")
+    .locator("#unified-filters")
     .getByRole("button", { name: "Apply", exact: true })
     .click();
   await expect(rows).toHaveCount(1);
