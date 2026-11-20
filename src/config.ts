@@ -61,6 +61,7 @@ export interface PluginConfig {
   ingestion?: {
     queueLimit?: number;
     batchSize?: number;
+    startupGraceSeconds?: number;
   };
   delivery?: {
     batchSize?: number;
@@ -413,6 +414,15 @@ function validateIngestion(ingestion: PluginConfig["ingestion"]): void {
     ingestion.batchSize > ingestion.queueLimit
   )
     throw new Error("ingestion.batchSize must not exceed ingestion.queueLimit");
+  if (
+    ingestion.startupGraceSeconds !== undefined &&
+    (!Number.isInteger(ingestion.startupGraceSeconds) ||
+      ingestion.startupGraceSeconds < 0 ||
+      ingestion.startupGraceSeconds > 3600)
+  )
+    throw new Error(
+      "ingestion.startupGraceSeconds must be an integer from 0 to 3600",
+    );
 }
 
 function validateDelivery(delivery: PluginConfig["delivery"]): void {

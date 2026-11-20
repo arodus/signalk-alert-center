@@ -183,6 +183,15 @@ export const pluginConfigSchema = {
             "Limits synchronous database work before the plugin yields control back to Signal K.",
           default: 100,
         },
+        startupGraceSeconds: {
+          type: "integer",
+          minimum: 0,
+          maximum: 3600,
+          title: "Startup grace period (seconds)",
+          description:
+            "Signal K does not keep notifications across a restart. After startup, active notifications that no producer republishes within this period are closed as missing, without a recovery message. A notification republished later starts a new occurrence and notifies again. 0 closes them as soon as startup reconciliation finishes, before most producers have republished.",
+          default: 120,
+        },
       },
     },
     delivery: {

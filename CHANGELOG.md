@@ -5,6 +5,16 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixes
+
+- Close stored notifications that are no longer present after a Signal K
+  restart. Previously they stayed active indefinitely when their producer only
+  publishes on change and the condition ended while the server was down. After
+  startup, notifications that no producer republishes within the new **Startup
+  grace period** setting (120 seconds by default) are closed without a recovery
+  message; any queued initial delivery is kept. Notifications republished within
+  the period continue their existing occurrence without notifying again.
+
 ## [0.9.0] - 2026-11-19
 
 ### Features

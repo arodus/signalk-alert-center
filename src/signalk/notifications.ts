@@ -7,6 +7,8 @@ export interface SignalKNotificationInput {
   source?: string;
   sourceTimestamp?: Date;
   messageSample?: MessageSample;
+  /** Other sources' values the snapshot holds for this path under `values`. */
+  otherSources?: Array<{ source: string; value: unknown }>;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -106,11 +108,20 @@ export function* iterateSnapshotNotificationEntries(
     visited.add(node);
 
     if (Object.prototype.hasOwnProperty.call(node, "value") && suffix) {
+      const source =
+        typeof node.$source === "string" ? node.$source : undefined;
+      const otherSources = Object.entries(asRecord(node.values) ?? {})
+        .filter(([candidate]) => candidate !== source)
+        .map(([candidate, entry]) => ({
+          source: candidate,
+          value: asRecord(entry)?.value,
+        }));
       yield {
         path: `notifications.${suffix}`,
         value: node.value,
-        source: typeof node.$source === "string" ? node.$source : undefined,
+        source,
         sourceTimestamp: parseTimestamp(node.timestamp),
+        ...(otherSources.length ? { otherSources } : {}),
       };
       return;
     }

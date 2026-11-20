@@ -484,7 +484,17 @@ service selected for that alert.
 
 - Alert Center reconciles core alerts and the legacy notification tree at
   startup, then processes live updates. Missing core alerts are recorded as
-  removed without assuming the condition recovered.
+  removed without assuming the condition recovered. Signal K does not keep
+  legacy notifications across a server restart, and it starts data providers
+  only after plugins. A stored active notification that no producer republishes
+  within the startup grace period (`ingestion.startupGraceSeconds`, 120 seconds
+  by default) is closed with a `missing on startup` event. No recovery message is
+  sent, and any queued initial delivery is kept. A notification republished
+  within the period continues its existing occurrence without notifying again;
+  one republished later starts a new occurrence and notifies again. Signal K
+  starts data providers after plugins, so `0` closes almost every ongoing
+  condition at startup and re-notifies it when it returns.
+  Notifications on ignored paths keep their stored state.
 - A `normal`, `nominal`, cleared, or null notification transition clears the
   current occurrence but does not delete its history.
 - Delivery is persisted before network activity begins. Pending work is recovered

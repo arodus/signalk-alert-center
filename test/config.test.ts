@@ -169,6 +169,19 @@ describe("validateConfig", () => {
     ).toThrow("must not exceed");
   });
 
+  it("exposes and validates the startup grace period", () => {
+    const ingestion = pluginConfigSchema.properties.ingestion;
+    expect(ingestion.properties.startupGraceSeconds.default).toBe(120);
+    for (const startupGraceSeconds of [0, 60, 3600])
+      expect(() =>
+        validateConfig({ ingestion: { startupGraceSeconds } }),
+      ).not.toThrow();
+    for (const startupGraceSeconds of [-1, 1.5, 3601])
+      expect(() =>
+        validateConfig({ ingestion: { startupGraceSeconds } }),
+      ).toThrow("ingestion.startupGraceSeconds");
+  });
+
   it("rejects invalid notifier credentials", () => {
     expect(() =>
       validateConfig({

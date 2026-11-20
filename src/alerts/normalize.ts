@@ -19,6 +19,11 @@ export function normalizeSeverity(value: unknown): Severity {
   return normalized ?? "alert";
 }
 
+/** Identity of one producer's notification on a path. */
+export function notificationSourceKey(path: string, source?: string): string {
+  return source ? `${path}@${source}` : path;
+}
+
 export function normalizeNotification(
   path: string,
   value: unknown,
@@ -57,7 +62,7 @@ export function normalizeNotification(
     // Multiple sources can legitimately raise the same path independently
     // (e.g. two GPS units both losing signal); coalesce per source instead
     // of collapsing them into a single alert.
-    sourceKey: source ? `${path}@${source}` : path,
+    sourceKey: notificationSourceKey(path, source),
     path,
     source,
     severity,
