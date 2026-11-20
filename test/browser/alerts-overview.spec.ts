@@ -184,6 +184,7 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
 }) => {
   const definitions = Array.from({ length: 105 }, (_, index) => ({
     id: `overview-${index}`,
+    reportedNormal: index === 1 || index === 104,
     name: `Inactive ${String(index).padStart(3, "0")}`,
     pathPattern: `notifications.test.overview${index}`,
     sourceType: "recognized",
@@ -263,6 +264,12 @@ test("shows every definition, sorts zones above inactive alerts, and filters zon
     rows.nth(2).locator(".last-triggered-cell time"),
   ).toHaveAttribute("datetime", "2026-10-12T08:30:00.000Z");
   await expect(page.locator("#history-more")).toHaveCount(0);
+  await page.locator("#unified-severity").selectOption("normal");
+  await expect(rows).toHaveCount(2);
+  await expect(
+    page.locator('tr[data-definition-id="overview-1"] .alert-state-cell'),
+  ).toHaveText("normal");
+  await page.locator("#unified-severity").selectOption("");
   await page.locator("#state-filter").selectOption("zones-active");
   await expect(rows).toHaveCount(2);
   await page.screenshot({

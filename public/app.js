@@ -669,11 +669,13 @@ function renderDefinitions() {
             const status = definitionStatus(definition);
             const statusTitle = active
               ? latest.currentSeverity
-              : definitionZones(item).length
-                ? "Configured zone with no active alert reported by Signal K"
-                : hasHistory
-                  ? "No active alert has been recorded"
-                  : "No alert has been recorded for this definition";
+              : item.reportedNormal
+                ? "Signal K reports normal"
+                : definitionZones(item).length
+                  ? "Configured zone with no active alert reported by Signal K"
+                  : hasHistory
+                    ? "No active alert has been recorded"
+                    : "No alert has been recorded for this definition";
             return `<tr class="clickable-row" data-definition-id="${escapeHtml(item.id)}" ${occurrence ? `data-occurrence-id="${escapeHtml(occurrence.id)}"` : ""} tabindex="0" aria-label="Open ${escapeHtml(item.name ?? item.pathPattern)}">
             <td data-label="Alert"><strong class="cell-title" title="${escapeHtml(item.pathPattern)}">${escapeHtml(alertName(item))}</strong><span class="cell-detail compact-detail alert-summary" data-summary-occurrence="${escapeHtml(latest?.id ?? "")}" title="${escapeHtml(alertSummary)}">${escapeHtml(alertSummary)}</span></td>
             <td data-label="Value" class="live-value">${escapeHtml(liveValueText(item))}</td>
@@ -716,7 +718,7 @@ function definitionStatus({ definition, active, latest }) {
   if (latest?.coreAlert) return occurrenceState(latest);
   return active
     ? latest.currentSeverity
-    : definitionZones(definition).length
+    : definition.reportedNormal || definitionZones(definition).length
       ? "normal"
       : "inactive";
 }

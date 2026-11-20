@@ -15,6 +15,8 @@ Versioning while it remains pre-1.0.
   message; any queued initial delivery is kept, and PagerDuty incidents they
   opened are not resolved. Notifications republished within the period continue
   their existing occurrence without notifying again.
+- The Alerts table and Normal severity filter now include recognized notifications
+  whose source explicitly reports normal, even when the path has never fired.
 
 ## [0.9.0] - 2026-11-19
 
