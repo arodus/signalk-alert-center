@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-20
+
 ### Fixes
 
 - Close stored notifications that are no longer present after a Signal K
