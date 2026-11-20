@@ -1598,6 +1598,18 @@ export class AlertDatabase {
       !alert.coreResolutionConfirmed
     )
       return;
+    // A legacy occurrence closed because it was missing after a restart was
+    // never reported as recovered, so its remote incident must stay open.
+    if (
+      operation === "resolve" &&
+      !alert.coreAlert &&
+      this.db
+        .prepare(
+          "SELECT 1 FROM alert_events WHERE alert_id=? AND event_type='missing_on_startup' LIMIT 1",
+        )
+        .get(alertId)
+    )
+      return;
     const rows = this.db
       .prepare(
         `SELECT n.transport_instance_id, MAX(trigger_delivery.cycle) AS trigger_cycle

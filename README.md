@@ -489,9 +489,11 @@ service selected for that alert.
   only after plugins. A stored active notification that no producer republishes
   within the startup grace period (`ingestion.startupGraceSeconds`, 120 seconds
   by default) is closed with a `missing on startup` event. No recovery message is
-  sent, and any queued initial delivery is kept. A notification republished
-  within the period continues its existing occurrence without notifying again;
-  one republished later starts a new occurrence and notifies again. Signal K
+  sent, and any queued initial delivery is kept. A PagerDuty incident it opened
+  stays open, even if its trigger is delivered after the close. A notification
+  republished within the period continues its existing occurrence without
+  notifying again; one republished later starts a new occurrence and notifies
+  again. Signal K
   starts data providers after plugins, so `0` closes almost every ongoing
   condition at startup and re-notifies it when it returns.
   Notifications on ignored paths keep their stored state.
