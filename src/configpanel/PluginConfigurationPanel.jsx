@@ -32,7 +32,7 @@ const defaults = {
   storage: { path: "alert-center.sqlite" },
   snooze: { onlyWhenAnchoredOrMoored: false },
   discovery: { zoneRefreshSeconds: 300 },
-  ingestion: { queueLimit: 2000, batchSize: 100 },
+  ingestion: { queueLimit: 2000, batchSize: 100, startupGraceSeconds: 120 },
   delivery: { batchSize: 50, concurrency: 4, requestTimeoutSeconds: 15 },
   retention: {
     enabled: false,
@@ -1363,6 +1363,16 @@ function Advanced({ config, update, resetDatabase, resetRequested }) {
             max={1000}
             value={config.ingestion.batchSize}
             onChange={(batchSize) => section("ingestion", { batchSize })}
+          />
+          <NumberField
+            label="Startup grace period (seconds)"
+            hint="After a restart, alerts no source republishes within this time are closed as missing. A later republish starts a new alert and notifies again; 0 closes them as soon as startup finishes."
+            min={0}
+            max={3600}
+            value={config.ingestion.startupGraceSeconds}
+            onChange={(startupGraceSeconds) =>
+              section("ingestion", { startupGraceSeconds })
+            }
           />
           <NumberField
             label="Deliveries checked per run"

@@ -27,7 +27,11 @@ import {
   ServerAPI,
 } from "@signalk/server-api";
 import { AlertLifecycle } from "./alerts/lifecycle";
-import { normalizeNotification, normalizeSeverity } from "./alerts/normalize";
+import {
+  normalizeNotification,
+  normalizeSeverity,
+  notificationSourceKey,
+} from "./alerts/normalize";
 import { AlertPolicyResolver, EffectivePolicy } from "./alerts/policy";
 import {
   AlertDefinitionRecord,
@@ -113,6 +117,8 @@ const MAX_TIMER_DELAY = 2_147_000_000;
 const UPSTREAM_ACTION_TIMEOUT_MS = 5_000;
 const DEFAULT_INGESTION_QUEUE_LIMIT = 2_000;
 const DEFAULT_INGESTION_BATCH_SIZE = 100;
+const DEFAULT_STARTUP_GRACE_SECONDS = 120;
+const MISSING_SWEEP_LOG_LIMIT = 20;
 const QUEUE_WARNING_INTERVAL_MS = 60_000;
 const connectivityStates: ConnectivityState[] = [
   "OFF",
@@ -175,6 +181,9 @@ export class AlertCenterRuntime {
   private stopping = false;
   private suppression?: SuppressionStore;
   private suppressionTimer?: ReturnType<typeof setTimeout>;
+  private startupGraceTimer?: ReturnType<typeof setTimeout>;
+  /** Legacy source keys observed since start, until the startup grace ends. */
+  private startupSeenSourceKeys?: Set<string>;
   private navigationState?: NavigationStateObservation;
   private lastSnoozeEffectiveness?: string;
   private readonly manualAnnouncements = new Map<string, string>();
@@ -1006,6 +1015,10 @@ export class AlertCenterRuntime {
     let rejected = 0;
     for (const entry of entries) {
       if (this.isIgnoredPath(entry.path)) continue;
+      // A republished notification is present even before it is ingested, or
+      // if the queue rejects it.
+      if (entry.kind !== "core")
+        this.markSeenIfActive(entry.path, entry.value, entry.source);
       const sampled = {
         ...entry,
         messageSample: captureMessageSample(this.app, entry),
@@ -1150,6 +1163,7 @@ export class AlertCenterRuntime {
             entry.sourceTimestamp,
           );
     normalized.messageSample = entry.messageSample;
+    this.startupSeenSourceKeys?.add(normalized.sourceKey);
     const serviceHealth = isServiceHealthPath(normalized.path);
     const serviceHealthSource = serviceHealth
       ? (this.config.notifiers ?? []).find(
@@ -1252,6 +1266,61 @@ export class AlertCenterRuntime {
     return occurrence;
   }
 
+  private markSeenIfActive(
+    path: string,
+    value: unknown,
+    source: string | undefined,
+  ): void {
+    if (
+      this.startupSeenSourceKeys &&
+      normalizeNotification(path, value, source).state === "active"
+    )
+      this.startupSeenSourceKeys.add(notificationSourceKey(path, source));
+  }
+
+  /**
+   * Signal K does not keep notifications across a restart, and it starts data
+   * providers only after plugins. Once producers have had the grace period to
+   * republish, close stored legacy occurrences that nothing republished,
+   * without inferring recovery.
+   */
+  private scheduleMissingSweep(generation: number): void {
+    const graceSeconds =
+      this.config.ingestion?.startupGraceSeconds ??
+      DEFAULT_STARTUP_GRACE_SECONDS;
+    this.startupGraceTimer = setTimeout(() => {
+      this.startupGraceTimer = undefined;
+      const seen = this.startupSeenSourceKeys;
+      this.startupSeenSourceKeys = undefined;
+      if (!seen || !this.database || generation !== this.runtimeGeneration)
+        return;
+      try {
+        const closed = this.database.closeUnseenLegacyOccurrences(
+          seen,
+          new Date(),
+          this.isIgnoredPath,
+        );
+        const listed = closed
+          .slice(0, MISSING_SWEEP_LOG_LIMIT)
+          .map((item) => item.sourceKey)
+          .join(", ");
+        const more =
+          closed.length > MISSING_SWEEP_LOG_LIMIT
+            ? ` and ${closed.length - MISSING_SWEEP_LOG_LIMIT} more`
+            : "";
+        this.debug(
+          `Startup grace period ended: closed ${closed.length} notification(s) not republished within ${graceSeconds}s${closed.length ? `: ${listed}${more}` : ""}`,
+        );
+        if (closed.length) this.afterIngestionBatch();
+      } catch (error) {
+        this.reportAsyncError(
+          "Closing notifications missing after startup failed",
+          error,
+        );
+      }
+    }, graceSeconds * 1000);
+  }
+
   private updateNormalSources(
     definitionId: string,
     entry: SignalKNotificationInput,
@@ -1312,6 +1381,10 @@ export class AlertCenterRuntime {
     let snapshotEntries = 0;
     for (const entry of entries) {
       if (!this.database || generation !== this.runtimeGeneration) return;
+      // Only the latest writer is ingested. Other sources whose own value in the
+      // tree is still active must not be closed as missing.
+      for (const other of entry.otherSources ?? [])
+        this.markSeenIfActive(entry.path, other.value, other.source);
       this.ingestEntry(entry, new Date(), false);
       snapshotEntries += 1;
       if (snapshotEntries % 50 === 0)
@@ -1351,6 +1424,7 @@ export class AlertCenterRuntime {
       queuedEntries: queuedCount,
     };
     this.app.setPluginStatus(this.statusMessage());
+    this.scheduleMissingSweep(generation);
     this.debug(
       `Startup reconciliation complete: snapshotEntries=${snapshotEntries}, queuedEntries=${queuedCount}, durationMs=${Date.now() - startedAt}`,
     );
@@ -1947,6 +2021,7 @@ export class AlertCenterRuntime {
     );
     this.policy = new AlertPolicyResolver(this.database, options);
     this.reconcilingStartup = true;
+    this.startupSeenSourceKeys = new Set();
     this.reconciliationState = { state: "running", startedAt: new Date() };
     this.ingestionQueue = new BoundedIngestionQueue(
       options.ingestion?.queueLimit ?? DEFAULT_INGESTION_QUEUE_LIMIT,
@@ -2257,6 +2332,7 @@ export class AlertCenterRuntime {
       void this.reconcileStartup(generation).catch((error: unknown) => {
         if (generation !== this.runtimeGeneration) return;
         this.reconcilingStartup = false;
+        this.startupSeenSourceKeys = undefined;
         const completedAt = new Date();
         this.reconciliationState = {
           state: "failed",
@@ -2481,6 +2557,9 @@ export class AlertCenterRuntime {
     this.deliveryImmediate = undefined;
     this.deliveryRerunRequested = false;
     if (this.suppressionTimer) clearTimeout(this.suppressionTimer);
+    if (this.startupGraceTimer) clearTimeout(this.startupGraceTimer);
+    this.startupGraceTimer = undefined;
+    this.startupSeenSourceKeys = undefined;
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     if (this.zoneRefreshTimer) clearInterval(this.zoneRefreshTimer);

@@ -1598,6 +1598,18 @@ export class AlertDatabase {
       !alert.coreResolutionConfirmed
     )
       return;
+    // A legacy occurrence closed because it was missing after a restart was
+    // never reported as recovered, so its remote incident must stay open.
+    if (
+      operation === "resolve" &&
+      !alert.coreAlert &&
+      this.db
+        .prepare(
+          "SELECT 1 FROM alert_events WHERE alert_id=? AND event_type='missing_on_startup' LIMIT 1",
+        )
+        .get(alertId)
+    )
+      return;
     const rows = this.db
       .prepare(
         `SELECT n.transport_instance_id, MAX(trigger_delivery.cycle) AS trigger_cycle
@@ -2030,6 +2042,66 @@ export class AlertDatabase {
   ): void {
     this.getAlert(id);
     this.addEvent(id, eventType, now, payload);
+  }
+
+  /**
+   * End active legacy occurrences whose source key was not observed since
+   * startup. Signal K's notification tree does not survive a server restart, so
+   * a notification no producer republished is no longer active anywhere. Its
+   * removal reason is unknown: no recovery is delivered, while queued initial
+   * delivery is kept. Core occurrences are reconciled against core's active list
+   * instead, and occurrences on excluded (ignored) paths keep their stored state.
+   */
+  closeUnseenLegacyOccurrences(
+    seenSourceKeys: ReadonlySet<string>,
+    now = new Date(),
+    isExcludedPath: (path: string) => boolean = () => false,
+  ): Array<{ id: string; sourceKey: string }> {
+    const timestamp = now.toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = (
+        this.db
+          .prepare(
+            `SELECT id, source_key, path, activation_state FROM alert_occurrences
+             WHERE core_alert_id IS NULL AND current_state='active'`,
+          )
+          .all() as Row[]
+      ).filter(
+        (row) =>
+          !seenSourceKeys.has(String(row.source_key)) &&
+          !isExcludedPath(String(row.path)),
+      );
+      const close = this.db.prepare(
+        `UPDATE alert_occurrences SET current_state='cleared', current_severity='normal',
+          cleared_at=?,
+          activation_state=CASE WHEN activation_state='pending' THEN 'suppressed' ELSE activation_state END,
+          activation_due_at=CASE WHEN activation_state='pending' THEN NULL ELSE activation_due_at END,
+          updated_at=? WHERE id=?`,
+      );
+      const stopRepeats = this.db.prepare(
+        "UPDATE occurrence_notifiers SET next_repeat_at=NULL WHERE alert_id=?",
+      );
+      for (const row of rows) {
+        const id = String(row.id);
+        close.run(timestamp, timestamp, id);
+        stopRepeats.run(id);
+        this.clearWakeDue(id);
+        if (row.activation_state === "pending")
+          this.addEvent(id, "suppressed_before_activation", now);
+        this.addEvent(id, "missing_on_startup", now, {
+          reason: "unclassified",
+        });
+      }
+      this.db.exec("COMMIT");
+      return rows.map((row) => ({
+        id: String(row.id),
+        sourceKey: String(row.source_key),
+      }));
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private markOccurrence(

@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { NormalizedAlert } from "../src/alerts/types";
+import { normalizeCoreAlert } from "../src/signalk/core-alerts";
 import { AlertDatabase } from "../src/storage/db";
 import { schema } from "../src/storage/schema";
+import { coreFixture } from "./fixtures/core-alert";
 
 const active = (overrides: Partial<NormalizedAlert> = {}): NormalizedAlert => ({
   sourceKey: "notifications.navigation.anchor",
@@ -1863,5 +1865,225 @@ describe("occurrence storage", () => {
     expect(db.getDelivery(terminal.id)).toBeUndefined();
     expect(db.getDelivery(pending.id)?.state).toBe("pending");
     expect(db.getDelivery(delivered.id)?.state).toBe("delivered");
+  });
+});
+
+describe("legacy occurrences missing after restart", () => {
+  const databases: AlertDatabase[] = [];
+
+  afterEach(() => {
+    for (const database of databases) database.close();
+    databases.length = 0;
+  });
+
+  const database = () => {
+    const result = new AlertDatabase();
+    databases.push(result);
+    return result;
+  };
+
+  it("closes only unseen legacy occurrences without fabricating recovery", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const closedAt = new Date("2026-01-02T00:00:00Z");
+    const stale = db.ingest(
+      active({ sourceKey: "notifications.stale@fixture" }),
+      ["pagerduty"],
+      raisedAt,
+      { resolvingNotifierIds: ["pagerduty"] },
+    )!;
+    const trigger = db.listDeliveriesForAlert(stale.id)[0];
+    expect(db.claimDelivery(trigger.id, raisedAt)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "pd-dedup", raisedAt);
+    db.setWakeDue(stale.id, raisedAt, raisedAt);
+    const pending = db.ingest(
+      active({ sourceKey: "notifications.pending@fixture" }),
+      ["crew"],
+      raisedAt,
+    )!;
+    const seen = db.ingest(
+      active({ sourceKey: "notifications.seen@fixture" }),
+      [],
+      raisedAt,
+    )!;
+    const seenKeys = new Set(["notifications.seen@fixture"]);
+
+    expect(
+      db
+        .closeUnseenLegacyOccurrences(seenKeys, closedAt)
+        .sort((a, b) => a.sourceKey.localeCompare(b.sourceKey)),
+    ).toEqual([
+      { id: pending.id, sourceKey: "notifications.pending@fixture" },
+      { id: stale.id, sourceKey: "notifications.stale@fixture" },
+    ]);
+
+    expect(db.getAlert(stale.id)).toMatchObject({
+      currentState: "cleared",
+      currentSeverity: "normal",
+      maxSeverity: "alarm",
+      clearedAt: closedAt,
+    });
+    expect(db.getAlert(seen.id).currentState).toBe("active");
+    expect(db.listDeliveriesForAlert(stale.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+    ]);
+    expect(db.listDeliveriesForAlert(pending.id)).toMatchObject([
+      { operation: "notify", state: "pending" },
+    ]);
+    expect(db.listWakeRequests()).toEqual([]);
+    expect(
+      db
+        .listAlertEvents(stale.id)
+        .filter((event) => event.eventType === "missing_on_startup"),
+    ).toMatchObject([{ payload: { reason: "unclassified" } }]);
+    expect(
+      db
+        .listAlertEvents(stale.id)
+        .some((event) => event.eventType === "cleared"),
+    ).toBe(false);
+    expect(db.closeUnseenLegacyOccurrences(seenKeys, closedAt)).toEqual([]);
+  });
+
+  it("suppresses a pending activation instead of delivering it later", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const occurrence = db.ingest(active(), ["crew"], raisedAt, {
+      activationDelaySeconds: 60,
+    })!;
+    expect(db.getAlert(occurrence.id).activationState).toBe("pending");
+
+    db.closeUnseenLegacyOccurrences(
+      new Set(),
+      new Date("2026-01-01T00:00:30Z"),
+    );
+
+    expect(db.getAlert(occurrence.id).activationState).toBe("suppressed");
+    expect(db.nextActivationDueAt()).toBeUndefined();
+    expect(db.processDueActivations(new Date("2026-01-01T00:02:00Z"))).toEqual(
+      [],
+    );
+    expect(db.listDeliveries()).toEqual([]);
+  });
+
+  it("keeps occurrences on excluded paths unchanged", () => {
+    const db = database();
+    const occurrence = db.ingest(
+      active(),
+      [],
+      new Date("2026-01-01T00:00:00Z"),
+    )!;
+
+    expect(
+      db.closeUnseenLegacyOccurrences(
+        new Set(),
+        new Date("2026-01-02T00:00:00Z"),
+        (path) => path === "notifications.navigation.anchor",
+      ),
+    ).toEqual([]);
+    expect(db.getAlert(occurrence.id).currentState).toBe("active");
+  });
+
+  it("leaves core occurrences to core reconciliation", () => {
+    const db = database();
+    const occurrence = db.ingest(
+      normalizeCoreAlert(coreFixture()),
+      [],
+      new Date("2026-01-01T00:00:00Z"),
+    )!;
+
+    expect(db.closeUnseenLegacyOccurrences(new Set())).toEqual([]);
+    expect(db.getAlert(occurrence.id).currentState).toBe("active");
+  });
+
+  it("does not resolve PagerDuty when a queued trigger delivers after the close", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const occurrence = db.ingest(active(), ["pagerduty"], raisedAt, {
+      resolvingNotifierIds: ["pagerduty"],
+    })!;
+    const trigger = db.listDeliveriesForAlert(occurrence.id)[0];
+    expect(trigger).toMatchObject({ operation: "trigger", state: "pending" });
+
+    db.closeUnseenLegacyOccurrences(
+      new Set(),
+      new Date("2026-01-02T00:00:00Z"),
+    );
+    const deliveredAt = new Date("2026-01-02T00:00:05Z");
+    expect(db.claimDelivery(trigger.id, deliveredAt)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "pd-dedup", deliveredAt);
+
+    expect(db.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+      { operation: "trigger", state: "delivered" },
+    ]);
+  });
+
+  it("does not resolve PagerDuty when notifiers are reconciled after a later restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "legacy-missing-"));
+    try {
+      const filename = join(directory, "alerts.sqlite");
+      const raisedAt = new Date("2026-01-01T00:00:00Z");
+      const first = new AlertDatabase(filename);
+      const occurrence = first.ingest(active(), ["pagerduty"], raisedAt, {
+        resolvingNotifierIds: ["pagerduty"],
+      })!;
+      const trigger = first.listDeliveriesForAlert(occurrence.id)[0];
+      expect(first.claimDelivery(trigger.id, raisedAt)).toBe(true);
+      first.recordDeliverySuccess(trigger.id, "pd-dedup", raisedAt);
+      first.closeUnseenLegacyOccurrences(
+        new Set(),
+        new Date("2026-01-02T00:00:00Z"),
+      );
+      first.close();
+
+      const restarted = new AlertDatabase(filename);
+      databases.push(restarted);
+      restarted.configureResolvingNotifiers(
+        ["pagerduty"],
+        new Date("2026-01-03T00:00:00Z"),
+      );
+
+      expect(restarted.listDeliveriesForAlert(occurrence.id)).toMatchObject([
+        { operation: "trigger", state: "delivered" },
+      ]);
+      expect(restarted.listDueDeliveries()).toEqual([]);
+    } finally {
+      for (const database of databases.splice(0)) database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("still resolves PagerDuty when a later occurrence clears normally", () => {
+    const db = database();
+    const raisedAt = new Date("2026-01-01T00:00:00Z");
+    const options = { resolvingNotifierIds: ["pagerduty"] };
+    const missing = db.ingest(active(), ["pagerduty"], raisedAt, options)!;
+    db.closeUnseenLegacyOccurrences(
+      new Set(),
+      new Date("2026-01-02T00:00:00Z"),
+    );
+    const later = db.ingest(
+      active(),
+      ["pagerduty"],
+      new Date("2026-01-02T00:01:00Z"),
+      options,
+    )!;
+    expect(later.id).not.toBe(missing.id);
+    const trigger = db
+      .listDeliveriesForAlert(later.id)
+      .find((delivery) => delivery.operation === "trigger")!;
+    expect(db.claimDelivery(trigger.id)).toBe(true);
+    db.recordDeliverySuccess(trigger.id, "pd-dedup-2");
+    db.ingest(
+      active({ state: "cleared", severity: "normal" }),
+      ["pagerduty"],
+      new Date("2026-01-02T00:02:00Z"),
+      options,
+    );
+
+    expect(
+      db
+        .listDeliveriesForAlert(later.id)
+        .filter((delivery) => delivery.operation === "resolve"),
+    ).toMatchObject([{ state: "pending" }]);
   });
 });

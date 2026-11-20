@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ServerAPI } from "@signalk/server-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AlertLifecycle } from "../src/alerts/lifecycle";
+import { normalizeNotification } from "../src/alerts/normalize";
 import { AlertPolicyResolver, pathDefinitionId } from "../src/alerts/policy";
 import { AlertCenterRepository, Page } from "../src/api/routes";
 import { AlertCenterRuntime } from "../src/runtime";
@@ -1282,5 +1283,259 @@ describe("AlertCenterRuntime", () => {
     } finally {
       await runtime.stop();
     }
+  });
+
+  describe("legacy notifications missing after restart", () => {
+    const stalePath = "notifications.pumps.vacuum.heartbeat.dataAge.dataStale";
+    const livePath = "notifications.bilge.high";
+
+    function seed(
+      filename: string,
+      entries: Array<{ path: string; source: string }>,
+    ) {
+      const before = new AlertDatabase(filename);
+      const ids = entries.map(
+        ({ path, source }) =>
+          before.ingest(
+            normalizeNotification(
+              path,
+              { state: "alarm", message: path },
+              source,
+            ),
+            [],
+            new Date(Date.now() - 86_400_000),
+          )!.id,
+      );
+      before.close();
+      return ids;
+    }
+
+    function start(
+      notifications: Record<string, unknown>,
+      startupGraceSeconds: number,
+      ingestion: { queueLimit?: number; batchSize?: number } = {},
+    ) {
+      const directory = mkdtempSync(join(tmpdir(), "legacy-missing-"));
+      directories.push(directory);
+      const filename = join(directory, "alerts.sqlite");
+      let subscriber: (delta: unknown) => void = () => {};
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => new Promise(() => undefined)),
+      );
+      const app = {
+        debug: vi.fn(),
+        error: vi.fn(),
+        getDataDirPath: () => directory,
+        getPath: vi.fn(() => notifications),
+        selfContext: "vessels.self",
+        handleMessage: vi.fn(),
+        setPluginStatus: vi.fn(),
+        subscriptionmanager: {
+          subscribe: (
+            command: { subscribe: Array<{ path: string }> },
+            unsubscribes: Array<() => void>,
+            _onError: unknown,
+            callback: (delta: unknown) => void,
+          ) => {
+            if (
+              command.subscribe.some(({ path }) => path === "notifications.*")
+            )
+              subscriber = callback;
+            unsubscribes.push(vi.fn());
+          },
+        },
+      } as unknown as ServerAPI;
+      const runtime = new AlertCenterRuntime(app);
+      return {
+        filename,
+        app,
+        runtime,
+        publish: (path: string, source: string) =>
+          subscriber({
+            updates: [
+              {
+                $source: source,
+                values: [{ path, value: { state: "alarm", message: path } }],
+              },
+            ],
+          }),
+        run: () =>
+          runtime.start({
+            storage: { path: filename },
+            ingestion: { ...ingestion, startupGraceSeconds },
+            notifiers: [
+              {
+                name: "crew",
+                type: "ntfy",
+                server: "https://notify.invalid",
+                topic: "boat",
+              },
+            ],
+            defaults: { notifiers: ["crew"] },
+          }),
+        database: () =>
+          (runtime as unknown as { database: AlertDatabase }).database,
+      };
+    }
+
+    const graceEnded = (app: ServerAPI) =>
+      vi.waitFor(
+        () =>
+          expect(app.debug).toHaveBeenCalledWith(
+            expect.stringContaining("Startup grace period ended"),
+          ),
+        { timeout: 3000 },
+      );
+
+    it("closes notifications not republished within the grace period", async () => {
+      const context = start(
+        {
+          bilge: {
+            high: {
+              value: { state: "alarm", message: livePath },
+              $source: "bilge",
+            },
+          },
+        },
+        1,
+      );
+      const [stale, live] = seed(context.filename, [
+        { path: stalePath, source: "watchdog" },
+        { path: livePath, source: "bilge" },
+      ]);
+      context.run();
+      try {
+        await vi.waitFor(() =>
+          expect(context.runtime.status().reconciliation.state).toBe(
+            "complete",
+          ),
+        );
+        expect(context.database().getAlert(stale).currentState).toBe("active");
+
+        await graceEnded(context.app);
+        const database = context.database();
+        expect(database.getAlert(stale)).toMatchObject({
+          currentState: "cleared",
+          currentSeverity: "normal",
+        });
+        expect(
+          database
+            .listAlertEvents(stale)
+            .some((event) => event.eventType === "missing_on_startup"),
+        ).toBe(true);
+        expect(database.getAlert(live).currentState).toBe("active");
+        expect(database.listOccurrences()).toHaveLength(2);
+        expect(database.listDeliveries()).toEqual([]);
+      } finally {
+        await context.runtime.stop();
+      }
+    });
+
+    it("continues an alarm republished during the grace period without notifying again", async () => {
+      const context = start({}, 1);
+      const [stale] = seed(context.filename, [
+        { path: stalePath, source: "watchdog" },
+      ]);
+      context.run();
+      try {
+        await vi.waitFor(() =>
+          expect(context.runtime.status().reconciliation.state).toBe(
+            "complete",
+          ),
+        );
+        context.publish(stalePath, "watchdog");
+
+        await graceEnded(context.app);
+        const database = context.database();
+        expect(database.listOccurrences()).toMatchObject([
+          { id: stale, currentState: "active", occurrenceNumber: 1 },
+        ]);
+        expect(database.listDeliveries()).toEqual([]);
+      } finally {
+        await context.runtime.stop();
+      }
+    });
+
+    it("treats other sources as present only while their own value is active", async () => {
+      const context = start(
+        {
+          bilge: {
+            high: {
+              value: { state: "alarm", message: livePath },
+              $source: "primary",
+              values: {
+                primary: { value: { state: "alarm", message: livePath } },
+                secondary: { value: { state: "alarm", message: livePath } },
+                recovered: { value: { state: "normal", message: livePath } },
+              },
+            },
+          },
+        },
+        0,
+      );
+      const [primary, secondary, recovered] = seed(context.filename, [
+        { path: livePath, source: "primary" },
+        { path: livePath, source: "secondary" },
+        { path: livePath, source: "recovered" },
+      ]);
+      context.run();
+      try {
+        await graceEnded(context.app);
+        const database = context.database();
+        expect(database.getAlert(primary).currentState).toBe("active");
+        expect(database.getAlert(secondary).currentState).toBe("active");
+        expect(database.getAlert(recovered).currentState).toBe("cleared");
+      } finally {
+        await context.runtime.stop();
+      }
+    });
+
+    it("counts a republish the full ingestion queue rejected as present", async () => {
+      const context = start({}, 1, { queueLimit: 10, batchSize: 1 });
+      const [stale] = seed(context.filename, [
+        { path: stalePath, source: "watchdog" },
+      ]);
+      context.run();
+      try {
+        await vi.waitFor(() =>
+          expect(context.runtime.status().reconciliation.state).toBe(
+            "complete",
+          ),
+        );
+        for (let index = 0; index < 12; index += 1)
+          context.publish(`notifications.burst.${index}`, "burst");
+        context.publish(stalePath, "watchdog");
+        expect(context.runtime.status().ingestion.rejected).toBeGreaterThan(0);
+
+        await graceEnded(context.app);
+        expect(context.database().getAlert(stale).currentState).toBe("active");
+      } finally {
+        await context.runtime.stop();
+      }
+    });
+
+    it("cancels the sweep when stopped before the grace period ends", async () => {
+      const context = start({}, 1);
+      const [stale] = seed(context.filename, [
+        { path: stalePath, source: "watchdog" },
+      ]);
+      context.run();
+      await vi.waitFor(() =>
+        expect(context.runtime.status().reconciliation.state).toBe("complete"),
+      );
+      await context.runtime.stop();
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+
+      expect(context.app.debug).not.toHaveBeenCalledWith(
+        expect.stringContaining("Startup grace period ended"),
+      );
+      const database = new AlertDatabase(context.filename);
+      try {
+        expect(database.getAlert(stale).currentState).toBe("active");
+      } finally {
+        database.close();
+      }
+    });
   });
 });

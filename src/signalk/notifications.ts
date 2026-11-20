@@ -1,13 +1,14 @@
 import { MessageSample } from "../alerts/types";
 
 export interface SignalKNotificationInput {
-  otherSources?: Array<{ source: string; value: unknown }>;
   kind?: "core";
   path: string;
   value: unknown;
   source?: string;
   sourceTimestamp?: Date;
   messageSample?: MessageSample;
+  /** Other sources' values the snapshot holds for this path under `values`. */
+  otherSources?: Array<{ source: string; value: unknown }>;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -119,8 +120,8 @@ export function* iterateSnapshotNotificationEntries(
         path: `notifications.${suffix}`,
         value: node.value,
         source,
-        ...(otherSources.length ? { otherSources } : {}),
         sourceTimestamp: parseTimestamp(node.timestamp),
+        ...(otherSources.length ? { otherSources } : {}),
       };
       return;
     }
