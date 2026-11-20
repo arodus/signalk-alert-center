@@ -27,7 +27,7 @@ import {
   ServerAPI,
 } from "@signalk/server-api";
 import { AlertLifecycle } from "./alerts/lifecycle";
-import { normalizeNotification } from "./alerts/normalize";
+import { normalizeNotification, normalizeSeverity } from "./alerts/normalize";
 import { AlertPolicyResolver, EffectivePolicy } from "./alerts/policy";
 import {
   AlertDefinitionRecord,
@@ -137,6 +137,7 @@ interface PropertyValueApp {
 }
 
 interface DefinitionView extends AlertDefinitionRecord {
+  reportedNormal?: boolean;
   description?: string;
   zone?: string;
   oneTime: boolean;
@@ -147,6 +148,8 @@ interface DefinitionView extends AlertDefinitionRecord {
 }
 
 export class AlertCenterRuntime {
+  // Live normal reports are rebuilt from the server snapshot on each start.
+  private readonly normalSources = new Map<string, Set<string | undefined>>();
   private database?: AlertDatabase;
   private scheduler?: DeliveryScheduler;
   private connectivity?: ConnectivityManager;
@@ -1236,10 +1239,34 @@ export class AlertCenterRuntime {
           : policy.speechMinimumSeverity,
       },
     );
+    if (
+      !normalized.coreAlert &&
+      this.updateNormalSources(definitionId, entry) &&
+      !occurrence &&
+      !this.reconcilingStartup
+    )
+      this.emitChange("definitions");
     if (!occurrence) return undefined;
     this.applyConnectivityPolicy(occurrence, receivedAt, schedule);
     if (schedule) this.afterIngestionBatch();
     return occurrence;
+  }
+
+  private updateNormalSources(
+    definitionId: string,
+    entry: SignalKNotificationInput,
+  ): boolean {
+    const wasNormal = this.normalSources.has(definitionId);
+    const sources =
+      this.normalSources.get(definitionId) ?? new Set<string | undefined>();
+    for (const { source, value } of [...(entry.otherSources ?? []), entry]) {
+      const state = (value as { state?: unknown } | null)?.state;
+      if (normalizeSeverity(state) === "normal") sources.add(source);
+      else sources.delete(source);
+    }
+    if (sources.size) this.normalSources.set(definitionId, sources);
+    else this.normalSources.delete(definitionId);
+    return wasNormal !== Boolean(sources.size);
   }
 
   private async reconcileStartup(generation: number): Promise<void> {
@@ -1338,6 +1365,7 @@ export class AlertCenterRuntime {
     const stats = this.db().definitionStats(definition.id);
     return {
       ...definition,
+      reportedNormal: this.normalSources.has(definition.id) || undefined,
       description:
         typeof metadata.description === "string"
           ? metadata.description
@@ -1728,6 +1756,7 @@ export class AlertCenterRuntime {
       deleteDefinition: (id: string) => {
         const result = this.db().deleteDefinition(id);
         if (result === "deleted") {
+          this.normalSources.delete(id);
           this.scheduleNextWake();
           this.scheduleNextActivation();
           this.scheduleNextDelivery();
@@ -2435,6 +2464,7 @@ export class AlertCenterRuntime {
     this.stopCount += 1;
     this.reconcilingStartup = false;
     this.ingestionQueue.clear();
+    this.normalSources.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.clearServiceHealthNotifications();

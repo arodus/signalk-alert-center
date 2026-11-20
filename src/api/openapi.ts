@@ -1035,6 +1035,11 @@ export function getAlertCenterOpenApi() {
             metadata: { type: "object", additionalProperties: true },
             zone: { type: "string" },
             oneTime: { type: "boolean" },
+            reportedNormal: {
+              type: "boolean",
+              description:
+                "True when a legacy source currently reports normal on this definition. An active occurrence takes precedence in the dashboard.",
+            },
             lastFiredAt: { type: "string", format: "date-time" },
             lastActivityAt: { type: "string", format: "date-time" },
             fireCount: { type: "integer", minimum: 0 },

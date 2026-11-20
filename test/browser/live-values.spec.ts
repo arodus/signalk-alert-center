@@ -106,7 +106,7 @@ test("shows live converted readings and age while history keeps the receipt valu
   await request.post(`${fixture}/clear`, { data: { path, source } });
 });
 
-test("keeps a learned alert's reading live after it clears", async ({
+test("keeps a learned alert's reading live after its source reports normal", async ({
   page,
   request,
 }) => {
@@ -130,19 +130,21 @@ test("keeps a learned alert's reading live after it clears", async ({
       return Boolean(definitionId);
     })
     .toBe(true);
-  await request.post(`${fixture}/clear`, { data: { path, source } });
+  await request.post(`${fixture}/raise`, {
+    data: { path, source, state: "normal", message: "Depth is normal" },
+  });
   await page.route(
     "**/signalk/v1/api/vessels/self/environment/depth/belowKeel/meta",
     (route) => route.fulfill({ json: { units: "m" } }),
   );
   await page.goto("/signalk-alert-center/");
   const row = page.locator(`tr[data-definition-id="${definitionId}"]`);
-  await expect(row.locator('[data-label="State"]')).toHaveText("inactive");
+  await expect(row.locator('[data-label="State"]')).toHaveText("normal");
   await expect(row.locator('[data-label="Value"]')).toHaveText("10 m");
   await expect(row.locator('[data-label="Age"]')).toHaveText(/\d+s/);
   await request.post(`${fixture}/reading`, {
     data: { path: sensor, value: 12 },
   });
   await expect(row.locator('[data-label="Value"]')).toHaveText("12 m");
-  await expect(row.locator('[data-label="State"]')).toHaveText("inactive");
+  await expect(row.locator('[data-label="State"]')).toHaveText("normal");
 });

@@ -1,6 +1,7 @@
 import { MessageSample } from "../alerts/types";
 
 export interface SignalKNotificationInput {
+  otherSources?: Array<{ source: string; value: unknown }>;
   kind?: "core";
   path: string;
   value: unknown;
@@ -106,10 +107,19 @@ export function* iterateSnapshotNotificationEntries(
     visited.add(node);
 
     if (Object.prototype.hasOwnProperty.call(node, "value") && suffix) {
+      const source =
+        typeof node.$source === "string" ? node.$source : undefined;
+      const otherSources = Object.entries(asRecord(node.values) ?? {})
+        .filter(([candidate]) => candidate !== source)
+        .map(([candidate, entry]) => ({
+          source: candidate,
+          value: asRecord(entry)?.value,
+        }));
       yield {
         path: `notifications.${suffix}`,
         value: node.value,
-        source: typeof node.$source === "string" ? node.$source : undefined,
+        source,
+        ...(otherSources.length ? { otherSources } : {}),
         sourceTimestamp: parseTimestamp(node.timestamp),
       };
       return;
