@@ -5,6 +5,11 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixes
+
+- The Alerts table and Normal severity filter now include recognized notifications
+  whose source explicitly reports normal, even when the path has never fired.
+
 ## [0.9.0] - 2026-11-19
 
 ### Features

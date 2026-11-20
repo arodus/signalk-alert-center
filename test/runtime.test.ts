@@ -4,9 +4,13 @@ import { join } from "node:path";
 import { ServerAPI } from "@signalk/server-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AlertLifecycle } from "../src/alerts/lifecycle";
-import { pathDefinitionId } from "../src/alerts/policy";
+import { AlertPolicyResolver, pathDefinitionId } from "../src/alerts/policy";
 import { AlertCenterRepository, Page } from "../src/api/routes";
 import { AlertCenterRuntime } from "../src/runtime";
+import {
+  snapshotNotificationEntries,
+  SignalKNotificationInput,
+} from "../src/signalk/notifications";
 import { AlertDatabase } from "../src/storage/db";
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -19,6 +23,52 @@ describe("AlertCenterRuntime", () => {
     for (const directory of directories)
       rmSync(directory, { recursive: true, force: true });
     directories.length = 0;
+  });
+
+  it("reports explicit normal per legacy source without creating occurrences or delivery work", async () => {
+    const database = new AlertDatabase();
+    const runtime = new AlertCenterRuntime({
+      setPluginStatus: vi.fn(),
+    } as unknown as ServerAPI);
+    const internal = runtime as unknown as {
+      database: AlertDatabase;
+      policy: AlertPolicyResolver;
+      repository(): AlertCenterRepository;
+      ingestEntry(entry: SignalKNotificationInput): unknown;
+    };
+    internal.database = database;
+    internal.policy = new AlertPolicyResolver(database, {});
+    const path = "notifications.pump.health";
+    const definition = () =>
+      internal.repository().getDefinition(pathDefinitionId(path));
+    const normal = { state: "normal" };
+    try {
+      for (const entry of snapshotNotificationEntries({
+        pump: {
+          health: {
+            value: normal,
+            $source: "a",
+            values: { b: { value: normal } },
+          },
+        },
+      }))
+        internal.ingestEntry(entry);
+      internal.ingestEntry({ path, source: "a", value: normal });
+      internal.ingestEntry({ path, source: "a", value: null });
+      expect(await definition()).toMatchObject({
+        reportedNormal: true,
+        fireCount: 0,
+      });
+      internal.ingestEntry({ path, source: "b", value: null });
+      expect(await definition()).toMatchObject({
+        reportedNormal: undefined,
+        fireCount: 0,
+      });
+      expect(database.listOccurrences()).toHaveLength(0);
+      expect(database.listDeliveries()).toHaveLength(0);
+    } finally {
+      database.close();
+    }
   });
 
   it("builds the dashboard summary without historical or service aggregates", () => {
