@@ -5,6 +5,8 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-23
+
 ### Features
 
 - Customize each remote notification service’s message with alert text, name, severity, state, path, and server-local occurrence times. Leave the template blank to keep the standard message.
