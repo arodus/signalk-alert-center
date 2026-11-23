@@ -8,6 +8,13 @@ const serviceName = {
     "Choose a unique, recognizable name. This name appears in each alert's Settings, for example “Crew ntfy” or “Emergency PagerDuty”.",
   minLength: 1,
 };
+const messageTemplateSchema = () => ({
+  type: "string",
+  title: "Message template",
+  maxLength: 1000,
+  description:
+    "Optional remote alert text. Use {name}, {severity}, {message}, {path}, {state}, {localTime}, or {clearedLocalTime}. Times use the Signal K server timezone.",
+});
 const serviceEnabled = {
   type: "boolean",
   title: "Use this service",
@@ -426,6 +433,7 @@ export const pluginConfigSchema = {
               {
                 properties: {
                   type: { enum: ["ntfy"] },
+                  messageTemplate: messageTemplateSchema(),
                   server: {
                     type: "string",
                     title: "ntfy server address",
@@ -452,6 +460,7 @@ export const pluginConfigSchema = {
               {
                 properties: {
                   type: { enum: ["pagerduty"] },
+                  messageTemplate: messageTemplateSchema(),
                   routingKey: {
                     type: "string",
                     title: "PagerDuty Events API integration key",
@@ -465,6 +474,7 @@ export const pluginConfigSchema = {
               {
                 properties: {
                   type: { enum: ["discord"] },
+                  messageTemplate: messageTemplateSchema(),
                   webhookUrl: {
                     type: "string",
                     title: "Discord channel webhook address",
@@ -478,6 +488,7 @@ export const pluginConfigSchema = {
               {
                 properties: {
                   type: { enum: ["telegram"] },
+                  messageTemplate: messageTemplateSchema(),
                   botToken: {
                     type: "string",
                     title: "Telegram bot token",
@@ -511,6 +522,7 @@ export const pluginConfigSchema = {
               {
                 properties: {
                   type: { enum: ["pushover"] },
+                  messageTemplate: messageTemplateSchema(),
                   applicationToken: {
                     type: "string",
                     title: "Pushover application API token",

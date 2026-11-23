@@ -25,7 +25,7 @@ export function pushoverMessage(
   return {
     token: config.applicationToken,
     user: config.userKey,
-    title: Array.from(title).slice(0, 250).join(""),
+    ...(title && { title: Array.from(title).slice(0, 250).join("") }),
     message: Array.from(message).slice(0, 1024).join(""),
     priority,
     ...(config.device ? { device: config.device } : {}),

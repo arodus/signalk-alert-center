@@ -42,10 +42,10 @@ export class TelegramTransport implements NotificationTransport {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chat_id: this.config.chatId,
-            text: `${context.rendered.title}\n\n${context.rendered.body}`.slice(
-              0,
-              4096,
-            ),
+            text: [context.rendered.title, context.rendered.body]
+              .filter(Boolean)
+              .join("\n\n")
+              .slice(0, 4096),
             ...(this.config.messageThreadId === undefined
               ? {}
               : { message_thread_id: this.config.messageThreadId }),

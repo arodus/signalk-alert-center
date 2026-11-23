@@ -231,6 +231,25 @@ other configured services that receive its retry alert, terminal-failure warning
 and recovery. The affected service cannot select itself, and these internal
 alerts never use normal alert defaults or repeat delivery.
 
+### Remote message templates
+
+In **Notification services**, each remote service has an optional **Message template**.
+For example, `{message} · {localTime}` can send **Anchor dragging · 21:46** to Telegram.
+A template replaces the generated title and body. Leave it blank to use the
+standard message with full lifecycle details.
+
+| Placeholder                          | Value                                                                                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `{message}`                          | Alert text, including the language supplied by the source                                                                    |
+| `{name}` / `{path}`                  | Alert definition name / full notification path                                                                               |
+| `{severity}`                         | Highest severity in the delivery snapshot                                                                                    |
+| `{state}`                            | `active`, `cleared`, or `removed` for an unconfirmed core removal                                                            |
+| `{localTime}` / `{clearedLocalTime}` | Occurrence start / confirmed clear time, in the Signal K server timezone (24-hour clock). Clear time is empty until cleared. |
+
+Queued deliveries use the service's template at send time. Include `{state}` if
+recipients need to distinguish raises and clears. PagerDuty uses the text as its
+trigger summary. Wyoming has its own spoken alert template.
+
 ### Pushover
 
 Choose **Pushover** as the service type. Enter your application API token from
@@ -336,7 +355,9 @@ history and delivery progress recorded since it was taken.
    if Alert Center should pause remote delivery while offline or control an
    Internet connection.
 4. Open **Server → Plugin Config → Signal K Alert Center**.
-5. Enable the plugin and add any notification services you want to use.
+5. On a fresh installation, the plugin starts automatically after Signal K
+   restarts. Notification services are optional: alerts and history work without
+   them, and Internet connection control is off by default.
 6. Set the defaults that newly discovered alerts should inherit and save.
 7. Open **Webapps → Signal K Alert Center** to review alerts and adjust individual
    alert settings.
@@ -344,6 +365,13 @@ history and delivery progress recorded since it was taken.
 The default database is stored in the plugin's Signal K data directory. You do
 not need to enter an absolute path. Existing supported database layouts are
 migrated in place on startup.
+
+You can save the initial defaults without changing a setting. A previously saved
+disabled state stays disabled, including after upgrades and server restarts.
+To start a disabled installation, enable it in **Server → Plugin Config**.
+Signal K 2.37.0 omits disabled plugins from the Webapps list. If the Admin UI was
+already open during installation, reload it after restarting Signal K so it can
+load the newly installed configuration panel.
 
 ### Manual installation
 

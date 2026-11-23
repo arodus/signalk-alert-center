@@ -71,6 +71,36 @@ describe("TelegramTransport", () => {
     expect(result).toEqual({ kind: "success", remoteId: "73" });
   });
 
+  it("sends only the localized template, using occurrence time and literal source text", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}'));
+    vi.stubGlobal("fetch", fetchMock);
+    const received = new Date(2026, 10, 20, 21, 46);
+    const cleared = new Date(2026, 10, 20, 22, 3);
+    const occurrence: AlertRecord = {
+      ...alert,
+      firstSeenAt: received,
+      clearedAt: cleared,
+      currentState: "cleared",
+      message: "Garreando {severity}",
+    };
+    const rendered = renderAlert(
+      occurrence,
+      "{name}: {message} · {localTime}–{clearedLocalTime} ({state})",
+      "Ancla",
+    );
+    await new TelegramTransport({ botToken: "token", chatId: "crew" }).send(
+      occurrence,
+      delivery,
+      { rendered, now, signal: new AbortController().signal },
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).text).toBe(
+      "Ancla: Garreando {severity} · 21:46–22:03 (cleared)",
+    );
+    expect(renderAlert(alert, "{clearedLocalTime}")).toEqual(
+      renderAlert(alert),
+    );
+  });
+
   it("classifies Telegram rate limits as retryable", async () => {
     vi.stubGlobal(
       "fetch",
