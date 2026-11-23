@@ -8,6 +8,7 @@ Versioning while it remains pre-1.0.
 ### Features
 
 - Customize each remote notification service’s message with alert text, name, severity, state, path, and server-local occurrence times. Leave the template blank to keep the standard message.
+- Disable or re-enable delivery for future occurrences with a switch under the alert name, even before its first occurrence. History and previously queued deliveries are preserved.
 
 ### Fixes
 

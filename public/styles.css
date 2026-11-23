@@ -860,6 +860,39 @@ h2 {
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
 }
+#drawer-delivery:not([hidden]) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+#quick-delivery {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 3px 7px;
+  background: var(--soft);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+#quick-delivery::before {
+  content: "";
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+#quick-delivery[aria-checked="true"] {
+  flex-direction: row-reverse;
+  background: var(--primary-fill);
+  color: white;
+}
 .drawer-actions {
   display: flex;
   flex-wrap: wrap;

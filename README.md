@@ -158,7 +158,10 @@ Select an alert, then choose **Alert settings**. Settings are inherited from the
 global defaults until you override them for that alert. Choose **Customize** in a
 setting’s header to edit it, or **Use global default** to restore its inherited
 value.
-Changes apply to future occurrences.
+The **Delivery for future alerts** switch sits under the alert name in the detail
+drawer, including for alerts that have never fired. Changes save immediately.
+Turning delivery off keeps history and previously queued deliveries. **Use global
+defaults** in Alert settings restores all settings for that alert.
 
 You can configure:
 

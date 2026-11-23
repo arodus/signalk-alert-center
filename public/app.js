@@ -91,7 +91,6 @@ const mergeById = (...collections) => [
   ...new Map(collections.flat().map((item) => [item.id, item])).values(),
 ];
 const policyFieldNames = {
-  enabled: "remote notifications",
   minimumSeverity: "lowest severity sent",
   activationDelaySeconds: "wait before sending",
   connectivity: "internet connection behavior",
@@ -704,6 +703,7 @@ function renderDefinitions() {
     });
   });
   bindOccurrenceActions(elements.definitions);
+  syncDrawerDelivery();
 }
 function definitionStatus({ definition, active, latest }) {
   if (active && latest?.coreAlert) return occurrenceState(latest);
@@ -1283,6 +1283,8 @@ async function openDefinition(id) {
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
   elements.drawerTitle.textContent = definition.name ?? definition.pathPattern;
+  state.selectedDefinition = id;
+  syncDrawerDelivery();
   elements.drawerBody.innerHTML = '<div class="empty">Loading alert…</div>';
   elements.backdrop.hidden = false;
   elements.drawer.classList.add("is-open");
@@ -1298,14 +1300,12 @@ async function openDefinition(id) {
     await loadDisplayUnits(definition);
     state.selectedOccurrence = undefined;
     state.selectedDefinition = id;
-    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
+    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup([], undefined)}<div class="drawer-actions">${drawerPolicyActions(definition)}</div>`;
     elements.drawerResult.textContent = "";
     elements.events.innerHTML =
       '<div class="empty">No occurrence timeline.</div>';
     elements.moreEvents.hidden = true;
-    elements.drawerBody
-      .querySelector(".drawer-settings")
-      .addEventListener("click", () => openPolicy(id));
+    bindDrawerPolicyActions(definition);
     elements.drawer.focus();
   } catch (error) {
     showError(error);
@@ -1326,13 +1326,11 @@ async function openOccurrence(id) {
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${drawerPolicyActions(definition)}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
     bindOccurrenceActions();
-    elements.drawerBody
-      .querySelector(".drawer-settings")
-      ?.addEventListener("click", () => openPolicy(definition.id));
+    bindDrawerPolicyActions(definition);
     elements.events.innerHTML = '<div class="empty">Loading history…</div>';
     elements.backdrop.hidden = false;
     elements.drawer.classList.add("is-open");
@@ -1377,7 +1375,6 @@ function closeDrawer() {
 function setPolicyControlValues(policy) {
   $("#activation-delay").value = policy.activationDelaySeconds ?? 0;
   $("#minimum-severity").value = policy.minimumSeverity ?? "normal";
-  $("#policy-enabled").checked = policy.enabled !== false;
   $("#connectivity-mode").value = policy.connectivity?.mode ?? "queue";
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
   $("#speech-minimum-severity").value = policy.speechMinimumSeverity ?? "warn";
@@ -1393,7 +1390,6 @@ function applyDefaultForField(field) {
   const defaults = state.policyDefaults;
   if (!defaults) return;
   const setters = {
-    enabled: () => ($("#policy-enabled").checked = defaults.enabled),
     minimumSeverity: () =>
       ($("#minimum-severity").value = defaults.minimumSeverity),
     activationDelaySeconds: () =>
@@ -1492,6 +1488,68 @@ function updateInheritanceSummary() {
     : "Using global defaults";
   $("#policy-reset").disabled = count === 0;
 }
+
+function drawerPolicyActions(definition) {
+  if (!definition) return "";
+  const id = escapeHtml(definition.id);
+  return `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${id}" type="button">Alert settings</button>`;
+}
+
+function syncDrawerDelivery() {
+  const button = $("#quick-delivery");
+  const definition = state.definitions.find(
+    (item) => item.id === state.selectedDefinition,
+  );
+  $("#drawer-delivery").hidden = !definition;
+  if (!definition) return;
+  const enabled = definition.policy?.enabled !== false;
+  button.setAttribute("aria-checked", String(enabled));
+  button.textContent = enabled ? "On" : "Off";
+}
+
+function bindDrawerPolicyActions(definition) {
+  syncDrawerDelivery();
+  if (!definition) return;
+  elements.drawerBody
+    .querySelector(".drawer-settings")
+    .addEventListener("click", () => openPolicy(definition.id));
+}
+
+$("#quick-delivery").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const current = state.definitions.find(
+    (item) => item.id === state.selectedDefinition,
+  );
+  if (!current) return;
+  button.disabled = true;
+  try {
+    const updated = await api(
+      `/definitions/${encodeURIComponent(current.id)}/policy`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: current.policy?.enabled === false,
+          ...(current.ruleDescriptor ? { rule: current.ruleDescriptor } : {}),
+        }),
+      },
+    );
+    state.definitions = state.definitions.map((item) =>
+      item.id === current.id
+        ? { ...item, ...updated, catalogOnly: false }
+        : item,
+    );
+    renderDefinitions();
+    if (state.selectedDefinition === current.id)
+      elements.drawerResult.textContent = updated.policy.enabled
+        ? "Delivery enabled for future occurrences."
+        : "Delivery disabled for future occurrences. History and queued deliveries are kept.";
+  } catch (error) {
+    if (state.selectedDefinition === current.id)
+      elements.drawerResult.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 async function openPolicy(id) {
   try {
@@ -1593,7 +1651,6 @@ async function savePolicy(event) {
   const body = {
     ...(definition?.ruleDescriptor ? { rule: definition.ruleDescriptor } : {}),
     overrideFields: selectedOverrideFields(),
-    enabled: $("#policy-enabled").checked,
     activationDelaySeconds: Number($("#activation-delay").value),
     minimumSeverity: $("#minimum-severity").value,
     notifierIds,

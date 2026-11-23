@@ -83,6 +83,29 @@ test.beforeEach(async ({ request }) => {
   ).toBe(true);
 });
 
+test("toggles future delivery only from the alert detail drawer", async ({
+  page,
+}) => {
+  await openSettings(page);
+  await expect(page.locator("#policy-dialog #quick-delivery")).toHaveCount(0);
+  await expect(page.locator("tr #quick-delivery")).toHaveCount(0);
+  await page.locator("#policy-cancel").click();
+  const delivery = page.getByRole("switch", {
+    name: "Delivery for future alerts",
+  });
+  await expect(delivery).toBeChecked();
+  await delivery.click();
+  await expect(delivery).not.toBeChecked();
+  await openSettings(page);
+  await expect(page.locator("#policy-enabled")).toHaveCount(0);
+  await page.locator("#policy-reset").click();
+  await expect(page.locator("#policy-result")).toHaveText(
+    "Now using global defaults.",
+  );
+  await page.locator("#policy-cancel").click();
+  await expect(delivery).toBeChecked();
+});
+
 test("keeps each override action inside its setting on wide and narrow screens", async ({
   page,
 }) => {
