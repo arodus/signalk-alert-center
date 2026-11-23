@@ -63,6 +63,10 @@ requireValue(
   "Signal K plugin keyword is required",
 );
 requireValue(
+  packageJson["signalk-plugin-enabled-by-default"] === true,
+  "fresh installations must start without notification services",
+);
+requireValue(
   packageJson.keywords?.includes("signalk-category-notifications"),
   "Signal K notification category keyword is required",
 );

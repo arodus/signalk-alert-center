@@ -138,6 +138,7 @@ Never point automated tests at real notification services or vessel hardware.
 npm test                 # unit and storage tests
 npm run typecheck        # strict TypeScript
 npm run test:acceptance  # real Signal K server and mock notifier
+npm run test:first-install # packed install on Signal K 2.37.0, no pre-seeded config
 npm run test:browser     # desktop/tablet UI plus restart coverage
 npm run package:check    # package metadata and required files
 npm run package:smoke    # clean packaged-plugin installation
@@ -145,6 +146,13 @@ npm run package:smoke    # clean packaged-plugin installation
 
 Browser and acceptance fixtures live under `test/integration/`. They publish
 deterministic Signal K zones and notification deltas and must remain test-only.
+
+`test:first-install` requires Docker and Playwright Chromium. It installs the
+packed archive into a clean Signal K 2.37.0 data directory without an Alert Center
+configuration file, checks desktop/tablet settings and default saving, then
+verifies local history and explicit disablement across server restarts. It uses
+zero notification services and removes its container, network, and temporary
+archive on completion. Screenshots are saved under `test-results/`.
 
 ### Signal K plugin compatibility checks
 

@@ -1463,6 +1463,10 @@ export default function PluginConfigurationPanel({ configuration, save }) {
     () => JSON.stringify(config) !== JSON.stringify(baseline),
     [config, baseline],
   );
+  // Signal K supplies an empty configuration on automatic first start. The
+  // displayed defaults still need to be saveable without a synthetic edit.
+  const needsInitialSave =
+    !saved && Object.keys(configuration ?? {}).length === 0;
   useEffect(() => {
     const warn = (event) => {
       if (!dirty) return;
@@ -1556,7 +1560,9 @@ export default function PluginConfigurationPanel({ configuration, save }) {
             ? "Save requested."
             : dirty
               ? "Unsaved changes"
-              : "No unsaved changes"}
+              : needsInitialSave
+                ? "Using default settings"
+                : "No unsaved changes"}
         </span>
         <div style={{ display: "flex", gap: 8 }}>
           <button
@@ -1570,7 +1576,7 @@ export default function PluginConfigurationPanel({ configuration, save }) {
           <button
             type="button"
             style={styles.primary}
-            disabled={!dirty}
+            disabled={!dirty && !needsInitialSave}
             onClick={saveConfiguration}
           >
             Save changes
