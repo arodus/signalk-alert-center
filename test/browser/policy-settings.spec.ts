@@ -83,6 +83,36 @@ test.beforeEach(async ({ request }) => {
   ).toBe(true);
 });
 
+test("toggles future delivery immediately without saving other edits", async ({
+  page,
+}) => {
+  await openSettings(page);
+  const delay = page.locator('[data-policy-field="activationDelaySeconds"]');
+  await delay.getByRole("button").click();
+  await page.locator("#activation-delay").fill("45");
+  const toggle = async (label: string, enabled: boolean) => {
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/policy") &&
+        response.request().method() === "PATCH",
+    );
+    await page.getByRole("button", { name: label }).click();
+    const response = await saved;
+    expect(response.ok()).toBe(true);
+    expect(response.request().postDataJSON()).toEqual({ enabled });
+    expect((await response.json()).policy.enabled).toBe(enabled);
+  };
+  await toggle("Disable delivery for this alert", false);
+  await expect(page.locator("#activation-delay")).toHaveValue("45");
+  await page.locator("#policy-cancel").click();
+  await openSettings(page);
+  await expect(page.locator("#activation-delay")).toBeDisabled();
+  await toggle("Enable delivery for this alert", true);
+  await expect(
+    page.getByRole("button", { name: "Disable delivery for this alert" }),
+  ).toBeVisible();
+});
+
 test("keeps each override action inside its setting on wide and narrow screens", async ({
   page,
 }) => {

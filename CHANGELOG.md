@@ -5,6 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Features
+
+- Disable or re-enable delivery for future occurrences with one click in an alert’s settings. History and previously queued deliveries are preserved.
+
 ## [0.9.1] - 2026-11-20
 
 ### Fixes

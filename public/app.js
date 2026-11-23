@@ -1493,6 +1493,51 @@ function updateInheritanceSummary() {
   $("#policy-reset").disabled = count === 0;
 }
 
+function showQuickDelivery(enabled) {
+  const button = $("#quick-delivery");
+  button.dataset.nextEnabled = String(!enabled);
+  button.textContent = enabled
+    ? "Disable delivery for this alert"
+    : "Enable delivery for this alert";
+  $("#quick-delivery-result").textContent = enabled
+    ? "Delivery is enabled. This button saves immediately."
+    : "Delivery is disabled. Occurrences still appear in history.";
+}
+
+async function toggleAlertDelivery() {
+  const id = $("#policy-definition-id").value;
+  const definition = state.definitions.find((item) => item.id === id);
+  if (!definition) return;
+  const enabled = $("#quick-delivery").dataset.nextEnabled === "true";
+  const form = $("#policy-form");
+  form.inert = true;
+  try {
+    const updated = await api(`/definitions/${encodeURIComponent(id)}/policy`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        enabled,
+        ...(definition.ruleDescriptor
+          ? { rule: definition.ruleDescriptor }
+          : {}),
+      }),
+    });
+    state.definitions = state.definitions.map((item) =>
+      item.id === id ? { ...item, ...updated, catalogOnly: false } : item,
+    );
+    renderDefinitions();
+    if ($("#policy-definition-id").value !== id) return;
+    $("#policy-enabled").checked = updated.policy.enabled;
+    setPolicyOverrideState("enabled", true);
+    updateInheritanceSummary();
+    showQuickDelivery(updated.policy.enabled);
+  } catch (error) {
+    $("#quick-delivery-result").textContent = error.message;
+  } finally {
+    form.inert = false;
+    if (elements.policyDialog.open) $("#quick-delivery").focus();
+  }
+}
+
 async function openPolicy(id) {
   try {
     state.notifiers = pageItems(await api("/notifiers"));
@@ -1507,6 +1552,7 @@ async function openPolicy(id) {
   $("#policy-definition-id").value = id;
   state.policyDefaults = policy.defaults ?? policy;
   setPolicyControlValues(policy);
+  showQuickDelivery(policy.enabled !== false);
   toggleWakeDelay();
   elements.policyResult.textContent = "";
   const remove = $("#policy-remove");
@@ -1763,6 +1809,7 @@ document.addEventListener("keydown", (event) => {
     closeDrawer();
 });
 $("#connectivity-mode").addEventListener("change", toggleWakeDelay);
+$("#quick-delivery").addEventListener("click", toggleAlertDelivery);
 $("#policy-form").addEventListener("submit", savePolicy);
 $("#policy-close").addEventListener("click", () =>
   elements.policyDialog.close(),
