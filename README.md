@@ -333,7 +333,9 @@ history and delivery progress recorded since it was taken.
    if Alert Center should pause remote delivery while offline or control an
    Internet connection.
 4. Open **Server → Plugin Config → Signal K Alert Center**.
-5. Enable the plugin and add any notification services you want to use.
+5. On a fresh installation, the plugin starts automatically after Signal K
+   restarts. Notification services are optional: alerts and history work without
+   them, and Internet connection control is off by default.
 6. Set the defaults that newly discovered alerts should inherit and save.
 7. Open **Webapps → Signal K Alert Center** to review alerts and adjust individual
    alert settings.
@@ -341,6 +343,13 @@ history and delivery progress recorded since it was taken.
 The default database is stored in the plugin's Signal K data directory. You do
 not need to enter an absolute path. Existing supported database layouts are
 migrated in place on startup.
+
+You can save the initial defaults without changing a setting. A previously saved
+disabled state stays disabled, including after upgrades and server restarts.
+To start a disabled installation, enable it in **Server → Plugin Config**.
+Signal K 2.37.0 omits disabled plugins from the Webapps list. If the Admin UI was
+already open during installation, reload it after restarting Signal K so it can
+load the newly installed configuration panel.
 
 ### Manual installation
 
