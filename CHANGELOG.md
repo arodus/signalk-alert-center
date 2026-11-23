@@ -9,6 +9,14 @@ Versioning while it remains pre-1.0.
 
 - Customize each remote notification service’s message with alert text, name, severity, state, path, and server-local occurrence times. Leave the template blank to keep the standard message.
 
+### Fixes
+
+- Start fresh installations automatically with no notification services required
+  and Internet connection control disabled. This also makes the webapp appear in
+  Signal K 2.37.0's Webapps list. Explicitly disabled
+  installations remain disabled across upgrades and restarts.
+- Allow saving the initial configuration defaults without changing a setting.
+
 ## [0.9.1] - 2026-11-20
 
 ### Fixes

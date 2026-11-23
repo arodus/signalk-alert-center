@@ -61,6 +61,7 @@
     "test:browser": "node test/browser/run.mjs",
     "test:browser:only": "playwright test",
     "test:restart": "node test/integration/restart.mjs",
+    "test:first-install": "node test/integration/first-install.mjs",
     "screenshots:store": "node scripts/capture-store-screenshots.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -109,5 +110,5 @@
       "signalk-wyoming"
     ]
   },
-  "signalk-plugin-enabled-by-default": false
+  "signalk-plugin-enabled-by-default": true
 }
