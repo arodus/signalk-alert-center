@@ -7,7 +7,7 @@ Versioning while it remains pre-1.0.
 
 ### Features
 
-- Disable or re-enable delivery for future occurrences with one click in an alert’s settings. History and previously queued deliveries are preserved.
+- Disable or re-enable delivery for future occurrences with one click in the alert detail drawer beside Acknowledge and Silence. History and previously queued deliveries are preserved.
 
 ## [0.9.1] - 2026-11-20
 

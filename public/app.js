@@ -704,6 +704,7 @@ function renderDefinitions() {
     });
   });
   bindOccurrenceActions(elements.definitions);
+  syncDrawerDelivery();
 }
 function definitionStatus({ definition, active, latest }) {
   if (active && latest?.coreAlert) return occurrenceState(latest);
@@ -1298,14 +1299,12 @@ async function openDefinition(id) {
     await loadDisplayUnits(definition);
     state.selectedOccurrence = undefined;
     state.selectedDefinition = id;
-    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup([], undefined)}<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(id)}" type="button">Alert settings</button>`;
+    elements.drawerBody.innerHTML = `<p class="cell-detail">${escapeHtml(definition.pathPattern)}</p><dl class="detail-grid"><div><dt>Status</dt><dd>Never fired</dd></div><div><dt>Last fired</dt><dd>—</dd></div><div><dt>Origin</dt><dd>${escapeHtml(definitionOrigin(definition.sourceType))}</dd></div></dl>${definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup([], undefined)}<div class="drawer-actions">${drawerPolicyActions(definition)}</div>`;
     elements.drawerResult.textContent = "";
     elements.events.innerHTML =
       '<div class="empty">No occurrence timeline.</div>';
     elements.moreEvents.hidden = true;
-    elements.drawerBody
-      .querySelector(".drawer-settings")
-      .addEventListener("click", () => openPolicy(id));
+    bindDrawerPolicyActions(definition);
     elements.drawer.focus();
   } catch (error) {
     showError(error);
@@ -1326,13 +1325,11 @@ async function openOccurrence(id) {
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${definition ? `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${escapeHtml(definition.id)}" type="button">Alert settings</button>` : ""}</div>`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${drawerPolicyActions(definition)}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
     bindOccurrenceActions();
-    elements.drawerBody
-      .querySelector(".drawer-settings")
-      ?.addEventListener("click", () => openPolicy(definition.id));
+    bindDrawerPolicyActions(definition);
     elements.events.innerHTML = '<div class="empty">Loading history…</div>';
     elements.backdrop.hidden = false;
     elements.drawer.classList.add("is-open");
@@ -1493,49 +1490,63 @@ function updateInheritanceSummary() {
   $("#policy-reset").disabled = count === 0;
 }
 
-function showQuickDelivery(enabled) {
-  const button = $("#quick-delivery");
-  button.dataset.nextEnabled = String(!enabled);
-  button.textContent = enabled
-    ? "Disable delivery for this alert"
-    : "Enable delivery for this alert";
-  $("#quick-delivery-result").textContent = enabled
-    ? "Delivery is enabled. This button saves immediately."
-    : "Delivery is disabled. Occurrences still appear in history.";
+function drawerPolicyActions(definition) {
+  if (!definition) return "";
+  const id = escapeHtml(definition.id);
+  return `<button class="button button-quiet" id="quick-delivery" data-required-access="admin" data-id="${id}" type="button" title="Change delivery for future occurrences of this alert"></button>
+    <button class="button button-primary drawer-settings" data-required-access="admin" data-id="${id}" type="button">Alert settings</button>`;
 }
 
-async function toggleAlertDelivery() {
-  const id = $("#policy-definition-id").value;
-  const definition = state.definitions.find((item) => item.id === id);
+function syncDrawerDelivery() {
+  const button = $("#quick-delivery");
+  if (!button) return;
+  const definition = state.definitions.find(
+    (item) => item.id === button.dataset.id,
+  );
+  button.textContent =
+    definition?.policy?.enabled === false
+      ? "Enable delivery"
+      : "Disable delivery";
+}
+
+function bindDrawerPolicyActions(definition) {
   if (!definition) return;
-  const enabled = $("#quick-delivery").dataset.nextEnabled === "true";
-  const form = $("#policy-form");
-  form.inert = true;
-  try {
-    const updated = await api(`/definitions/${encodeURIComponent(id)}/policy`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        enabled,
-        ...(definition.ruleDescriptor
-          ? { rule: definition.ruleDescriptor }
-          : {}),
-      }),
-    });
-    state.definitions = state.definitions.map((item) =>
-      item.id === id ? { ...item, ...updated, catalogOnly: false } : item,
-    );
-    renderDefinitions();
-    if ($("#policy-definition-id").value !== id) return;
-    $("#policy-enabled").checked = updated.policy.enabled;
-    setPolicyOverrideState("enabled", true);
-    updateInheritanceSummary();
-    showQuickDelivery(updated.policy.enabled);
-  } catch (error) {
-    $("#quick-delivery-result").textContent = error.message;
-  } finally {
-    form.inert = false;
-    if (elements.policyDialog.open) $("#quick-delivery").focus();
-  }
+  syncDrawerDelivery();
+  elements.drawerBody
+    .querySelector(".drawer-settings")
+    .addEventListener("click", () => openPolicy(definition.id));
+  const button = $("#quick-delivery");
+  button.addEventListener("click", async () => {
+    const current = state.definitions.find((item) => item.id === definition.id);
+    if (!current) return;
+    button.disabled = true;
+    try {
+      const updated = await api(
+        `/definitions/${encodeURIComponent(current.id)}/policy`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            enabled: current.policy?.enabled === false,
+            ...(current.ruleDescriptor ? { rule: current.ruleDescriptor } : {}),
+          }),
+        },
+      );
+      state.definitions = state.definitions.map((item) =>
+        item.id === current.id
+          ? { ...item, ...updated, catalogOnly: false }
+          : item,
+      );
+      renderDefinitions();
+      if (button.isConnected)
+        elements.drawerResult.textContent = updated.policy.enabled
+          ? "Delivery enabled for future occurrences."
+          : "Delivery disabled for future occurrences. History and queued deliveries are kept.";
+    } catch (error) {
+      if (button.isConnected) elements.drawerResult.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
 }
 
 async function openPolicy(id) {
@@ -1552,7 +1563,6 @@ async function openPolicy(id) {
   $("#policy-definition-id").value = id;
   state.policyDefaults = policy.defaults ?? policy;
   setPolicyControlValues(policy);
-  showQuickDelivery(policy.enabled !== false);
   toggleWakeDelay();
   elements.policyResult.textContent = "";
   const remove = $("#policy-remove");
@@ -1809,7 +1819,6 @@ document.addEventListener("keydown", (event) => {
     closeDrawer();
 });
 $("#connectivity-mode").addEventListener("change", toggleWakeDelay);
-$("#quick-delivery").addEventListener("click", toggleAlertDelivery);
 $("#policy-form").addEventListener("submit", savePolicy);
 $("#policy-close").addEventListener("click", () =>
   elements.policyDialog.close(),

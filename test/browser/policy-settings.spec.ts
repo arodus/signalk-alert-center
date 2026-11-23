@@ -83,13 +83,13 @@ test.beforeEach(async ({ request }) => {
   ).toBe(true);
 });
 
-test("toggles future delivery immediately without saving other edits", async ({
+test("toggles future delivery only from the alert detail drawer", async ({
   page,
 }) => {
   await openSettings(page);
-  const delay = page.locator('[data-policy-field="activationDelaySeconds"]');
-  await delay.getByRole("button").click();
-  await page.locator("#activation-delay").fill("45");
+  await expect(page.locator("#policy-dialog #quick-delivery")).toHaveCount(0);
+  await expect(page.locator("tr #quick-delivery")).toHaveCount(0);
+  await page.locator("#policy-cancel").click();
   const toggle = async (label: string, enabled: boolean) => {
     const saved = page.waitForResponse(
       (response) =>
@@ -102,14 +102,13 @@ test("toggles future delivery immediately without saving other edits", async ({
     expect(response.request().postDataJSON()).toEqual({ enabled });
     expect((await response.json()).policy.enabled).toBe(enabled);
   };
-  await toggle("Disable delivery for this alert", false);
-  await expect(page.locator("#activation-delay")).toHaveValue("45");
-  await page.locator("#policy-cancel").click();
+  await toggle("Disable delivery", false);
   await openSettings(page);
-  await expect(page.locator("#activation-delay")).toBeDisabled();
-  await toggle("Enable delivery for this alert", true);
+  await expect(page.locator("#policy-enabled")).not.toBeChecked();
+  await page.locator("#policy-cancel").click();
+  await toggle("Enable delivery", true);
   await expect(
-    page.getByRole("button", { name: "Disable delivery for this alert" }),
+    page.getByRole("button", { name: "Disable delivery", exact: true }),
   ).toBeVisible();
 });
 
