@@ -231,7 +231,7 @@ alerts never use normal alert defaults or repeat delivery.
 ### Remote message templates
 
 In **Notification services**, each remote service has an optional **Message template**.
-For example, `{message} · {localTime}` can send **Garreando · 21:46** to Telegram.
+For example, `{message} · {localTime}` can send **Anchor dragging · 21:46** to Telegram.
 A template replaces the generated title and body. Leave it blank to use the
 standard message with full lifecycle details.
 
