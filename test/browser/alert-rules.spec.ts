@@ -66,6 +66,16 @@ test("lists every rule and saves delivery settings before its first occurrence",
     .getByRole("button", { name: "Alert settings", exact: true })
     .click();
   await expect(page.locator("#policy-remove")).toBeDisabled();
+  await page.locator("#policy-cancel").click();
+  const delivery = page.getByRole("switch", {
+    name: "Delivery for future alerts",
+  });
+  await expect(delivery).toBeChecked();
+  await delivery.click();
+  await expect(delivery).not.toBeChecked();
+  await page
+    .getByRole("button", { name: "Alert settings", exact: true })
+    .click();
   await page
     .getByRole("button", { name: "Customize wait before sending", exact: true })
     .click();
@@ -78,7 +88,7 @@ test("lists every rule and saves delivery settings before its first occurrence",
     sourceType: "rule",
     fireCount: 0,
     pathPattern: "alerts.electrical.batteries.*.voltageLow",
-    policy: { activationDelaySeconds: 45 },
+    policy: { enabled: false, activationDelaySeconds: 45 },
   });
   expect(
     (

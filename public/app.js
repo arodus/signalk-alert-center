@@ -91,7 +91,6 @@ const mergeById = (...collections) => [
   ...new Map(collections.flat().map((item) => [item.id, item])).values(),
 ];
 const policyFieldNames = {
-  enabled: "remote notifications",
   minimumSeverity: "lowest severity sent",
   activationDelaySeconds: "wait before sending",
   connectivity: "internet connection behavior",
@@ -1284,6 +1283,8 @@ async function openDefinition(id) {
   const definition = state.definitions.find((item) => item.id === id);
   if (!definition) return;
   elements.drawerTitle.textContent = definition.name ?? definition.pathPattern;
+  state.selectedDefinition = id;
+  syncDrawerDelivery();
   elements.drawerBody.innerHTML = '<div class="empty">Loading alert…</div>';
   elements.backdrop.hidden = false;
   elements.drawer.classList.add("is-open");
@@ -1374,7 +1375,6 @@ function closeDrawer() {
 function setPolicyControlValues(policy) {
   $("#activation-delay").value = policy.activationDelaySeconds ?? 0;
   $("#minimum-severity").value = policy.minimumSeverity ?? "normal";
-  $("#policy-enabled").checked = policy.enabled !== false;
   $("#connectivity-mode").value = policy.connectivity?.mode ?? "queue";
   $("#wake-delay").value = policy.connectivity?.delaySeconds ?? 0;
   $("#speech-minimum-severity").value = policy.speechMinimumSeverity ?? "warn";
@@ -1390,7 +1390,6 @@ function applyDefaultForField(field) {
   const defaults = state.policyDefaults;
   if (!defaults) return;
   const setters = {
-    enabled: () => ($("#policy-enabled").checked = defaults.enabled),
     minimumSeverity: () =>
       ($("#minimum-severity").value = defaults.minimumSeverity),
     activationDelaySeconds: () =>
@@ -1493,61 +1492,64 @@ function updateInheritanceSummary() {
 function drawerPolicyActions(definition) {
   if (!definition) return "";
   const id = escapeHtml(definition.id);
-  return `<button class="button button-quiet" id="quick-delivery" data-required-access="admin" data-id="${id}" type="button" title="Change delivery for future occurrences of this alert"></button>
-    <button class="button button-primary drawer-settings" data-required-access="admin" data-id="${id}" type="button">Alert settings</button>`;
+  return `<button class="button button-primary drawer-settings" data-required-access="admin" data-id="${id}" type="button">Alert settings</button>`;
 }
 
 function syncDrawerDelivery() {
   const button = $("#quick-delivery");
-  if (!button) return;
   const definition = state.definitions.find(
-    (item) => item.id === button.dataset.id,
+    (item) => item.id === state.selectedDefinition,
   );
-  button.textContent =
-    definition?.policy?.enabled === false
-      ? "Enable delivery"
-      : "Disable delivery";
+  $("#drawer-delivery").hidden = !definition;
+  if (!definition) return;
+  const enabled = definition.policy?.enabled !== false;
+  button.setAttribute("aria-checked", String(enabled));
+  button.textContent = enabled ? "On" : "Off";
 }
 
 function bindDrawerPolicyActions(definition) {
-  if (!definition) return;
   syncDrawerDelivery();
+  if (!definition) return;
   elements.drawerBody
     .querySelector(".drawer-settings")
     .addEventListener("click", () => openPolicy(definition.id));
-  const button = $("#quick-delivery");
-  button.addEventListener("click", async () => {
-    const current = state.definitions.find((item) => item.id === definition.id);
-    if (!current) return;
-    button.disabled = true;
-    try {
-      const updated = await api(
-        `/definitions/${encodeURIComponent(current.id)}/policy`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            enabled: current.policy?.enabled === false,
-            ...(current.ruleDescriptor ? { rule: current.ruleDescriptor } : {}),
-          }),
-        },
-      );
-      state.definitions = state.definitions.map((item) =>
-        item.id === current.id
-          ? { ...item, ...updated, catalogOnly: false }
-          : item,
-      );
-      renderDefinitions();
-      if (button.isConnected)
-        elements.drawerResult.textContent = updated.policy.enabled
-          ? "Delivery enabled for future occurrences."
-          : "Delivery disabled for future occurrences. History and queued deliveries are kept.";
-    } catch (error) {
-      if (button.isConnected) elements.drawerResult.textContent = error.message;
-    } finally {
-      button.disabled = false;
-    }
-  });
 }
+
+$("#quick-delivery").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const current = state.definitions.find(
+    (item) => item.id === state.selectedDefinition,
+  );
+  if (!current) return;
+  button.disabled = true;
+  try {
+    const updated = await api(
+      `/definitions/${encodeURIComponent(current.id)}/policy`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          enabled: current.policy?.enabled === false,
+          ...(current.ruleDescriptor ? { rule: current.ruleDescriptor } : {}),
+        }),
+      },
+    );
+    state.definitions = state.definitions.map((item) =>
+      item.id === current.id
+        ? { ...item, ...updated, catalogOnly: false }
+        : item,
+    );
+    renderDefinitions();
+    if (state.selectedDefinition === current.id)
+      elements.drawerResult.textContent = updated.policy.enabled
+        ? "Delivery enabled for future occurrences."
+        : "Delivery disabled for future occurrences. History and queued deliveries are kept.";
+  } catch (error) {
+    if (state.selectedDefinition === current.id)
+      elements.drawerResult.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 async function openPolicy(id) {
   try {
@@ -1649,7 +1651,6 @@ async function savePolicy(event) {
   const body = {
     ...(definition?.ruleDescriptor ? { rule: definition.ruleDescriptor } : {}),
     overrideFields: selectedOverrideFields(),
-    enabled: $("#policy-enabled").checked,
     activationDelaySeconds: Number($("#activation-delay").value),
     minimumSeverity: $("#minimum-severity").value,
     notifierIds,

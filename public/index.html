@@ -413,6 +413,18 @@
         <div>
           <p class="eyebrow">Alert detail</p>
           <h2 id="drawer-title">History</h2>
+          <div id="drawer-delivery" data-required-access="admin" hidden>
+            <label for="quick-delivery">Delivery for future alerts</label>
+            <button
+              id="quick-delivery"
+              type="button"
+              role="switch"
+              aria-label="Delivery for future alerts"
+              aria-checked="true"
+            >
+              On
+            </button>
+          </div>
         </div>
         <button
           id="drawer-close"
@@ -796,29 +808,6 @@
               ></span
             ><input id="wake-delay" type="number" min="0" max="604800"
           /></label>
-        </div>
-        <div
-          class="policy-setting"
-          data-policy-field="enabled"
-          role="group"
-          aria-labelledby="policy-enabled-title"
-        >
-          <div class="policy-field-header">
-            <label
-              id="policy-enabled-title"
-              class="policy-field-title check-label"
-              ><input
-                id="policy-enabled"
-                aria-describedby="policy-enabled-help"
-                type="checkbox"
-              />
-              Deliver notifications</label
-            >
-          </div>
-          <p class="field-help" id="policy-enabled-help">
-            Turn this off to keep tracking the alert without creating new ntfy,
-            PagerDuty, Discord, or Wyoming audio deliveries.
-          </p>
         </div>
         <p id="policy-result" class="form-result" role="status"></p>
         <div class="dialog-actions">

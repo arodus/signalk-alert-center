@@ -90,26 +90,20 @@ test("toggles future delivery only from the alert detail drawer", async ({
   await expect(page.locator("#policy-dialog #quick-delivery")).toHaveCount(0);
   await expect(page.locator("tr #quick-delivery")).toHaveCount(0);
   await page.locator("#policy-cancel").click();
-  const toggle = async (label: string, enabled: boolean) => {
-    const saved = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/policy") &&
-        response.request().method() === "PATCH",
-    );
-    await page.getByRole("button", { name: label }).click();
-    const response = await saved;
-    expect(response.ok()).toBe(true);
-    expect(response.request().postDataJSON()).toEqual({ enabled });
-    expect((await response.json()).policy.enabled).toBe(enabled);
-  };
-  await toggle("Disable delivery", false);
+  const delivery = page.getByRole("switch", {
+    name: "Delivery for future alerts",
+  });
+  await expect(delivery).toBeChecked();
+  await delivery.click();
+  await expect(delivery).not.toBeChecked();
   await openSettings(page);
-  await expect(page.locator("#policy-enabled")).not.toBeChecked();
+  await expect(page.locator("#policy-enabled")).toHaveCount(0);
+  await page.locator("#policy-reset").click();
+  await expect(page.locator("#policy-result")).toHaveText(
+    "Now using global defaults.",
+  );
   await page.locator("#policy-cancel").click();
-  await toggle("Enable delivery", true);
-  await expect(
-    page.getByRole("button", { name: "Disable delivery", exact: true }),
-  ).toBeVisible();
+  await expect(delivery).toBeChecked();
 });
 
 test("keeps each override action inside its setting on wide and narrow screens", async ({

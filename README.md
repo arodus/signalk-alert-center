@@ -158,10 +158,10 @@ Select an alert, then choose **Alert settings**. Settings are inherited from the
 global defaults until you override them for that alert. Choose **Customize** in a
 setting’s header to edit it, or **Use global default** to restore its inherited
 value.
-In the alert detail drawer, use **Disable delivery** to stop deliveries for future occurrences
-with one click. Alert Center saves this immediately and continues recording history.
-Reopen the same alert and choose **Enable delivery** to turn
-delivery back on. Previously queued deliveries keep their original settings.
+The **Delivery for future alerts** switch sits under the alert name in the detail
+drawer, including for alerts that have never fired. Changes save immediately.
+Turning delivery off keeps history and previously queued deliveries. **Use global
+defaults** in Alert settings restores all settings for that alert.
 
 You can configure:
 
