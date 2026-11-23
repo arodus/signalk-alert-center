@@ -20,7 +20,7 @@ export class NtfyTransport implements NotificationTransport {
   ): Promise<TransportResult> {
     try {
       const headers: Record<string, string> = {
-        Title: context.rendered.title,
+        ...(context.rendered.title && { Title: context.rendered.title }),
         Priority: String(
           { normal: 2, alert: 3, warn: 3, alarm: 4, emergency: 5 }[
             context.rendered.severity

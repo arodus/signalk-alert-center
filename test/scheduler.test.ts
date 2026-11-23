@@ -5,6 +5,49 @@ import { AlertDatabase } from "../src/storage/db";
 import { NotificationTransport } from "../src/transports/transport";
 
 describe("DeliveryScheduler", () => {
+  it("formats the same queued occurrence independently for each service", async () => {
+    const database = new AlertDatabase();
+    const now = new Date();
+    const path = "notifications.navigation.anchor";
+    database.ingest(
+      {
+        sourceKey: path,
+        path,
+        severity: "alarm",
+        state: "active",
+        message: "Garreando",
+      },
+      ["phone", "log"],
+      now,
+    );
+    const send = vi
+      .fn<NotificationTransport["send"]>()
+      .mockResolvedValue({ kind: "success" });
+    const transport = { type: "test", requiresInternet: true, send };
+    const scheduler = new DeliveryScheduler(
+      database,
+      new Map([
+        ["phone", transport],
+        ["log", transport],
+      ]),
+      undefined,
+      { messageTemplates: new Map([["phone", "{message}"]]) },
+    );
+    await scheduler.runOnce(now);
+    const messages = Object.fromEntries(
+      send.mock.calls.map(([, delivery, context]) => [
+        delivery.transportInstanceId,
+        context.rendered,
+      ]),
+    );
+    expect(messages.phone).toMatchObject({ title: "", body: "Garreando" });
+    expect(messages.log).toMatchObject({
+      title: `ALARM: ${path}`,
+      body: expect.stringContaining("First seen at"),
+    });
+    database.close();
+  });
+
   it("delivers the state snapshot for every queued severity transition", async () => {
     const database = new AlertDatabase();
     const options = { resolvingNotifierIds: ["service"] };

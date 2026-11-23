@@ -658,6 +658,9 @@ function NotificationServices({ config, update }) {
                     name: service.name,
                     enabled: service.enabled,
                     minSeverity: service.minSeverity,
+                    ...(type !== "wyoming" && {
+                      messageTemplate: service.messageTemplate,
+                    }),
                     quietHours: service.quietHours,
                     repeatIntervalSeconds: service.repeatIntervalSeconds,
                     failureNotifierIds: service.failureNotifierIds ?? [],
@@ -880,6 +883,24 @@ function NotificationServices({ config, update }) {
                   </select>
                 </Field>
               </>
+            )}
+            {service.type !== "wyoming" && (
+              <Field
+                label="Message template"
+                full
+                hint="Leave blank for the standard alert. Use {name}, {severity}, {message}, {path}, {state}, {localTime} (first seen), or {clearedLocalTime}. Times follow the Signal K server timezone."
+              >
+                <textarea
+                  style={styles.input}
+                  rows={2}
+                  maxLength={1000}
+                  value={service.messageTemplate ?? ""}
+                  placeholder="{message} · {localTime}"
+                  onChange={(event) =>
+                    change(index, { messageTemplate: event.target.value })
+                  }
+                />
+              </Field>
             )}
             <NumberField
               label="Repeat while the alert remains active (seconds)"

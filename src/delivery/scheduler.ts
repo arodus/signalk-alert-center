@@ -27,6 +27,7 @@ export interface DeliverySchedulerStatus {
 }
 
 export interface DeliverySchedulerOptions {
+  messageTemplates?: ReadonlyMap<string, string>;
   beforeSend?: (delivery: DeliveryRecord) => boolean;
   onResult?: (
     delivery: DeliveryRecord,
@@ -253,8 +254,15 @@ export class DeliveryScheduler {
         }
 
         if (controller.signal.aborted) return await aborted;
+        const template = this.options.messageTemplates?.get(
+          delivery.transportInstanceId,
+        );
+        const name =
+          template?.includes("{name}") && messageAlert.definitionId
+            ? this.database.getDefinition(messageAlert.definitionId).name
+            : undefined;
         return transport.send(messageAlert, delivery, {
-          rendered: renderAlert(messageAlert),
+          rendered: renderAlert(messageAlert, template, name),
           now,
           signal: controller.signal,
         });

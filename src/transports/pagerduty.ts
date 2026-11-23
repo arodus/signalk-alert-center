@@ -42,7 +42,7 @@ export class PagerDutyTransport implements NotificationTransport {
       ...(eventAction === "trigger"
         ? {
             payload: {
-              summary: context.rendered.body,
+              summary: context.rendered.body.slice(0, 1024),
               severity: pagerDutySeverity[context.rendered.severity],
               source: alert.path,
               timestamp: context.now.toISOString(),

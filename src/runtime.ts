@@ -2157,6 +2157,13 @@ export class AlertCenterRuntime {
         jitter: options.retry?.jitter ?? 0.2,
       },
       {
+        messageTemplates: new Map(
+          (options.notifiers ?? []).flatMap((service) =>
+            service.type !== "wyoming" && service.messageTemplate?.trim()
+              ? [[service.name, service.messageTemplate] as const]
+              : [],
+          ),
+        ),
         beforeSend: (delivery) => this.maySend(delivery),
         batchSize: options.delivery?.batchSize ?? 50,
         concurrency: options.delivery?.concurrency ?? 4,

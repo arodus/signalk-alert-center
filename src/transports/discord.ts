@@ -23,8 +23,8 @@ export class DiscordTransport implements NotificationTransport {
         body: JSON.stringify({
           embeds: [
             {
-              title: context.rendered.title,
-              description: context.rendered.body,
+              ...(context.rendered.title && { title: context.rendered.title }),
+              description: context.rendered.body.slice(0, 4096),
               timestamp: context.rendered.occurredAt.toISOString(),
             },
           ],
