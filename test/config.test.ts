@@ -31,6 +31,19 @@ describe("validateConfig", () => {
     expect(migrateLegacyRepeatConfig(migrated!)).toBeUndefined();
   });
 
+  it("exposes the plugin schema without repeated object references", () => {
+    const seen = new WeakSet<object>();
+    JSON.stringify(pluginConfigSchema, (key, value: unknown) => {
+      if (value !== null && typeof value === "object") {
+        expect(seen.has(value), `Repeated schema reference at ${key}`).toBe(
+          false,
+        );
+        seen.add(value);
+      }
+      return value;
+    });
+  });
+
   it("exposes only global settings in the Signal K plugin form", () => {
     expect(pluginConfigSchema.properties).not.toHaveProperty("rules");
     expect(pluginConfigSchema.properties).not.toHaveProperty("audio");
