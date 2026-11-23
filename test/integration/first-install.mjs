@@ -123,7 +123,7 @@ try {
       cp -R /fixture/. /tmp/first-install/node_modules/signalk-test-fixture/
       mkdir -p /tmp/first-install/plugin-config-data
       echo '{"enabled":true,"configuration":{"seedOnStart":false}}' > /tmp/first-install/plugin-config-data/signalk-test-fixture.json
-      exec /home/node/signalk/node_modules/signalk-server/bin/signalk-server -c /tmp/first-install
+      exec "$HOME/signalk/node_modules/signalk-server/bin/signalk-server" -c /tmp/first-install
     `,
   );
   await ready();
@@ -133,7 +133,7 @@ try {
       id,
       "node",
       "-p",
-      "require('/home/node/signalk/node_modules/signalk-server/package.json').version",
+      "require(require('node:path').join(require('node:os').homedir(), 'signalk/node_modules/signalk-server/package.json')).version",
     ),
     "2.37.0",
   );
