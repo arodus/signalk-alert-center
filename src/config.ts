@@ -6,6 +6,7 @@ interface NotifierBaseConfig {
   name: string;
   enabled?: boolean;
   minSeverity?: Severity;
+  messageTemplate?: string;
   quietHours?: QuietHours;
   /** Seconds after a successful delivery before this service sends again. */
   repeatIntervalSeconds?: number;
@@ -171,6 +172,14 @@ export function validateConfig(config: PluginConfig): void {
     if (normalizedNotifierNames.has(normalizedName))
       throw new Error(
         `Notification service name must be unique: ${notifier.name}`,
+      );
+    if (
+      notifier.messageTemplate !== undefined &&
+      (typeof notifier.messageTemplate !== "string" ||
+        notifier.messageTemplate.length > 1000)
+    )
+      throw new Error(
+        `Message template for ${notifier.name} must be text of at most 1000 characters`,
       );
     validateQuietHours(notifier.quietHours);
     notifierNames.add(notifier.name);

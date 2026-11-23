@@ -228,6 +228,25 @@ other configured services that receive its retry alert, terminal-failure warning
 and recovery. The affected service cannot select itself, and these internal
 alerts never use normal alert defaults or repeat delivery.
 
+### Remote message templates
+
+In **Notification services**, each remote service has an optional **Message template**.
+For example, `{message} · {localTime}` can send **Anchor dragging · 21:46** to Telegram.
+A template replaces the generated title and body. Leave it blank to use the
+standard message with full lifecycle details.
+
+| Placeholder                          | Value                                                                                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `{message}`                          | Alert text, including the language supplied by the source                                                                    |
+| `{name}` / `{path}`                  | Alert definition name / full notification path                                                                               |
+| `{severity}`                         | Highest severity in the delivery snapshot                                                                                    |
+| `{state}`                            | `active`, `cleared`, or `removed` for an unconfirmed core removal                                                            |
+| `{localTime}` / `{clearedLocalTime}` | Occurrence start / confirmed clear time, in the Signal K server timezone (24-hour clock). Clear time is empty until cleared. |
+
+Queued deliveries use the service's template at send time. Include `{state}` if
+recipients need to distinguish raises and clears. PagerDuty uses the text as its
+trigger summary. Wyoming has its own spoken alert template.
+
 ### Pushover
 
 Choose **Pushover** as the service type. Enter your application API token from

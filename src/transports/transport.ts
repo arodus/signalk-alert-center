@@ -27,7 +27,11 @@ export interface NotificationTransport {
   ): Promise<TransportResult>;
 }
 
-export function renderAlert(alert: AlertRecord): RenderedAlert {
+export function renderAlert(
+  alert: AlertRecord,
+  template?: string,
+  name = alert.path,
+): RenderedAlert {
   const unknownRemoval =
     alert.coreAlert?.state === "normal" && !alert.coreResolutionConfirmed;
   const removal = unknownRemoval
@@ -43,9 +47,41 @@ export function renderAlert(alert: AlertRecord): RenderedAlert {
   const lifecycle = alert.clearedAt
     ? `Occurred at ${alert.firstSeenAt.toISOString()}. Cleared at ${alert.clearedAt.toISOString()} after ${Math.round((duration ?? 0) / 60000)} minutes.`
     : `First seen at ${alert.firstSeenAt.toISOString()}.`;
+  const defaultBody = `${alert.message ?? alert.path}\n${lifecycle}${removal}\nMaximum severity: ${alert.maxSeverity}.`;
+  const localTime = (date: Date) =>
+    date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+  const customBody = template
+    ?.replace(
+      /\{(name|severity|message|path|state|localTime|clearedLocalTime)\}/g,
+      (token) => {
+        switch (token) {
+          case "{name}":
+            return name;
+          case "{severity}":
+            return alert.maxSeverity;
+          case "{message}":
+            return alert.message?.trim() || name;
+          case "{path}":
+            return alert.path;
+          case "{state}":
+            return unknownRemoval ? "removed" : alert.currentState;
+          case "{localTime}":
+            return localTime(alert.firstSeenAt);
+          case "{clearedLocalTime}":
+            return alert.clearedAt ? localTime(alert.clearedAt) : "";
+          default:
+            return token;
+        }
+      },
+    )
+    .trim();
   return {
-    title,
-    body: `${alert.message ?? alert.path}\n${lifecycle}${removal}\nMaximum severity: ${alert.maxSeverity}.`,
+    title: customBody ? "" : title,
+    body: customBody || defaultBody,
     severity: alert.maxSeverity,
     occurredAt: alert.firstSeenAt,
     clearedAt: alert.clearedAt,
