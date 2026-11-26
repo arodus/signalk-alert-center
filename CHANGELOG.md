@@ -5,6 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixes
+
+- Removing a stored alert now asks for confirmation inside Alert Center, so it works in AppDock when browser prompts are blocked.
+
 ## [0.10.0] - 2026-11-23
 
 ### Features
