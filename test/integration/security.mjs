@@ -10,6 +10,7 @@ const users = [
   { username: "owner", type: "admin" },
   { username: "restricted-admin", type: "admin" },
   { username: "crew", type: "readwrite" },
+  { username: "path-only", type: "readwrite" },
   { username: "demo", type: "readwrite" },
   { username: "viewer", type: "readonly" },
 ];
@@ -30,8 +31,17 @@ if (process.argv[2] === "setup") {
           context: "vessels.self",
           resources: [
             {
+              paths: ["notifications"],
+              permissions: [
+                { subject: "owner", permission: "put" },
+                { subject: "crew", permission: "put" },
+                { subject: "any", permission: "read" },
+              ],
+            },
+            {
               paths: ["notifications.electrical.*"],
               permissions: [
+                { subject: "path-only", permission: "put" },
                 { subject: "owner", permission: "put" },
                 { subject: "crew", permission: "put" },
                 { subject: "any", permission: "read" },
@@ -184,7 +194,13 @@ async function testAuthorization() {
   const policyBefore = await request(`${api}/definitions/${definitionId}`);
   const requestsBefore = await mockRequest("/requests");
 
-  for (const user of [null, "viewer", "demo", "restricted-admin"]) {
+  for (const user of [
+    null,
+    "viewer",
+    "demo",
+    "restricted-admin",
+    "path-only",
+  ]) {
     for (const occurrence of targets) {
       for (const prefix of ["alerts", "occurrences"]) {
         for (const action of ["acknowledge", "silence"]) {
@@ -249,7 +265,7 @@ async function testAuthorization() {
     assert.equal(upstream.value.status.silenced, false);
   }
 
-  // Exercise all four action routes successfully with a path-authorized crew login.
+  // Exercise all four action routes with both path and collection permission.
   for (const prefix of ["occurrences", "alerts"]) {
     for (const action of ["silence", "acknowledge"]) {
       await request(
