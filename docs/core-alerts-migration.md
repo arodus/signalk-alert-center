@@ -224,6 +224,12 @@ Core grants use the concrete `alerts.<path>` (for example,
 sensor path, rule wildcard, or a request-body path. A grant on
 `alerts.electrical.*` covers individual matching instances. Legacy
 `notifications.*` grants and bare `alerts` grants do not authorize core actions.
+Legacy occurrences with a notification ID additionally require `put` on the
+literal `notifications` collection before calling `app.notifications`, matching
+[Signal K 2.38.0's Notifications API guard](https://github.com/SignalK/signalk-server/blob/v2.38.0/src/api/notifications/index.ts).
+This additional check does not apply to core alerts or local-only annotations.
+There is no upstream-clear route in Alert Center; dismissal only changes local
+visibility and retains history and delivery work.
 No configured ACLs retains normal readwrite/admin access; a missing checker
 denies actions. Only self-vessel core alerts are ingested.
 

@@ -128,7 +128,10 @@ anonymous access when the server permits it. With security enabled:
   For example, `notifications.electrical.*` permits electrical alerts without
   granting control of navigation alerts. Core alerts require their separate
   `alerts.*` paths, such as `alerts.electrical.*`. An admin login does not bypass
-  this ACL.
+  this ACL. Server-managed legacy notifications additionally require `put` on
+  the literal `notifications` collection, matching Signal K 2.38.0's
+  Notifications API. Local-only annotations without a notification ID and core
+  alerts do not require that legacy collection grant.
 - **Alert settings, policy resets, forgetting definitions, delivery deletion or
   retry, service tests, and global snooze buttons** require an admin login.
 - Existing Signal K PUT controls for snooze and quiet hours continue to use the
@@ -137,7 +140,8 @@ anonymous access when the server permits it. With security enabled:
 If you use ACLs, grant `put` on the specific paths your crew should control.
 A permission on the literal `notifications` path (used by the server's v2
 Notifications API) does not also match `notifications.electrical.*`; use explicit
-path patterns for Alert Center. Likewise, a literal `alerts` grant or a legacy
+path patterns as well as the collection grant for server-managed legacy alerts.
+Likewise, a literal `alerts` grant or a legacy
 `notifications.*` grant does not authorize core `alerts.*` actions. Without
 configured ACLs, readwrite users retain acknowledge/silence access. With server security disabled, actions remain
 available through Signal K's permissive security strategy. An unexpectedly

@@ -5,6 +5,13 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixes
+
+- Require the Signal K Notifications API's collection permission before
+  acknowledging or silencing a server-managed legacy notification. Existing
+  per-alert path permissions still apply. With ACLs enabled, grant crew `put` on
+  both `notifications` and the individual notification paths they may control.
+
 ## [0.10.0] - 2026-11-23
 
 ### Features
