@@ -628,6 +628,14 @@ Authenticated controls share the same persisted state:
   invoke commands. Manual service tests are blocked only while snooze is
   effective; they remain available when the navigation-state guard bypasses it.
 
+All four snooze paths and `digital.alertCenter.quietHours.enabled` declare
+`meta.updateContract: "event"` through Signal K's default metadata API. They are
+published at startup and on state changes, so unchanged controls remain valid
+when Signal K 2.38+ enforces data timeouts. `snooze.duration` remains a snapshot;
+use `snooze.endsAt` for a live countdown. Explicit user metadata is preserved:
+to intentionally expire a control, set its `updateContract` to `periodic` and
+configure its `timeout`. No configuration or database migration is required.
+
 ## Quiet hours per notification service
 
 In **Plugin settings → Notification services**, enable **Quiet hours** on each

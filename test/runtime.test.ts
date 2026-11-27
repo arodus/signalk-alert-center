@@ -26,6 +26,57 @@ describe("AlertCenterRuntime", () => {
     directories.length = 0;
   });
 
+  it("registers event metadata on each start and reports metadata failures without blocking controls", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "control-metadata-"));
+    directories.push(directory);
+    const app = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      getDataDirPath: () => directory,
+      getPath: vi.fn(),
+      getSelfPath: vi.fn(),
+      selfContext: "vessels.self",
+      handleMessage: vi.fn(),
+      setDefaultMetadata: vi.fn(async () => true),
+      setPluginStatus: vi.fn(),
+      subscriptionmanager: { subscribe: vi.fn() },
+    };
+    const runtime = new AlertCenterRuntime(app as unknown as ServerAPI);
+    const paths = [
+      "digital.alertCenter.quietHours.enabled",
+      "digital.alertCenter.snooze.active",
+      "digital.alertCenter.snooze.duration",
+      "digital.alertCenter.snooze.startedAt",
+      "digital.alertCenter.snooze.endsAt",
+    ];
+    try {
+      for (let start = 0; start < 2; start++) {
+        app.setDefaultMetadata.mockClear();
+        runtime.start({});
+        await flush();
+        expect(app.setDefaultMetadata.mock.calls).toEqual(
+          paths.map((path) => [path, { updateContract: "event" }]),
+        );
+        runtime.setSnooze(60);
+        runtime.setQuietHoursEnabled(false);
+        expect(app.setDefaultMetadata).toHaveBeenCalledTimes(5);
+        await runtime.stop();
+      }
+      app.setDefaultMetadata.mockRejectedValueOnce(new Error("write failed"));
+      runtime.start({});
+      await flush();
+      expect(app.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Could not register Alert Center control metadata",
+        ),
+      );
+      expect(() => runtime.setSnooze(0)).not.toThrow();
+      expect(() => runtime.setQuietHoursEnabled(true)).not.toThrow();
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it("reports explicit normal per legacy source without creating occurrences or delivery work", async () => {
     const database = new AlertDatabase();
     const runtime = new AlertCenterRuntime({

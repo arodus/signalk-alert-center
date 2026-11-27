@@ -136,6 +136,77 @@ try {
   );
   assert.equal(fresh.timestamp, recovery.updates[0].timestamp);
 
+  // Controls publish only on changes. The real enforcer must leave every leaf
+  // intact past its one-second default, including false/zero and ISO timestamps.
+  const controls = [
+    "quietHours.enabled",
+    "snooze.active",
+    "snooze.duration",
+    "snooze.startedAt",
+    "snooze.endsAt",
+  ];
+  const controlLeaves = () =>
+    Promise.all(
+      controls.map((path) => sensorLeaf(`digital.alertCenter.${path}`)),
+    );
+  async function assertStableControls() {
+    const before = await controlLeaves();
+    for (const leaf of before) {
+      assert.equal(leaf.meta.updateContract, "event");
+      assert.notEqual(leaf.state?.timedOut, true);
+    }
+    await delay(2200);
+    const after = await controlLeaves();
+    after.forEach((leaf, index) => {
+      assert.equal(leaf.value, before[index].value, controls[index]);
+      assert.equal(leaf.timestamp, before[index].timestamp, controls[index]);
+      assert.notEqual(leaf.state?.timedOut, true, controls[index]);
+    });
+    return after.map((leaf) => leaf.value);
+  }
+  async function putControl(path, value) {
+    const response = await fetch(
+      base +
+        `/signalk/v1/api/vessels/self/digital/alertCenter/${path.replaceAll(".", "/")}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      },
+    );
+    assert.ok(response.ok, `PUT ${path}`);
+  }
+  assert.deepEqual(await assertStableControls(), [true, false, 0, null, null]);
+  await putControl("quietHours.enabled", false);
+  await putControl("snooze.duration", 120);
+  const snoozeBeforeRestart = await request(`${ac}/snooze`);
+  const activeValues = await assertStableControls();
+  assert.deepEqual(activeValues.slice(0, 2), [false, true]);
+  assert.ok(activeValues[2] > 0);
+  assert.equal(activeValues[3], snoozeBeforeRestart.startedAt);
+  assert.equal(activeValues[4], snoozeBeforeRestart.endsAt);
+
+  compose("restart", "signalk");
+  await until(
+    () => request(`${ac}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "Alert Center ready after control state restart",
+  );
+  const restoredValues = await assertStableControls();
+  assert.deepEqual(restoredValues.slice(0, 2), [false, true]);
+  assert.ok(restoredValues[2] > 0 && restoredValues[2] <= activeValues[2]);
+  assert.deepEqual(restoredValues.slice(3), activeValues.slice(3));
+  await putControl("snooze.active", false);
+  await putControl("quietHours.enabled", true);
+  assert.deepEqual(await assertStableControls(), [true, false, 0, null, null]);
+  await putControl("snooze.duration", 2);
+  await until(
+    () => request(`${ac}/snooze`),
+    (state) => !state.active,
+    "snooze expires normally with event metadata",
+  );
+  assert.deepEqual(await assertStableControls(), [true, false, 0, null, null]);
+
   const failoverSensor = "environment.nativeTimeout.failover";
   const priorities = await fetch(base + "/skServer/priorityOverrides", {
     method: "PUT",
@@ -194,8 +265,30 @@ try {
   );
   assert.equal(recovered.timestamp, primaryRecovery.updates[0].timestamp);
   await assertNoTimeoutAlerts();
+
+  // A user's explicit contract must survive plugin/server restart and retain
+  // its normal timeout behavior. Default metadata must not force it to event.
+  await putControl("quietHours.enabled.meta", {
+    updateContract: "periodic",
+    timeout: 1,
+    displayName: "Custom quiet-hours control",
+  });
+  compose("restart", "signalk");
+  await until(
+    () => request(`${ac}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "Alert Center ready after user metadata override",
+  );
+  const overridden = await until(
+    () => sensorLeaf("digital.alertCenter.quietHours.enabled"),
+    (leaf) => leaf.value === null && leaf.state?.timedOut === true,
+    "explicit periodic control still times out",
+  );
+  assert.equal(overridden.meta.updateContract, "periodic");
+  assert.equal(overridden.meta.displayName, "Custom quiet-hours control");
+  assert.equal((await request(`${ac}/status`)).quietHours.enabled, true);
   console.log(
-    "Signal K 2.38.0 stale state, last valid timestamps, null handling, source failover and recovery passed without creating timeout alerts.",
+    "Signal K 2.38.0 stale state, source recovery, event controls, snooze expiry, restart persistence and user metadata overrides passed without creating timeout alerts.",
   );
 } finally {
   compose("down", "-v", "--remove-orphans");
