@@ -480,7 +480,7 @@ describe("core alerts migration", () => {
       );
       db.close();
       db = new AlertDatabase(filename);
-      expect(db.schemaVersion()).toBe(5);
+      expect(db.schemaVersion()).toBe(6);
       expect(db.migrationApplied).toBe(true);
       expect(db.getDelivery(delivery.id)?.state).toBe("failed_retryable");
       expect({
@@ -569,7 +569,7 @@ describe("core alerts migration", () => {
       interrupted!.close();
       const recovered = new AlertDatabase(filename);
       databases.push(recovered);
-      expect(recovered.schemaVersion()).toBe(5);
+      expect(recovered.schemaVersion()).toBe(6);
       expect(recovered.migrationApplied).toBe(true);
       expect(ingest(recovered).coreAlert?.id).toBe("core-1");
     },

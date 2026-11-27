@@ -1134,6 +1134,11 @@ export function getAlertCenterOpenApi() {
                 "False for displacement or an unclassified core removal without independent confirmation; neither must be reported as recovery.",
             },
             messageSample: { $ref: "#/components/schemas/MessageSample" },
+            location: {
+              type: "string",
+              description:
+                "Physical location aboard the vessel, not geographic coordinates.",
+            },
             id: { type: "string" },
             definitionId: { type: "string" },
             path: { type: "string" },
@@ -1212,6 +1217,11 @@ export function getAlertCenterOpenApi() {
                 message: { type: "string" },
                 at: { type: "string", format: "date-time" },
                 messageSample: { $ref: "#/components/schemas/MessageSample" },
+                location: {
+                  type: "string",
+                  description:
+                    "Physical location aboard the vessel, not geographic coordinates.",
+                },
               },
             },
             alert: { type: "object", additionalProperties: true },
@@ -1295,6 +1305,11 @@ export function getAlertCenterOpenApi() {
           required: ["id", "occurrenceId", "eventType", "occurredAt"],
           properties: {
             messageSample: { $ref: "#/components/schemas/MessageSample" },
+            location: {
+              type: "string",
+              description:
+                "Physical location aboard the vessel, not geographic coordinates.",
+            },
             id: { type: "string" },
             occurrenceId: { type: "string" },
             eventType: { type: "string" },
@@ -1320,6 +1335,11 @@ export function getAlertCenterOpenApi() {
           ],
           properties: {
             messageSample: { $ref: "#/components/schemas/MessageSample" },
+            location: {
+              type: "string",
+              description:
+                "Physical location aboard the vessel, not geographic coordinates.",
+            },
             id: { type: "integer" },
             alertId: { type: "string" },
             definitionId: { type: "string" },

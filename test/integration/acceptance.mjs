@@ -142,6 +142,7 @@ await json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
   body: JSON.stringify({
     source: "fixture.acceptance",
     message: "Acceptance alert",
+    location: "Engine room port",
   }),
 });
 const fixture = await json(`${signalkUrl}/plugins/signalk-test-fixture/state`);
@@ -166,6 +167,7 @@ const occurrencePage = await eventually(
 const occurrence = occurrencePage.items[0];
 assert.equal(occurrence.oneTime, true);
 assert.equal(occurrence.message, "Acceptance alert");
+assert.equal(occurrence.location, "Engine room port");
 const events = await json(
   `${signalkUrl}/plugins/signalk-alert-center/occurrences/${occurrence.id}/events`,
 );
@@ -181,6 +183,44 @@ const raisedHistory = alertHistory.items.find(
 );
 assert.equal(Boolean(raisedHistory), true);
 assert.equal(raisedHistory.message, "Acceptance alert");
+assert.equal(raisedHistory.location, "Engine room port");
+assert.equal(
+  events.items.find((event) => event.eventType === "raised").location,
+  "Engine room port",
+);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    source: "fixture.acceptance",
+    message: "Acceptance alert",
+    location: "Engine room starboard",
+  }),
+});
+await eventually(
+  () =>
+    json(
+      `${signalkUrl}/plugins/signalk-alert-center/occurrences/${occurrence.id}`,
+    ),
+  (item) => item.location === "Engine room starboard",
+  "location-only update was not persisted",
+);
+const locationEvents = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/occurrences/${occurrence.id}/events`,
+);
+assert.equal(
+  locationEvents.items.filter((event) => event.eventType === "raised").length,
+  1,
+);
+assert.equal(
+  locationEvents.items.find((event) => event.eventType === "location_changed")
+    .location,
+  "Engine room starboard",
+);
+assert.equal(
+  locationEvents.items.find((event) => event.eventType === "raised").location,
+  "Engine room port",
+);
 assert.equal(Object.hasOwn(raisedHistory, "deliveries"), false);
 const activeRemoval = await fetch(
   `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}`,
@@ -216,7 +256,7 @@ assert.equal(
   true,
 );
 assert.equal(status.database.healthy, true);
-assert.equal(status.database.schemaVersion, 5);
+assert.equal(status.database.schemaVersion, 6);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);

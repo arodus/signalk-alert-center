@@ -8,6 +8,7 @@ Versioning while it remains pre-1.0.
 ### Features
 
 - Show timed-out readings as **Stale** in the Alerts table, with age measured from the last valid reading rather than the timeout event. Missing readings remain unavailable. These indicators do not create alerts or deliveries; configure sensor-loss alerts in a separate rules plugin.
+- Show notification locations in the alert list, details and history, include them in standard remote messages, and support `{location}` in service templates. Location-only updates do not retrigger delivery. Schema 6 preserves event and delivery locations across restarts; back up the database before upgrading, and restore the backup if reverting to an earlier version.
 
 ### Fixes
 

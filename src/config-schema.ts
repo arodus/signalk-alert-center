@@ -13,7 +13,7 @@ const messageTemplateSchema = () => ({
   title: "Message template",
   maxLength: 1000,
   description:
-    "Optional remote alert text. Use {name}, {severity}, {message}, {path}, {state}, {localTime}, or {clearedLocalTime}. Times use the Signal K server timezone.",
+    "Optional remote alert text. Use {name}, {severity}, {message}, {location}, {path}, {state}, {localTime}, or {clearedLocalTime}. Times use the Signal K server timezone.",
 });
 const serviceEnabled = {
   type: "boolean",
@@ -395,7 +395,7 @@ export const pluginConfigSchema = {
           type: "string",
           title: "Default spoken alert text",
           description:
-            "Template passed to signalk-wyoming. Available placeholders: {name}, {severity}, {message}, {path}, and {state}. Maximum 500 characters.",
+            "Template passed to signalk-wyoming. Available placeholders: {name}, {severity}, {message}, {location}, {path}, and {state}. Maximum 500 characters.",
           minLength: 1,
           maxLength: 500,
           default: "{name}. {severity}. {message}",
