@@ -810,4 +810,93 @@ try {
   await saveIgnoredConfig(ignoredPlugin.data.configuration);
 }
 
+// Native notification methods changed in 2.38.0. Keep the older-server lane,
+// while exercising the real manager (not a fabricated delta) on newer servers.
+const serverDiscovery = await json(`${signalkUrl}/signalk`);
+const [serverMajor, serverMinor] = String(
+  serverDiscovery.server?.version ?? "0.0",
+)
+  .split(".")
+  .map(Number);
+if (serverMajor > 2 || (serverMajor === 2 && serverMinor >= 38)) {
+  const api = `${signalkUrl}/plugins/signalk-alert-center`;
+  const notifications = `${signalkUrl}/signalk/v2/api/notifications`;
+  const path = "notifications.electrical.stateLifecycle";
+  await eventually(
+    () => json(`${api}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "state lifecycle startup",
+  );
+  const write = (method, body) => ({
+    method,
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const raised = await json(
+    notifications,
+    write("POST", {
+      path,
+      state: "warn",
+      message: "Battery warning",
+    }),
+  );
+  const page = await eventually(
+    () => json(`${api}/occurrences?path=${encodeURIComponent(path)}`),
+    (page) => page.items.some((item) => item.notificationId === raised.id),
+    "native lifecycle occurrence",
+  );
+  const occurrence = page.items.find(
+    (item) => item.notificationId === raised.id,
+  );
+  const load = () => json(`${api}/occurrences/${occurrence.id}`);
+  for (const [action, nextState] of [
+    ["silence", "alarm"],
+    ["acknowledge", "warn"],
+  ]) {
+    await json(`${api}/occurrences/${occurrence.id}/${action}`, write("POST"));
+    const field = action === "silence" ? "silencedAt" : "acknowledgedAt";
+    const annotated = await eventually(
+      load,
+      (item) => item[field],
+      `${action} timestamp`,
+    );
+    await json(
+      `${notifications}/${raised.id}`,
+      write("PUT", {
+        message: "Battery reading changed",
+        location: "Engine room",
+      }),
+    );
+    const sameState = await eventually(
+      load,
+      (item) => item.message === "Battery reading changed",
+      "native message update",
+    );
+    assert.equal(sameState[field], annotated[field]);
+    const quiet = await json(`${notifications}/${raised.id}`);
+    assert.equal(quiet.value.method.includes("sound"), false);
+    await json(
+      `${notifications}/${raised.id}`,
+      write("PUT", { state: nextState }),
+    );
+    const changed = await eventually(
+      load,
+      (item) =>
+        item.currentSeverity === nextState &&
+        !item.acknowledgedAt &&
+        !item.silencedAt,
+      "state change resets local actions",
+    );
+    assert.equal(changed.id, occurrence.id);
+    const audible = await json(`${notifications}/${raised.id}`);
+    assert.deepEqual(audible.value.method, ["visual", "sound"]);
+  }
+  await json(`${notifications}/${raised.id}`, write("DELETE"));
+  await eventually(
+    load,
+    (item) => item.currentState === "cleared",
+    "native clear retains occurrence",
+  );
+}
+
 console.log("Docker acceptance smoke test passed");

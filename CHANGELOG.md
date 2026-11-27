@@ -5,6 +5,13 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixes
+
+- Reset a legacy notification's local acknowledgement and silence when its
+  active severity changes, including decreases, while retaining its history.
+  Message and location changes keep those actions in effect. Pending remote
+  acknowledgements of the old state no longer acknowledge the new state.
+
 ## [0.10.0] - 2026-11-23
 
 ### Features

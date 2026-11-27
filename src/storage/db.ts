@@ -1166,7 +1166,29 @@ export class AlertDatabase {
             id,
           );
         persistCore(id);
+        const legacyStateChanged =
+          !core && !clearing && previousSeverity !== alert.severity;
+        if (legacyStateChanged) {
+          // Acknowledge/silence answer the previous state, not the entire
+          // occurrence. Keep the action events, but let the new state ask for
+          // attention again, including severity decreases (Signal K #3361).
+          this.db
+            .prepare(
+              "UPDATE alert_occurrences SET acknowledged_at=NULL, silenced_at=NULL WHERE id=?",
+            )
+            .run(id);
+          if (active.acknowledged_at || active.silenced_at)
+            this.addEvent(id, "attention_reset", now, {
+              reason: "state_changed",
+              from: previousSeverity,
+              to: alert.severity,
+              acknowledgedAt: active.acknowledged_at,
+              silencedAt: active.silenced_at,
+            });
+          active = { ...active, acknowledged_at: null, silenced_at: null };
+        }
         if (
+          legacyStateChanged ||
           core?.clearReason === "displaced" ||
           reannounced ||
           (core?.state === "unacknowledged" &&
@@ -1189,9 +1211,14 @@ export class AlertDatabase {
             )
             .run(id);
           if (pendingActions.length)
-            this.addEvent(id, "core_actions_superseded", now, {
-              deliveryIds: pendingActions.map((row) => row.id),
-            });
+            this.addEvent(
+              id,
+              legacyStateChanged
+                ? "state_change_actions_superseded"
+                : "core_actions_superseded",
+              now,
+              { deliveryIds: pendingActions.map((row) => row.id) },
+            );
           const snapshotDelay = Number(active.activation_delay_seconds);
           if (reannounced && snapshotDelay > 0) {
             const dueAt = new Date(
