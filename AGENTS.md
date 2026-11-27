@@ -1,21 +1,44 @@
 # AGENTS.md
 
+## Branches, commits, and pull requests
+
+Apply these rules whether you use local Git, `gh`, or the GitHub API.
+
+- Before editing, check the repository root, current branch, working-tree changes,
+  and any existing branch or PR for the task. Continue existing work on its branch.
+  For new work, create a focused branch from the intended base before editing.
+  If the checkout contains unrelated work, use a separate worktree.
+- Name new branches `<purpose>/<short-kebab-case-description>`. An issue number
+  is optional, for example `fix/69-tablet-badge-width`. Use an exact branch name
+  supplied by the user as given. Assistant-branded prefixes such as `codex/`
+  and `agent/` require an explicit request.
+- Choose the branch prefix by purpose:
+  - `feature/` for new functionality and `fix/` for bug fixes.
+  - `refactor/`, `docs/`, `test/`, or `perf/` for changes of that kind.
+  - `ci/` for workflows, `build/` for packaging, and `chore/` for maintenance.
+  - `release/` for release preparation and `hotfix/` for explicitly urgent
+    production fixes.
+- Use Conventional Commit titles: `type: summary` or `type(scope): summary`.
+  Use `feat:` for a `feature/` branch. For example, a fix on
+  `fix/appdock-stored-alert-removal` could use the commit title
+  `fix: confirm stored alert removal in AppDock`.
+- Give issues and PRs Conventional Commit titles with a nonempty summary.
+  GitHub applies the Signal K type label from the title (for example,
+  `feat:` → `feature`, `fix:` → `fix`, and `docs:` → `doc`).
+- Before committing or pushing, verify the target branch and review the diff
+  against the intended base. Include only changes that belong to the task.
+- Open ready-for-review PRs by default. Use a draft only when requested.
+  Describe what changed, why, which checks passed, and which could not run.
+  Merging, rewriting published history, deleting branches, releasing, and
+  deploying each require authorization.
+
 ## Project scope
 
-This repository implements a Signal K plugin for reliable, offline-first alert delivery on boats and other intermittently connected systems.
-
-The plugin must:
-
-- ingest Signal K notifications/alerts;
-- persist alert state before attempting external delivery;
-- deliver through multiple notifier transports in parallel;
-- retry failed deliveries without losing successful delivery state for other transports;
-- optionally wake a connectivity device such as Starlink through a Signal K PUT-capable switch;
-- keep connectivity active while delivery work remains;
-- shut connectivity down only when it is safe and only when the plugin itself turned it on;
-- survive Signal K/plugin/process restarts without losing pending work.
-
-The plugin is not merely an ntfy adapter. Treat it as a durable alert-delivery engine with pluggable transports and connectivity management.
+Signal K Alert Center provides persistent onboard alert history and offline-first
+remote delivery on Raspberry Pi-class systems. The lifecycle engine records
+alerts in durable storage. A scheduler delivers them through independent
+notifier instances. A separate connectivity manager can wake and release a WAN
+connection through a Signal K switch.
 
 ## Notification-center goal
 
@@ -120,742 +143,105 @@ services or vessel hardware.
   history drill-down, and per-path controls. Do not copy its synchronous JSON log,
   GET-based mutations, global mutable state, or legacy untyped architecture.
 
-## Core reliability invariants
-
-These invariants are mandatory and take precedence over convenience:
-
-1. **Persist before send.**
-   A notification that requires delivery must be durably recorded before any network request or Starlink wake action is attempted.
-
-2. **Never delete globally because one notifier succeeded.**
-   Delivery state is tracked independently per configured notifier.
-
-3. **A notifier failure must not block unrelated notifiers.**
-   ntfy can fail while PagerDuty and Discord succeed, and vice versa.
-
-4. **Emergency alerts are durable.**
-   Emergency/critical alerts must not expire merely because retries have run for a long time.
-
-5. **Restarts must be safe.**
-   On startup, recover pending alerts, delivery attempts, wake ownership, and any incomplete delivery work from persistent storage.
-
-6. **Do not turn off manually enabled connectivity.**
-   The plugin may power Starlink off only when it can prove that the current connectivity session was started by the plugin.
-
-7. **Do not send notification spam.**
-   Repeated Signal K updates for the same logical alert must update a durable alert record rather than create unbounded duplicate deliveries.
-
-8. **Cleared alerts still matter.**
-   If an alert was raised and later cleared while offline, the eventual remote message must preserve the occurrence and lifecycle rather than silently dropping it.
-
-9. **Power control and message delivery are separate concerns.**
-   Connectivity management must not be implemented inside individual notifier transports.
-
-10. **Configuration is declarative.**
-    Alert routing, wake behavior, notifier selection, severity thresholds, delays, cooldowns, retry limits, and switch paths must be configurable.
-
-## Code quality, formatting, and style
-
-Code quality is part of correctness.
-
-Before considering any implementation task complete:
-
-- format all changed code with the repository-standard formatter;
-- lint all changed code with the repository-standard linter;
-- fix all formatter and lint errors;
-- keep TypeScript in strict mode;
-- keep imports ordered and consistent with repository conventions;
-- use clear, consistent naming for files, types, functions, classes, states, and configuration keys;
-- avoid dead code, unused exports, stale comments, commented-out code, and avoidable `any`;
-- keep modules focused and avoid oversized files when responsibilities can be separated cleanly;
-- preserve existing style when contributing to an established repository;
-- add formatter/linter commands to `package.json` and CI when the repository does not already provide them.
-
-Preferred tooling for a new repository:
-
-- Prettier for formatting;
-- ESLint with TypeScript support for linting;
-- repository-consistent import ordering;
-- automated format/lint/test checks in CI.
-
-Do not hand-format around formatter output. Configure the formatter once and use it consistently.
-
-A change is not done if the code builds but formatting or lint checks fail.
-
-## Architecture research rule
-
-Do not invent Signal K-specific architecture when an established convention likely exists.
-
-When there is uncertainty about any of the following:
-
-- Signal K plugin lifecycle;
-- plugin registration and packaging;
-- configuration schemas;
-- subscriptions;
-- notification or alert semantics;
-- REST route registration;
-- authentication;
-- Signal K PUT handling;
-- plugin web UI conventions;
-- server APIs;
-- data paths;
-- plugin state publication;
-- installation/update behavior;
-- TypeScript patterns used by Signal K plugins;
-
-research existing conventions before implementing.
-
-Use this order of preference:
-
-1. current official Signal K documentation;
-2. current Signal K server source/types;
-3. current first-party Signal K plugins;
-4. mature, actively maintained, well-starred Signal K plugin repositories;
-5. smaller third-party plugins only when better references do not exist.
-
-When reviewing reference repositories:
-
-- prefer repositories with meaningful adoption/stars and recent maintenance;
-- inspect actual source, configuration, packaging, tests, and release structure rather than copying README snippets blindly;
-- compare more than one mature plugin when the architectural choice is significant;
-- prefer patterns that align with current Signal K releases;
-- avoid copying deprecated APIs or legacy JavaScript patterns into a new TypeScript implementation.
-
-If this project intentionally deviates from established Signal K patterns, document:
-
-- the convention that was considered;
-- why it was unsuitable here;
-- the chosen alternative;
-- any compatibility or maintenance implications.
-
-For non-Signal-K-specific concerns such as SQLite schema design, retry scheduling, state machines, or HTTP clients, prefer conventional Node.js/TypeScript engineering practices rather than forcing Signal K-specific patterns where none are needed.
-
-## Preferred technology
-
-- TypeScript
-- Node.js version compatible with the supported Signal K server release
-- Signal K plugin conventions and APIs
-- Strict TypeScript
-- ESLint/Prettier or repository-standard equivalents
-- A lightweight embedded durable store suitable for Raspberry Pi use
-
-Prefer a real embedded database with transactions, such as SQLite, over ad-hoc JSON files once persistence becomes non-trivial. If another store is chosen, document why it is safer or simpler.
-
-Avoid introducing a large framework unless it clearly reduces complexity.
-
-## Formatting, style, and code quality
-
-Code quality is part of correctness. Do not consider a change complete merely because it compiles or the happy path works.
-
-Before finishing any implementation change:
-
-- run the repository formatter on all changed files;
-- run the linter and fix all lint errors;
-- run TypeScript type-checking with strict settings;
-- run the relevant test suite;
-- keep imports ordered and remove unused imports/dead code;
-- follow the naming, file layout, error-handling, and logging conventions already established in the repository;
-- avoid inconsistent one-off style choices;
-- prefer clear types and small explicit interfaces over implicit `any` or loosely shaped objects;
-- do not disable lint/type rules merely to make checks pass unless there is a documented technical reason;
-- keep generated/config examples formatted as well as source code.
-
-If the repository already defines `format`, `lint`, `typecheck`, `test`, or equivalent scripts, use those exact scripts rather than inventing parallel tooling.
-
-If formatter/linter configuration is missing, establish a minimal conventional setup appropriate for a modern TypeScript Signal K plugin and document the commands in the README.
-
-CI should, where practical, enforce the same formatting, linting, type-checking, and test commands used locally.
-
-A PR/change is not done while changed code would fail the configured formatter, linter, type checker, or relevant tests.
-
-## Architecture research and precedent
-
-Do not guess at Signal K architecture when established patterns can be checked.
-
-When an implementation decision touches any of the following, first inspect current Signal K sources/documentation and mature Signal K plugin implementations:
-
-- plugin lifecycle and `start`/`stop` behavior;
-- plugin metadata and packaging;
-- configuration schemas;
-- subscriptions;
-- notifications/alerts;
-- Signal K PUT handling;
-- REST route registration;
-- authentication/authorization;
-- plugin data directories and persistent storage;
-- web/plugin UI conventions;
-- logging;
-- server compatibility;
-- testing conventions.
-
-Use this research order:
-
-1. **Current official Signal K documentation and server source** for the authoritative API/behavior.
-2. **Current Signal K-maintained examples/plugins** where available.
-3. **Mature, actively maintained, well-starred Signal K plugin repositories** to understand real-world conventions and edge cases.
-
-When reviewing community plugin repositories:
-
-- prefer repositories with meaningful adoption/stars and recent maintenance;
-- prefer plugins targeting current Signal K server versions;
-- inspect more than one mature repository when the architectural choice is significant;
-- copy conventions, not bugs or obsolete compatibility workarounds;
-- confirm that patterns seen in old plugins are still compatible with current Signal K APIs.
-
-Do not invent a custom abstraction for something Signal K already provides unless there is a clear reliability or maintainability reason.
-
-If this plugin intentionally deviates from common Signal K plugin architecture, document the deviation and rationale in code comments or architecture documentation, especially where persistence, notification lifecycle, connectivity control, or REST behavior differs from established patterns.
-
-For architecture questions that remain ambiguous after research, choose the design that best preserves the reliability invariants in this file.
-
-## Suggested architecture
-
-Keep modules small and explicit.
-
-```text
-Signal K source adapter
-        |
-        v
-Alert lifecycle engine
-        |
-        v
-Durable store
-        |
-        +----------------------+
-        |                      |
-        v                      v
-Delivery scheduler      Connectivity manager
-        |                      |
-        v                      v
-Transport registry      Signal K PUT switch
-   |    |    |
-   |    |    +-- Discord
-   |    +------- PagerDuty
-   +------------ ntfy
-```
-
-Recommended module boundaries:
-
-- `src/plugin.ts`
-  - Signal K lifecycle: start/stop
-  - configuration loading
-  - subscriptions
-  - REST/API registration
-
-- `src/alerts/`
-  - normalization
-  - lifecycle transitions
-  - deduplication/coalescing
-  - per-alert policy resolution
-
-- `src/storage/`
-  - migrations
-  - alert/event persistence
-  - per-transport delivery persistence
-  - leases/locks if required
-
-- `src/delivery/`
-  - scheduler
-  - retry/backoff
-  - concurrency control
-  - batching
-  - delivery result handling
-
-- `src/transports/`
-  - shared transport interface
-  - `ntfy`
-  - `pagerduty`
-  - `discord`
-  - future adapters
-
-- `src/connectivity/`
-  - Starlink/switch state machine
-  - Signal K PUT
-  - switch-state observation
-  - Internet reachability
-  - ownership/cooldown
-
-- `src/api/`
-  - queue/status endpoints
-  - manual retry
-  - test notification
-  - optional UI data
-
-## Internal alert model
-
-Do not couple persistence directly to the exact current Signal K notification schema.
-
-Normalize Signal K input into an internal representation similar to:
-
-```ts
-type AlertSeverity =
-  | "normal"
-  | "warn"
-  | "alert"
-  | "alarm"
-  | "emergency";
-
-interface AlertRecord {
-  id: string;                 // stable internal ID
-  sourceKey: string;          // usually Signal K path/id
-  path: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  clearedAt?: string;
-  currentSeverity: AlertSeverity;
-  maxSeverity: AlertSeverity;
-  currentState: "active" | "cleared";
-  message?: string;
-  value?: unknown;
-  metadata?: Record<string, unknown>;
-}
-```
-
-Preserve enough source data to support future Signal K alert APIs without rewriting the queue engine.
-
-## Delivery model
-
-Each logical alert can have zero or more delivery targets.
-
-Track them independently:
-
-```ts
-type DeliveryState =
-  | "pending"
-  | "waiting_connectivity"
-  | "sending"
-  | "delivered"
-  | "failed_retryable"
-  | "failed_terminal";
-
-interface DeliveryRecord {
-  id: string;
-  alertId: string;
-  transportId: string;        // concrete configured notifier instance
-  state: DeliveryState;
-  attempts: number;
-  nextAttemptAt?: string;
-  lastAttemptAt?: string;
-  deliveredAt?: string;
-  lastError?: string;
-  remoteId?: string;
-}
-```
-
-Do not represent all notifiers with one boolean.
-
-## Transport interface
-
-All notifier integrations must implement one common interface.
-
-For example:
-
-```ts
-interface NotificationTransport {
-  readonly type: string;
-
-  validateConfig(config: unknown): void;
-
-  send(
-    alert: AlertRecord,
-    delivery: DeliveryRecord,
-    context: TransportContext
-  ): Promise<TransportResult>;
-
-  healthCheck?(): Promise<TransportHealth>;
-}
-```
-
-Transport results must distinguish:
-
-- success;
-- retryable failure;
-- permanent/configuration failure.
-
-Transport code must not own retry scheduling or Starlink power.
-
-## Initial transports
-
-Implement these as independent notifier instances that can be enabled simultaneously.
-
-### ntfy
-
-Support at minimum:
-
-- server URL;
-- topic;
-- token/auth where applicable;
-- priority mapping;
-- title/message;
-- tags;
-- click URL;
-- optional actions later.
-
-### PagerDuty
-
-Use PagerDuty Events API semantics.
-
-Support at minimum:
-
-- routing/integration key;
-- trigger;
-- resolve where appropriate;
-- dedup key derived from stable alert identity;
-- severity mapping;
-- links/custom details where useful.
-
-Do not create a new PagerDuty incident for every repeated Signal K delta of the same logical alert.
-
-### Discord
-
-Support Discord webhooks.
-
-Support at minimum:
-
-- webhook URL;
-- human-readable title/body;
-- severity;
-- timestamps;
-- optional embeds.
-
-Discord should be considered an informational notifier, not a guaranteed wake-up mechanism.
-
-## Parallel delivery
-
-A per-alert policy may target more than one transport:
-
-```yaml
-notifiers:
-  - Crew ntfy
-  - Emergency PagerDuty
-  - Boat Discord
-```
-
-All matching targets are scheduled independently.
-
-Example result:
-
-```text
-ntfy       delivered
-PagerDuty  retrying
-Discord    delivered
-```
-
-This alert remains pending only for PagerDuty. Successful ntfy and Discord deliveries must not be repeated unless policy explicitly requests repeat/escalation behavior.
-
-## Alert lifecycle and deduplication
-
-The stable source key should normally be the Signal K notification path or another stable alert ID.
-
-Repeated updates while active must coalesce.
-
-Example:
-
-```text
-19:04 notifications.bilge.highWater -> emergency
-19:05 notifications.bilge.highWater -> emergency
-19:08 notifications.bilge.highWater -> emergency
-19:17 notifications.bilge.highWater -> normal/cleared
-```
-
-The durable history must preserve:
-
-- first seen;
-- last seen;
-- maximum severity;
-- current state;
-- clear time.
-
-When first delivery happens after the alert has already cleared, the rendered notification should be able to say that it occurred and later cleared, including timestamps/duration.
-
-Do not simply drop a cleared alert that was never delivered.
-
-## Connectivity modes
-
-Per-alert policies must support at least:
-
-- `queue`
-  - persist now;
-  - do not wake Starlink;
-  - deliver whenever Internet becomes available for another reason.
-
-- `wake`
-  - persist;
-  - request Starlink immediately;
-  - deliver when online.
-
-- `wake_after`
-  - persist;
-  - wake only if the condition remains active past a configured duration.
-
-Conceptual per-alert policy examples (stored by the plugin, not entered in the
-Signal K plugin configuration):
-
-```yaml
-alerts:
-  - path: "notifications.environment.inside.fridge.temperature"
-    minSeverity: warn
-    connectivity: queue
-    notifiers: [Crew ntfy]
-
-  - path: "notifications.electrical.shorePower.lost"
-    minSeverity: alarm
-    connectivity:
-      mode: wake_after
-      delaySeconds: 600
-    notifiers: [Crew ntfy, Boat Discord]
-
-  - path: "notifications.bilge.highWater"
-    minSeverity: emergency
-    connectivity: wake
-    notifiers: [Crew ntfy, Emergency PagerDuty, Boat Discord]
-```
-
-## Connectivity manager
-
-Implement connectivity as an explicit state machine.
-
-Suggested states:
-
-```text
-OFF
-REQUESTING_ON
-POWERED
-WAITING_FOR_INTERNET
-ONLINE
-IDLE_COOLDOWN
-REQUESTING_OFF
-FAULT
-```
-
-Configuration should support:
-
-- Signal K switch path;
-- ON and OFF values;
-- optional separate observed-state path;
-- switch confirmation timeout;
-- Internet readiness checks;
-- Starlink boot timeout;
-- idle cooldown;
-- maximum keepalive if appropriate.
-
-## Signal K switch control
-
-Use Signal K PUT for the configured switch rather than coupling to Shelly/GPIO/Victron/etc.
-
-Example configuration:
-
-```yaml
-connectivity:
-  enabled: true
-
-  switch:
-    path: electrical.switches.starlink.state
-    onValue: 1
-    offValue: 0
-
-  switchConfirmTimeoutSeconds: 15
-  internetTimeoutSeconds: 240
-  internetCheckIntervalSeconds: 5
-  idleCooldownSeconds: 300
-```
-
-The exact path is installation-specific.
-
-## Connectivity ownership
-
-This is mandatory.
-
-Before requesting ON, record whether the switch was already ON.
-
-Cases:
-
-### Initially OFF
-
-```text
-plugin sees OFF
-plugin requests ON
-plugin confirms ON
-session.startedByPlugin = true
-```
-
-The plugin may later turn it OFF.
-
-### Initially ON
-
-```text
-plugin sees ON
-plugin uses connectivity
-session.startedByPlugin = false
-```
-
-The plugin must leave it ON.
-
-If ownership is ambiguous after a crash/restart, prefer leaving Starlink ON rather than risking turning off a manually enabled connection.
-
-## Shutdown conditions
-
-Only request OFF when all are true:
-
-- the plugin owns the connectivity session;
-- no pending delivery currently requires connectivity;
-- no active alert has a wake-required policy;
-- no retry is scheduled within the protected keepalive window;
-- no send is in flight;
-- the configured idle cooldown has elapsed.
-
-A newly arriving alert during cooldown cancels shutdown.
-
-## Batching
-
-Once Internet becomes available, attempt all eligible queued deliveries, including low-priority notifications that did not themselves justify waking Starlink.
-
-Example:
-
-```text
-fridge warning    queued
-battery warning   queued
-bilge emergency   wakes Starlink
-                  |
-                  +--> ntfy fridge
-                  +--> ntfy battery
-                  +--> ntfy/PagerDuty/Discord bilge
-```
-
-This minimizes Starlink power cycles.
-
-## Retry policy
-
-Retry scheduling belongs in the delivery scheduler.
-
-Use exponential backoff with jitter and a configurable cap.
-
-Example progression:
-
-```text
-10s
-30s
-1m
-2m
-5m
-10m
-30m
-...
-```
-
-Requirements:
-
-- persist `nextAttemptAt`;
-- resume after restart;
-- avoid synchronized retry storms;
-- parse HTTP status codes appropriately;
-- do not hammer services on authentication/configuration errors;
-- emergency deliveries must remain durable.
-
-## Storage semantics
-
-Use atomic/transactional updates for:
-
-- ingesting/updating an alert;
-- creating required per-transport delivery rows;
-- transitioning delivery state;
-- recording delivered results.
-
-At-least-once remote sending is acceptable where remote APIs do not allow perfect exactly-once behavior, but use remote deduplication facilities where available.
-
-PagerDuty dedup keys should be stable.
-
-## Plugin status
-
-Expose useful operational state via REST and, where appropriate, Signal K values.
-
-At minimum expose:
-
-- pending logical alerts;
-- pending deliveries;
-- per-notifier status;
-- oldest pending delivery;
-- last successful remote delivery;
-- connectivity state;
-- switch observed state;
-- whether the plugin owns the current connectivity session;
-- last connectivity error;
-- last delivery error.
-
-Potential paths:
-
-```text
-notifications.delivery.pendingCount
-notifications.delivery.oldestPending
-notifications.delivery.lastSuccess
-notifications.delivery.connectivity.state
-```
-
-Choose final paths according to Signal K conventions; do not invent incompatible standard paths without documenting them as plugin-specific.
-
-## REST/API hooks
-
-Provide APIs for the required notification list and history UI:
-
-- `GET /status`
-- `GET /alerts`
-- `GET /deliveries`
-- `POST /retry`
-- `POST /test/:transport`
-- optional `POST /connectivity/wake`
-- optional `POST /connectivity/release`
-
-Manual actions must be authenticated through Signal K's normal plugin/server mechanisms.
-
-## Configuration
-
-Validate configuration at plugin startup.
-
-Configuration must support:
-
-- multiple configured instances of the same transport;
-- per-instance secrets;
-- per-notifier global minimum severity;
-- global policy defaults;
-- retry settings;
-- persistence settings;
-- connectivity switch settings.
-
-Per-alert minimum severity, connectivity mode, activation delay, one-time behavior,
-and notifier fan-out belong in durable Alert center settings, not plugin configuration.
-
-Never log secrets.
-
-## Logging
-
-Use structured, actionable logs.
-
-Include:
-
-- alert ID/source key;
-- delivery ID;
-- transport ID;
-- attempt number;
-- connectivity state transition;
-- switch command/result.
-
-Do not include:
-
-- webhook URLs;
-- ntfy bearer tokens;
-- PagerDuty keys;
-- other credentials.
-
-## Graceful shutdown
-
-On plugin stop:
-
-- stop accepting/scheduling new sends;
-- stop timers;
-- allow short bounded completion of in-flight database operations;
-- persist all states;
-- do not turn Starlink off merely because the plugin/server is shutting down;
-- leave ambiguous connectivity ownership in the safe state.
+## Persistence and delivery
+
+- Normalize Signal K input independently of the wire schema. Keep the stable source
+  key, path, original value and metadata, first/last seen and clear times, current
+  state and severity, and peak severity. When an alert rises and clears offline,
+  deliver its lifecycle with timestamps or duration.
+- In one transaction, persist the occurrence, lifecycle changes, and required
+  per-notifier work before any send or wake request. Record delivery transitions
+  and outcomes atomically. Prefer SQLite or another lightweight transactional
+  store; document the rationale for an alternative.
+- Schedule each configured notifier instance independently and in parallel.
+  Persist its delivery ID, state (pending, waiting for connectivity, sending,
+  delivered, retryable or terminal failure), attempts, next and last attempt times,
+  delivery time, last error and remote ID. Retry only outstanding targets.
+  Repeat a successful delivery only under explicit repeat or escalation policy.
+- The scheduler owns batching, concurrency and retries. Interpret HTTP outcomes,
+  distinguish configuration failures from transient errors, and persist
+  exponential backoff with jitter and a configurable cap. Emergency and critical
+  work must survive indefinitely when retry age is the only reason to expire it.
+  At-least-once sending is acceptable; use remote deduplication where available.
+- Recover pending alerts, in-flight work, retry deadlines, attempts and ownership
+  after restart. On stop, stop scheduling sends and timers, allow bounded
+  completion of database operations, and persist state. Shutdown alone must
+  never power off connectivity.
+
+## Notifier transports
+
+Use a shared interface for type, configuration validation, asynchronous send and
+optional health check. Return success, retryable failure or permanent failure.
+Keep power control and retry scheduling outside the adapters.
+
+- **ntfy** — server, topic, authentication, priority mapping, title, message, tags
+  and click URL.
+- **PagerDuty** — Events API routing key, trigger and appropriate resolve, stable
+  occurrence dedup key, severity mapping, and links or custom details where useful.
+- **Discord** — webhook, readable title/body, severity, timestamps and optional
+  embeds. Treat Discord as informational.
+
+## Connectivity and power ownership
+
+- For eligible deliveries, `queue` waits for connectivity, `wake` requests it
+  immediately, and `wake_after` requests it only if the condition stays active
+  through the configured delay. Once online, send all eligible work, including
+  queued alerts that did not request the wake.
+- Model switch requests and confirmation, powered/booting, Internet readiness,
+  online, idle cooldown and faults explicitly. Use Signal K PUT with configurable
+  path, ON/OFF values, optional separate observed-state path, confirmation and
+  boot timeouts, Internet check interval, idle cooldown and keepalive as applicable.
+- Record the observed switch state before requesting ON. Claim ownership only
+  after observing OFF, requesting ON and confirming ON. Leave manually powered
+  or ambiguously owned connections on, including after a restart.
+- Request OFF only for a proven plugin-owned session after cooldown, with no
+  pending work requiring connectivity, active wake-required alert, retry within
+  the protected keepalive window, or send in flight. A new alert cancels cooldown.
+  On switch failure or Internet timeout, retain queued work and expose the error.
+
+## Configuration, operations and security
+
+- Validate global configuration at startup. Support multiple instances per
+  transport, per-instance secrets and severity floors, global policy defaults,
+  retries, persistence and connectivity settings. Store per-definition policy
+  separately as described above.
+- Provide the alert list and history APIs, status, deliveries, manual retry and
+  transport testing (`GET /status`, `GET /alerts`, `GET /deliveries`,
+  `POST /retry`, `POST /test/:transport`). Manual wake/release is optional.
+  Authenticate manual actions through Signal K.
+- Report pending alert and delivery counts, oldest pending delivery, last
+  successful send, per-notifier status, connectivity state, observed switch,
+  ownership and last connectivity/delivery errors. Document plugin-specific
+  Signal K paths when publishing status.
+- Log alert/source, delivery and transport IDs, attempts, connectivity transitions
+  and switch command outcomes. Keep secrets in supported configuration or secret
+  storage. Redact credentials and webhook URLs from logs and API responses.
+  Validate outbound URLs. Interactive notifier actions that control boat equipment
+  require explicit authorization. Avoid arbitrary command execution.
+- Prefer subscriptions over high-frequency polling. Bound memory queues, avoid
+  full-file rewrites per alert and minimize Internet probes while power is off.
+
+## Engineering workflow
+
+- Before changing behavior, identify affected state transitions, transaction
+  boundaries, restart recovery, notifier independence and connectivity ownership.
+  Add or update failure-path tests and make the smallest coherent change.
+- For Signal K lifecycle, packaging, configuration, data paths, subscriptions,
+  alerts, PUT, auth, routing, storage directories, UI, logging or testing,
+  verify conventions against current official docs and server source/types,
+  then first-party plugins and mature maintained plugins. Inspect source and
+  tests; compare multiple implementations for significant choices. Document
+  deliberate deviations, rationale and compatibility implications.
+- Use strict TypeScript and a Node version compatible with the supported server.
+  Keep plugin lifecycle, alert normalization/policy, storage/migrations,
+  scheduling, transports, connectivity and API responsibilities distinct.
+  Follow existing conventions, order imports, remove dead code and avoid loose
+  types or large frameworks without a clear benefit.
+- Run the repository formatter, linter, strict type-check and relevant unit and
+  integration tests. Format changed examples and config too. Fix failures.
+  Document any necessary rule exceptions. If tooling is missing, add standard
+  scripts (prefer Prettier and TypeScript-aware ESLint), document them, and
+  enforce the same checks in CI where practical.
 
 ## Tests required
 
@@ -884,98 +270,14 @@ Do not consider the implementation complete without automated tests for at least
 
 Prefer deterministic fake clocks and mocked transports/network state.
 
-## Failure philosophy
+## Documentation and releases
 
-On uncertainty:
-
-- preserve the alert;
-- preserve delivery state;
-- leave connectivity ON rather than incorrectly switching it OFF;
-- avoid duplicate incident creation where the remote service supports deduplication;
-- expose the failure clearly.
-
-Never trade alert durability for a cleaner queue.
-
-## Security
-
-- secrets only in Signal K plugin configuration or supported secret mechanisms;
-- never expose credentials via status endpoints;
-- validate outbound URLs;
-- avoid arbitrary command execution;
-- interactive notifier actions must not directly execute privileged boat commands without an explicit authorization layer;
-- do not treat Discord or public ntfy topics as secure control channels.
-
-## Performance constraints
-
-Target Raspberry Pi-class hardware.
-
-Avoid:
-
-- high-frequency polling when subscriptions/events are available;
-- unbounded in-memory queues;
-- rewriting large files for every alert;
-- aggressive Internet probes while Starlink is OFF.
-
-## Documentation
-
-### Changelog updates
-
-- Every PR with a notable user-visible change must update `CHANGELOG.md` in
-  the same PR, including features, bug fixes, UI behavior, configuration,
-  compatibility, and upgrade or migration requirements.
-- Add concise, user-facing entries under `[Unreleased]`. Explain what changed
-  and any action users need to take; do not rely on the PR description or README
-  as a substitute.
-- Before declaring a change complete or merging it, check the diff for the
-  matching changelog entry. If none is needed because the change is strictly
-  internal or documentation-only, state that explicitly in the PR description.
-- Do not bump the package version or create a dated release section unless a
-  release was requested. During release preparation, move the relevant
-  `[Unreleased]` entries into the new version section.
-
-README must eventually explain:
-
-- architecture;
-- supported Signal K versions;
-- installation;
-- ntfy/PagerDuty/Discord setup;
-- Starlink switch setup;
-- offline behavior;
-- queue semantics;
-- safety/ownership behavior;
-- example configuration;
-- troubleshooting;
-- how to send a test alert.
-
-## Coding workflow
-
-Before changing behavior:
-
-1. understand the relevant state transition;
-2. identify the durability boundary;
-3. identify effects on all transports;
-4. identify effects on connectivity ownership;
-5. if the change involves Signal K architecture/API behavior, check current official Signal K docs/source and mature well-starred plugin repos before designing a custom pattern;
-6. add/update tests;
-7. implement the smallest coherent change;
-8. run formatter;
-9. run linter;
-10. run strict TypeScript type-checking;
-11. run unit/integration tests;
-12. document configuration or architectural changes.
-
-Do not make broad refactors while reliability behavior is still untested.
-
-## Definition of done
-
-A feature is complete only when:
-
-- its state is durable where required;
-- restart behavior is defined;
-- parallel notifier behavior is defined;
-- connectivity ownership implications are defined;
-- errors are observable;
-- automated tests cover the important failure paths;
-- user-facing configuration is documented;
-- notable user-visible changes are recorded in `CHANGELOG.md` under
-  `[Unreleased]`, or the PR explains why no changelog entry is needed.
+- Document architecture, supported Signal K versions, installation, notifier and
+  switch setup, offline queue behavior, power ownership, example configuration,
+  troubleshooting and sending a test alert in the README.
+- Every notable user-visible change needs a concise `CHANGELOG.md` entry under
+  `[Unreleased]` in the same PR. Include configuration, compatibility, upgrades
+  and any action users must take. Verify the entry before completion or merge.
+  Explain strictly internal or documentation-only exceptions in the PR description.
+- Bump versions and create dated changelog sections only for requested releases.
+  Move the relevant unreleased entries into the release section.
