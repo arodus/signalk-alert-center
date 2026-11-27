@@ -1497,6 +1497,7 @@ export class AlertCenterRuntime {
               name: definition?.name ?? occurrence.path,
               path: occurrence.path,
               message: occurrence.message,
+              location: occurrence.location,
               severity: occurrence.maxSeverity,
               startedAt: occurrence.firstSeenAt,
             }
@@ -1866,6 +1867,7 @@ export class AlertCenterRuntime {
             occurredAt: event.occurredAt,
             payload: event.payload,
             messageSample: event.messageSample,
+            location: event.location,
           }));
         if (query.eventType)
           items = items.filter((event) => event.eventType === query.eventType);

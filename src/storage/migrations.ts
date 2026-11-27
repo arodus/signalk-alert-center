@@ -315,3 +315,28 @@ export function migrateCoreAlerts(database: DatabaseSync): boolean {
   );
   return true;
 }
+
+/** Version 6: preserve notification locations independently in events and deliveries.
+ * Runs inside the schema transaction. Old delivery locations are unknown, so do
+ * not backfill them from an occurrence that may have changed since the send.
+ */
+export function migrateNotificationLocations(database: DatabaseSync): boolean {
+  const version = Number(
+    (database.prepare("PRAGMA user_version").get() as Row).user_version,
+  );
+  if (version >= 6) return false;
+  for (const table of ["alert_occurrences", "alert_events", "deliveries"]) {
+    if (!columns(database, table).has("location"))
+      database.exec(`ALTER TABLE ${table} ADD COLUMN location TEXT`);
+  }
+  for (const [table, payload] of [
+    ["alert_occurrences", "source_payload_json"],
+    ["alert_events", "payload_json"],
+  ]) {
+    database.exec(`UPDATE ${table} SET location=json_extract(${payload}, '$.location')
+      WHERE json_valid(${payload}) AND json_type(${payload}, '$.location')='text'
+      AND length(trim(json_extract(${payload}, '$.location'))) > 0`);
+  }
+  database.exec("PRAGMA user_version = 6");
+  return true;
+}

@@ -45,6 +45,8 @@ export interface AlertRecord {
   currentSeverity: Severity;
   maxSeverity: Severity;
   message?: string;
+  /** Physical place aboard the vessel, not geographic coordinates. */
+  location?: string;
   sourcePayload?: unknown;
   messageSample?: MessageSample;
   notificationId?: string;
@@ -74,6 +76,7 @@ export interface AlertEventRecord {
   eventType: string;
   occurredAt: Date;
   payload?: unknown;
+  location?: string;
   messageSample?: MessageSample;
 }
 
@@ -87,6 +90,8 @@ export interface AlertHistoryRecord extends AlertEventRecord {
   state: AlertState;
   severity: Severity;
   message?: string;
+  /** Physical place aboard the vessel, not geographic coordinates. */
+  location?: string;
   startedAt: Date;
   clearedAt?: Date;
 }
@@ -185,6 +190,8 @@ export interface DeliveryRecord {
     state: AlertState;
     severity: Severity;
     message?: string;
+    /** Physical place aboard the vessel, not geographic coordinates. */
+    location?: string;
     messageSample?: MessageSample;
     at: Date;
   };
@@ -203,6 +210,8 @@ export interface DeliveryRecord {
     name: string;
     path: string;
     message?: string;
+    /** Physical place aboard the vessel, not geographic coordinates. */
+    location?: string;
     messageSample?: MessageSample;
     severity: Severity;
     startedAt: Date;
@@ -317,6 +326,8 @@ export interface NormalizedAlert {
   severity: Severity;
   state: AlertState;
   message?: string;
+  /** Physical place aboard the vessel, not geographic coordinates. */
+  location?: string;
   sourcePayload?: unknown;
   messageSample?: MessageSample;
   notificationId?: string;

@@ -244,11 +244,14 @@ standard message with full lifecycle details.
 | `{name}` / `{path}`                  | Alert definition name / full notification path                                                                               |
 | `{severity}`                         | Highest severity in the delivery snapshot                                                                                    |
 | `{state}`                            | `active`, `cleared`, or `removed` for an unconfirmed core removal                                                            |
+| `{location}`                         | Physical location aboard the vessel, when supplied by the notification; otherwise empty.                                     |
 | `{localTime}` / `{clearedLocalTime}` | Occurrence start / confirmed clear time, in the Signal K server timezone (24-hour clock). Clear time is empty until cleared. |
 
 Queued deliveries use the service's template at send time. Include `{state}` if
 recipients need to distinguish raises and clears. PagerDuty uses the text as its
 trigger summary. Wyoming has its own spoken alert template.
+
+Notification locations are shown in alert details and history and included in standard outgoing messages. Changing only a location does not schedule another delivery; each delivery keeps the location captured when it was queued. Existing databases upgrade transactionally to schema 6; historical delivery locations that were not recorded remain unknown. Back up the database before upgrading; reverting to an earlier version requires restoring that backup.
 
 ### Pushover
 

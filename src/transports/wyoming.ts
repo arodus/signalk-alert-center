@@ -121,12 +121,13 @@ export function renderSpeechText(
     name,
     severity: alert.maxSeverity,
     message: alert.message?.trim() || name,
+    location: alert.location ?? "",
     path: alert.path,
     state: alert.currentState,
   };
   const template = alert.speechTemplate?.trim() || DEFAULT_TEMPLATE;
   const rendered = template.replace(
-    /\{(name|severity|message|path|state)\}/g,
+    /\{(name|severity|message|location|path|state)\}/g,
     (_match, token: string) => values[token] ?? "",
   );
   return rendered.replace(/\s+/g, " ").trim().slice(0, 500);

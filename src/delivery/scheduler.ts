@@ -190,6 +190,7 @@ export class DeliveryScheduler {
           currentSeverity: delivery.alertSnapshot.severity,
           maxSeverity: delivery.alertSnapshot.severity,
           message: delivery.alertSnapshot.message,
+          location: delivery.alertSnapshot.location,
           messageSample: delivery.alertSnapshot.messageSample,
           lastSeenAt: delivery.alertSnapshot.at,
           clearedAt: alert.coreAlert

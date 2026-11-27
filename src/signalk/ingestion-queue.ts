@@ -27,7 +27,7 @@ export type EnqueueResult = "queued" | "coalesced" | "rejected";
 
 /**
  * Fixed-size notification queue. Only equivalent pending updates for the same
- * source are replaced; state, severity, and message changes retain their order.
+ * source are replaced; state, severity, message, and location changes retain their order.
  */
 export class BoundedIngestionQueue {
   private items: QueueItem[] = [];
@@ -65,6 +65,7 @@ export class BoundedIngestionQueue {
       normalized.state,
       normalized.severity,
       normalized.message ?? null,
+      normalized.location ?? null,
       entry.messageSample?.value ?? null,
       entry.messageSample?.units ?? null,
     ]);

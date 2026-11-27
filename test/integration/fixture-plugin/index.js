@@ -232,6 +232,9 @@ module.exports = function fixturePlugin(app) {
               state: body.state ?? "alarm",
               method: body.method ?? ["visual", "sound"],
               message: body.message ?? "Fixture alert",
+              ...(body.location !== undefined
+                ? { location: body.location }
+                : {}),
               ...(body.id ? { id: body.id } : {}),
             },
             body.source,
