@@ -5,6 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixes
+
+- Refresh configured zones when Signal K publishes zone metadata after startup, avoiding a wait of up to five minutes or a plugin restart.
+
 ## [0.11.0] - 2026-11-27
 
 ### Upgrade and rollback

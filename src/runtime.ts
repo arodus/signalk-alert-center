@@ -166,6 +166,7 @@ export class AlertCenterRuntime {
   private activationTimer?: ReturnType<typeof setTimeout>;
   private deliveryTimer?: ReturnType<typeof setTimeout>;
   private zoneRefreshTimer?: ReturnType<typeof setInterval>;
+  private zoneMetadataTimer?: ReturnType<typeof setTimeout>;
   private retentionTimer?: ReturnType<typeof setInterval>;
   private reconcilingStartup = false;
   private ingestionQueue = new BoundedIngestionQueue(
@@ -2324,6 +2325,38 @@ export class AlertCenterRuntime {
         this.reportAsyncError("Notification subscription failed", error),
       handler,
     );
+    // The notification subscription does not see sensor metadata. Observe the
+    // normalized metadata stream so zones arriving after startup do not wait
+    // for the five-minute fallback scan. Defer until the model is updated and
+    // coalesce bursts without scanning on ordinary sensor readings.
+    if (serverManagesNotifications(this.app) && this.app.streambundle) {
+      unsubscribes.push(
+        this.app.streambundle.getBus().onValue((delta) => {
+          if (
+            generation !== this.runtimeGeneration ||
+            this.stopping ||
+            !delta.isMeta ||
+            delta.context !== this.app.selfContext ||
+            !Object.prototype.hasOwnProperty.call(delta.value, "zones") ||
+            this.zoneMetadataTimer
+          )
+            return;
+          this.zoneMetadataTimer = setTimeout(() => {
+            this.zoneMetadataTimer = undefined;
+            if (generation !== this.runtimeGeneration || this.stopping) return;
+            try {
+              this.seedDefinitions();
+              this.emitChange("definitions");
+            } catch (error) {
+              this.reportAsyncError(
+                "Could not refresh zone definitions",
+                error,
+              );
+            }
+          }, 1000);
+        }),
+      );
+    }
     this.unsubscribe = () => unsubscribes.forEach((stop) => stop());
     this.coreStartupSnapshot = coreAlertsApi(this.app)
       ?.list()
@@ -2577,6 +2610,7 @@ export class AlertCenterRuntime {
     if (this.activationTimer) clearTimeout(this.activationTimer);
     if (this.deliveryTimer) clearTimeout(this.deliveryTimer);
     if (this.zoneRefreshTimer) clearInterval(this.zoneRefreshTimer);
+    if (this.zoneMetadataTimer) clearTimeout(this.zoneMetadataTimer);
     if (this.retentionTimer) clearInterval(this.retentionTimer);
     await this.scheduler?.stop();
     await this.deliveryRun;
@@ -2600,6 +2634,7 @@ export class AlertCenterRuntime {
     this.activationTimer = undefined;
     this.deliveryTimer = undefined;
     this.zoneRefreshTimer = undefined;
+    this.zoneMetadataTimer = undefined;
     this.retentionTimer = undefined;
     this.debug("Stopped");
   }
