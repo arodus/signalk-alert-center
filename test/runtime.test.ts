@@ -711,15 +711,29 @@ describe("AlertCenterRuntime", () => {
       expect(app.error).toHaveBeenCalledWith(
         expect.stringContaining("ingestion queue reached"),
       );
-      await vi.waitFor(() => {
-        expect(runtime.status().ingestion.depth).toBe(0);
-        expect(runtime.status().scheduler.activeRequests).toBe(1);
-      });
+      // Each event-loop turn must make progress independently of the stalled
+      // request; draining durable writes need not finish within one second.
+      let previousDepth = runtime.status().ingestion.depth;
+      while (previousDepth > 0) {
+        await flush();
+        const { ingestion, scheduler } = runtime.status();
+        expect(ingestion.depth).toBeLessThan(previousDepth);
+        expect(scheduler.activeRequests).toBe(1);
+        previousDepth = ingestion.depth;
+      }
+      expect(runtime.status().ingestion.processed).toBe(11);
     } finally {
       await runtime.stop();
       vi.unstubAllGlobals();
     }
     expect(unsubscribe).toHaveBeenCalledTimes(2);
+    const database = new AlertDatabase(join(directory, "alert-center.sqlite"));
+    try {
+      expect(database.listOccurrences()).toHaveLength(11);
+      expect(database.pendingDeliveryCount()).toBe(11);
+    } finally {
+      database.close();
+    }
   });
 
   it("stores service health notifications without delivering them", async () => {
