@@ -720,3 +720,37 @@ test("explains internet state and connection control in user-facing terms", asyn
     ),
   ).toBeVisible();
 });
+
+test("confirms stored alert removal inside an embedded dashboard", async ({
+  page,
+  request,
+}) => {
+  const path = `notifications.test.appDockRemoval.${test.info().project.name}`;
+  const source = "fixture.appDockRemoval";
+  await request.post(`${fixture}/raise`, { data: { path, source } });
+  await request.post(`${fixture}/clear`, { data: { path, source } });
+  await page.route("**/appdock-test", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<iframe title="Alert Center" sandbox="allow-scripts allow-same-origin" src="/signalk-alert-center/" style="width:100%;height:95vh"></iframe>',
+    }),
+  );
+  await page.goto("/appdock-test");
+  const frame = page.frameLocator('iframe[title="Alert Center"]');
+  const row = frame.locator(`tr[data-definition-id]:has([title="${path}"])`);
+  await row.click();
+  await frame.getByRole("button", { name: "Alert settings" }).click();
+  const remove = frame.getByRole("button", { name: "Remove stored alert" });
+  await remove.click();
+  await frame.getByRole("button", { name: "Keep alert" }).click();
+  await expect(remove).toBeFocused();
+  await remove.click();
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "DELETE" &&
+      response.url().includes(`${plugin}/definitions/`),
+  );
+  await frame.getByRole("button", { name: "Permanently remove" }).click();
+  expect((await deleted).status()).toBe(200);
+  await expect(row).toHaveCount(0);
+});
