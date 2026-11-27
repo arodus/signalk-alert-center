@@ -58,7 +58,7 @@ assert.equal(captured.length, 2);
 assert.deepEqual(captured[0].json, { attempt: 1 });
 assert.equal(captured[0].headers["x-fixture"], "one");
 
-await json(`${signalkUrl}/signalk`);
+const serverDiscovery = await json(`${signalkUrl}/signalk`);
 const eventController = new AbortController();
 const eventResponse = await fetch(
   `${signalkUrl}/plugins/signalk-alert-center/events`,
@@ -142,6 +142,7 @@ await json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
   body: JSON.stringify({
     source: "fixture.acceptance",
     message: "Acceptance alert",
+    location: "Engine room port",
   }),
 });
 const fixture = await json(`${signalkUrl}/plugins/signalk-test-fixture/state`);
@@ -166,6 +167,7 @@ const occurrencePage = await eventually(
 const occurrence = occurrencePage.items[0];
 assert.equal(occurrence.oneTime, true);
 assert.equal(occurrence.message, "Acceptance alert");
+assert.equal(occurrence.location, "Engine room port");
 const events = await json(
   `${signalkUrl}/plugins/signalk-alert-center/occurrences/${occurrence.id}/events`,
 );
@@ -181,6 +183,44 @@ const raisedHistory = alertHistory.items.find(
 );
 assert.equal(Boolean(raisedHistory), true);
 assert.equal(raisedHistory.message, "Acceptance alert");
+assert.equal(raisedHistory.location, "Engine room port");
+assert.equal(
+  events.items.find((event) => event.eventType === "raised").location,
+  "Engine room port",
+);
+await json(`${signalkUrl}/plugins/signalk-test-fixture/raise`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    source: "fixture.acceptance",
+    message: "Acceptance alert",
+    location: "Engine room starboard",
+  }),
+});
+await eventually(
+  () =>
+    json(
+      `${signalkUrl}/plugins/signalk-alert-center/occurrences/${occurrence.id}`,
+    ),
+  (item) => item.location === "Engine room starboard",
+  "location-only update was not persisted",
+);
+const locationEvents = await json(
+  `${signalkUrl}/plugins/signalk-alert-center/occurrences/${occurrence.id}/events`,
+);
+assert.equal(
+  locationEvents.items.filter((event) => event.eventType === "raised").length,
+  1,
+);
+assert.equal(
+  locationEvents.items.find((event) => event.eventType === "location_changed")
+    .location,
+  "Engine room starboard",
+);
+assert.equal(
+  locationEvents.items.find((event) => event.eventType === "raised").location,
+  "Engine room port",
+);
 assert.equal(Object.hasOwn(raisedHistory, "deliveries"), false);
 const activeRemoval = await fetch(
   `${signalkUrl}/plugins/signalk-alert-center/definitions/${encodeURIComponent(definition.id)}`,
@@ -216,7 +256,7 @@ assert.equal(
   true,
 );
 assert.equal(status.database.healthy, true);
-assert.equal(status.database.schemaVersion, 5);
+assert.equal(status.database.schemaVersion, 6);
 assert.equal(status.reconciliation.state, "complete");
 assert.equal(typeof status.scheduler.running, "boolean");
 assert.equal(Array.isArray(status.services), true);
@@ -697,7 +737,12 @@ const coursePaths = [
   "notifications.navigation.course.arrivalCircleEntered",
   "notifications.navigation.course.perpendicularPassed",
 ];
-const defaultIgnoredPaths = [collisionPath, ...coursePaths];
+const defaultIgnoredPaths = [
+  collisionPath,
+  ...coursePaths,
+  "notifications.security.accessRequest.a",
+  "notifications.security.accessRequest.client.request-id",
+];
 const otherCoursePath = "notifications.navigation.course.offCourse";
 const customIgnoredPath = "notifications.test.ignored.radar.bridge.1";
 const allowedPath = "notifications.test.allowed.voltage";
@@ -810,4 +855,200 @@ try {
   await saveIgnoredConfig(ignoredPlugin.data.configuration);
 }
 
+// Native notification methods changed in 2.38.0. Keep the older-server lane,
+// while exercising the real manager (not a fabricated delta) on newer servers.
+
+const [serverMajor, serverMinor] = String(
+  serverDiscovery.server?.version ?? "0.0",
+)
+  .split(".")
+  .map(Number);
+if (serverMajor > 2 || (serverMajor === 2 && serverMinor >= 38)) {
+  const api = `${signalkUrl}/plugins/signalk-alert-center`;
+  const notifications = `${signalkUrl}/signalk/v2/api/notifications`;
+  const path = "notifications.electrical.stateLifecycle";
+  await eventually(
+    () => json(`${api}/status`),
+    (status) => status.reconciliation.state === "complete",
+    "state lifecycle startup",
+  );
+  const write = (method, body) => ({
+    method,
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const raised = await json(
+    notifications,
+    write("POST", {
+      path,
+      state: "warn",
+      message: "Battery warning",
+    }),
+  );
+  const page = await eventually(
+    () => json(`${api}/occurrences?path=${encodeURIComponent(path)}`),
+    (page) => page.items.some((item) => item.notificationId === raised.id),
+    "native lifecycle occurrence",
+  );
+  const occurrence = page.items.find(
+    (item) => item.notificationId === raised.id,
+  );
+  const load = () => json(`${api}/occurrences/${occurrence.id}`);
+  for (const [action, nextState] of [
+    ["silence", "alarm"],
+    ["acknowledge", "warn"],
+  ]) {
+    await json(`${api}/occurrences/${occurrence.id}/${action}`, write("POST"));
+    const field = action === "silence" ? "silencedAt" : "acknowledgedAt";
+    const annotated = await eventually(
+      load,
+      (item) => item[field],
+      `${action} timestamp`,
+    );
+    await json(
+      `${notifications}/${raised.id}`,
+      write("PUT", {
+        message: "Battery reading changed",
+        location: "Engine room",
+      }),
+    );
+    const sameState = await eventually(
+      load,
+      (item) => item.message === "Battery reading changed",
+      "native message update",
+    );
+    assert.equal(sameState[field], annotated[field]);
+    const quiet = await json(`${notifications}/${raised.id}`);
+    assert.equal(quiet.value.method.includes("sound"), false);
+    await json(
+      `${notifications}/${raised.id}`,
+      write("PUT", { state: nextState }),
+    );
+    const changed = await eventually(
+      load,
+      (item) =>
+        item.currentSeverity === nextState &&
+        !item.acknowledgedAt &&
+        !item.silencedAt,
+      "state change resets local actions",
+    );
+    assert.equal(changed.id, occurrence.id);
+    const audible = await json(`${notifications}/${raised.id}`);
+    assert.deepEqual(audible.value.method, ["visual", "sound"]);
+  }
+  await json(`${notifications}/${raised.id}`, write("DELETE"));
+  await eventually(
+    load,
+    (item) => item.currentState === "cleared",
+    "native clear retains occurrence",
+  );
+}
+
+// These boundaries and generated messages intentionally differ before 2.38.
+const [major, minor] = serverDiscovery.server.version.split(".").map(Number);
+if (major > 2 || (major === 2 && minor >= 38)) {
+  const sensor = "environment.inside.zoneAcceptance.temperature";
+  const path = `notifications.${sensor}`;
+  const api = `${signalkUrl}/plugins/signalk-alert-center`;
+  const fixture = `${signalkUrl}/plugins/signalk-test-fixture`;
+  const post = (route, body) =>
+    json(`${fixture}/${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const occurrences = () =>
+    json(`${api}/occurrences?path=${encodeURIComponent(path)}`);
+  await post("reading", { path: sensor, value: 20 });
+  await post("zones", {
+    path: sensor,
+    displayName: "Acceptance sensor",
+    units: "K",
+    zones: [
+      { lower: 0, upper: 10, state: "warn" },
+      { lower: 10, upper: 10, state: "alarm" },
+    ],
+  });
+  await post("reading", { path: sensor, value: 10 });
+  const atBoundary = await eventually(
+    occurrences,
+    (page) =>
+      page.items.some(
+        (item) =>
+          item.path === path &&
+          item.state === "active" &&
+          item.currentSeverity === "alarm",
+      ),
+    "single-value zone wins at touching boundary",
+  );
+  const occurrence = atBoundary.items.find(
+    (item) => item.path === path && item.state === "active",
+  );
+  await eventually(
+    () =>
+      json(`${api}/definitions/${encodeURIComponent(occurrence.definitionId)}`),
+    (item) => item.metadata?.zones?.length === 2,
+    "zone thresholds were discovered before removal",
+  );
+  assert.equal(occurrence.message, "Acceptance sensor at 10");
+  assert.equal(occurrence.messageSample?.value, 10);
+  assert.deepEqual(occurrence.messageSample?.generatedZone, {
+    name: "Acceptance sensor",
+    lower: 10,
+    upper: 10,
+  });
+  await post("zones", {
+    path: sensor,
+    displayName: "Acceptance sensor",
+    units: "K",
+    zones: null,
+  });
+  await eventually(
+    occurrences,
+    (page) =>
+      page.items.some(
+        (item) => item.id === occurrence.id && item.state === "cleared",
+      ),
+    "zone removal clears occurrence",
+  );
+  await post("reading", { path: sensor, value: 20 });
+  await post("reading", { path: sensor, value: 10 });
+  await new Promise((resolve) => setTimeout(resolve, 1250));
+  assert.equal(
+    (await occurrences()).items.some(
+      (item) => item.path === path && item.state === "active",
+    ),
+    false,
+  );
+  await eventually(
+    () => json(`${api}/definitions?limit=100`),
+    (page) =>
+      page.items.some(
+        (item) =>
+          item.id === occurrence.definitionId &&
+          item.metadata?.zones?.length === 0,
+      ),
+    "removed thresholds leave history but not current badges",
+  );
+  await post("zones", {
+    path: sensor,
+    displayName: "Acceptance sensor",
+    units: "K",
+    zones: [{ lower: 0, upper: 10, state: "warn" }],
+  });
+  await post("reading", { path: sensor, value: 20 });
+  await post("reading", { path: sensor, value: 10 });
+  await eventually(
+    occurrences,
+    (page) =>
+      page.items.some(
+        (item) =>
+          item.path === path &&
+          item.state === "active" &&
+          item.currentSeverity === "warn",
+      ),
+    "otherwise unmatched upper boundary belongs to zone",
+  );
+  await post("zones", { path: sensor, zones: null });
+}
 console.log("Docker acceptance smoke test passed");

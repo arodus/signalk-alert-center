@@ -21,7 +21,9 @@ export const coreSecurity = {
       resources: [
         { paths: ["alerts.electrical.*"], permissions: grants("crew") },
         {
-          paths: ["notifications.electrical.*"],
+          // Managed legacy actions need the native collection grant as well
+          // as the concrete occurrence path; neither grants core alert access.
+          paths: ["notifications", "notifications.electrical.*"],
           permissions: grants("legacy"),
         },
         { paths: ["alerts", "electrical.*"], permissions: grants("namespace") },

@@ -1,5 +1,5 @@
 /** Initial Signal K Alert Center schema. */
-export const currentSchemaVersion = 5;
+export const currentSchemaVersion = 6;
 
 // Equality on this expression lets delivery pages seek by the implicit rowid.
 export const deliveryPrioritySql = `CASE WHEN state IN ('pending', 'waiting_connectivity', 'sending', 'failed_retryable', 'paused') THEN 0 ELSE 1 END`;

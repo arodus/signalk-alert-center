@@ -225,8 +225,7 @@ sequence. Wyoming-only services do not request managed internet connectivity.
 ## Releases
 
 Release automation and tag requirements are documented in
-[docs/RELEASING.md](./docs/RELEASING.md). User-visible changes belong in
-[CHANGELOG.md](./CHANGELOG.md). Before preparing a release, run:
+[docs/RELEASING.md](./docs/RELEASING.md). Use descriptive PR titles and link the relevant issues. Document storage, configuration and compatibility impacts in the PR. Release authors collect merged PRs into [CHANGELOG.md](./CHANGELOG.md). Before preparing a release, run:
 
 ```sh
 npm run release:check

@@ -190,6 +190,7 @@ export class DeliveryScheduler {
           currentSeverity: delivery.alertSnapshot.severity,
           maxSeverity: delivery.alertSnapshot.severity,
           message: delivery.alertSnapshot.message,
+          location: delivery.alertSnapshot.location,
           messageSample: delivery.alertSnapshot.messageSample,
           lastSeenAt: delivery.alertSnapshot.at,
           clearedAt: alert.coreAlert
@@ -232,7 +233,10 @@ export class DeliveryScheduler {
             ? deliveryAlert.message
             : convertAlertMessage(
                 deliveryAlert.message,
-                { units: deliveryAlert.messageSample?.units },
+                {
+                  units: deliveryAlert.messageSample?.units,
+                  generatedZone: deliveryAlert.messageSample?.generatedZone,
+                },
                 deliveryAlert.messageSample?.value,
               ),
         };
@@ -244,6 +248,7 @@ export class DeliveryScheduler {
                 deliveryAlert.message,
                 {
                   ...metadata,
+                  generatedZone: deliveryAlert.messageSample?.generatedZone,
                   units: deliveryAlert.messageSample?.units ?? metadata?.units,
                 },
                 deliveryAlert.messageSample?.value,

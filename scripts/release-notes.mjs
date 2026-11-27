@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
-const requested = process.argv[2];
-const output = process.argv[3];
+const args = process.argv.slice(2);
+const [requested, output] = args.filter((arg) => arg !== "--require-review");
 if (!requested) throw new Error("Pass a release version or v-prefixed tag");
 
 const version = requested.replace(/^v/, "");
@@ -21,6 +21,18 @@ const notes = lines
   .join("\n")
   .trim();
 if (!notes) throw new Error(`CHANGELOG.md release section ${version} is empty`);
+
+const rollback = /^### Upgrade and rollback[ \t]*\r?$/m.exec(notes);
+if (
+  (!rollback && args.includes("--require-review")) ||
+  notes.includes("<!-- RELEASE REVIEW:") ||
+  (rollback &&
+    !notes
+      .slice(rollback.index + rollback[0].length)
+      .split(/^#{1,3} /m, 1)[0]
+      .trim())
+)
+  throw new Error("Complete the Upgrade and rollback review before publishing");
 
 const rendered = `${notes}\n`;
 if (output) writeFileSync(output, rendered);

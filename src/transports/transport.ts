@@ -47,7 +47,7 @@ export function renderAlert(
   const lifecycle = alert.clearedAt
     ? `Occurred at ${alert.firstSeenAt.toISOString()}. Cleared at ${alert.clearedAt.toISOString()} after ${Math.round((duration ?? 0) / 60000)} minutes.`
     : `First seen at ${alert.firstSeenAt.toISOString()}.`;
-  const defaultBody = `${alert.message ?? alert.path}\n${lifecycle}${removal}\nMaximum severity: ${alert.maxSeverity}.`;
+  const defaultBody = `${alert.message ?? alert.path}${alert.location ? `\nLocation: ${alert.location}` : ""}\n${lifecycle}${removal}\nMaximum severity: ${alert.maxSeverity}.`;
   const localTime = (date: Date) =>
     date.toLocaleTimeString(undefined, {
       hour: "2-digit",
@@ -56,7 +56,7 @@ export function renderAlert(
     });
   const customBody = template
     ?.replace(
-      /\{(name|severity|message|path|state|localTime|clearedLocalTime)\}/g,
+      /\{(name|severity|message|location|path|state|localTime|clearedLocalTime)\}/g,
       (token) => {
         switch (token) {
           case "{name}":
@@ -65,6 +65,8 @@ export function renderAlert(
             return alert.maxSeverity;
           case "{message}":
             return alert.message?.trim() || name;
+          case "{location}":
+            return alert.location ?? "";
           case "{path}":
             return alert.path;
           case "{state}":

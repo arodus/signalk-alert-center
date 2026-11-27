@@ -1,4 +1,13 @@
+export interface GeneratedZone {
+  name: string;
+  lower?: number;
+  upper?: number;
+}
 export interface UnitMetadata {
+  path?: string;
+  displayName?: string;
+  zones?: { lower?: number; upper?: number; message?: string }[];
+  generatedZone?: GeneratedZone;
   units?: string;
   displayUnits?: {
     category?: string;
@@ -13,7 +22,14 @@ export function displayZone(
   metadata?: UnitMetadata,
 ): { zone: { lower?: number; upper?: number }; units?: string };
 
-export function isZoneMessage(message: unknown): boolean;
+export function generatedZoneMessage(
+  message: unknown,
+  metadata?: UnitMetadata,
+): GeneratedZone | undefined;
+export function isZoneMessage(
+  message: unknown,
+  metadata?: UnitMetadata,
+): boolean;
 export function convertAlertMessage(
   message: string | undefined,
   metadata?: UnitMetadata,

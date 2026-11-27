@@ -103,6 +103,27 @@ test("shows live converted readings and age while history keeps the receipt valu
       .value,
   ).toBe(280.15);
   expect(occurrence.message).toBe("273.15 < value < 373.15");
+  await page.route(
+    `**/signalk/v1/api/vessels/self/${sensor.replaceAll(".", "/")}`,
+    (route) =>
+      route.fulfill({
+        json: {
+          value: null,
+          timestamp: new Date().toISOString(),
+          state: {
+            timedOut: true,
+            lastValue: {
+              value: 282.15,
+              timestamp: new Date(Date.now() - 120_000).toISOString(),
+            },
+          },
+        },
+      }),
+  );
+  await request.post(`${fixture}/reading`, { data: { value: null } });
+  await expect(row.locator('[data-label="Value"]')).toHaveText("Stale");
+  await expect(row.locator(".alert-summary")).toContainText("Stale");
+  await expect(row.locator(".alert-summary")).not.toContainText("Live");
   await request.post(`${fixture}/clear`, { data: { path, source } });
 });
 

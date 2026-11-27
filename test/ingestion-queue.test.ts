@@ -9,6 +9,24 @@ const entry = (state: string, message = state, timestamp = 0) => ({
 });
 
 describe("BoundedIngestionQueue", () => {
+  it("preserves location changes and removals in source order", () => {
+    const queue = new BoundedIngestionQueue(10);
+    for (const location of [
+      "ER Port",
+      "ER Starboard",
+      "ER Starboard",
+      undefined,
+    ])
+      queue.enqueue({
+        ...entry("alarm", "High water"),
+        value: { state: "alarm", message: "High water", location },
+      });
+    expect(
+      queue
+        .take(10)
+        .map((item) => (item.value as { location?: string }).location),
+    ).toEqual(["ER Port", "ER Starboard", undefined]);
+  });
   it("preserves different receipt readings while coalescing identical readings", () => {
     const queue = new BoundedIngestionQueue(3);
     const notification = entry("alarm", "0 < value < 10");

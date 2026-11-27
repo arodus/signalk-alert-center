@@ -28,6 +28,7 @@ const defaults = {
     "navigation.closestApproach.*",
     "navigation.course.arrivalCircleEntered",
     "navigation.course.perpendicularPassed",
+    "security.accessRequest.*",
   ],
   storage: { path: "alert-center.sqlite" },
   snooze: { onlyWhenAnchoredOrMoored: false },
@@ -527,7 +528,7 @@ function AlertDefaults({ config, update }) {
             </Field>
             <Field
               label="Spoken alert text"
-              hint="Available placeholders: {name}, {severity}, {message}, {path}, and {state}."
+              hint="Available placeholders: {name}, {severity}, {message}, {location}, {path}, and {state}."
               full
             >
               <input
@@ -888,7 +889,7 @@ function NotificationServices({ config, update }) {
               <Field
                 label="Message template"
                 full
-                hint="Leave blank for the standard alert. Use {name}, {severity}, {message}, {path}, {state}, {localTime} (first seen), or {clearedLocalTime}. Times follow the Signal K server timezone."
+                hint="Leave blank for the standard alert. Use {name}, {severity}, {message}, {location}, {path}, {state}, {localTime} (first seen), or {clearedLocalTime}. Times follow the Signal K server timezone."
               >
                 <textarea
                   style={styles.input}

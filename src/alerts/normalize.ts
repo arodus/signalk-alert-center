@@ -68,6 +68,10 @@ export function normalizeNotification(
     severity,
     state,
     message,
+    location:
+      typeof record.location === "string" && record.location.trim()
+        ? record.location
+        : undefined,
     sourcePayload: value,
     notificationId,
     acknowledged: status?.acknowledged === true,

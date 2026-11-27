@@ -5,9 +5,23 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Features
+
+- Show timed-out readings as **Stale** in the Alerts table, with age measured from the last valid reading rather than the timeout event. Missing readings remain unavailable. These indicators do not create alerts or deliveries; configure sensor-loss alerts in a separate rules plugin.
+- Show notification locations in the alert list, details and history, include them in standard remote messages, and support `{location}` in service templates. Location-only updates do not retrigger delivery. Schema 6 preserves event and delivery locations across restarts; back up the database before upgrading, and restore the backup if reverting to an earlier version.
+
 ### Fixes
 
 - Removing a stored alert now asks for confirmation inside Alert Center, so it works in AppDock when browser prompts are blocked.
+- Require the Signal K Notifications API's collection permission before
+  acknowledging or silencing a server-managed legacy notification. Existing
+  per-alert path permissions still apply. With ACLs enabled, grant crew `put` on
+  both `notifications` and the individual notification paths they may control.
+- Reset a legacy notification's local acknowledgement and silence when its
+  active severity changes, including decreases, while retaining its history.
+  Message and location changes keep those actions in effect. Pending remote
+  acknowledgements of the old state no longer acknowledge the new state.
+- Format Signal K 2.38 zone messages in display units and preserve captured readings in history and deliveries, including after thresholds change. Removed thresholds no longer remain in the Alerts table; stored history and policy are retained.
 
 ## [0.10.0] - 2026-11-23
 

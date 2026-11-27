@@ -1497,6 +1497,7 @@ export class AlertCenterRuntime {
               name: definition?.name ?? occurrence.path,
               path: occurrence.path,
               message: occurrence.message,
+              location: occurrence.location,
               severity: occurrence.maxSeverity,
               startedAt: occurrence.firstSeenAt,
             }
@@ -1866,6 +1867,7 @@ export class AlertCenterRuntime {
             occurredAt: event.occurredAt,
             payload: event.payload,
             messageSample: event.messageSample,
+            location: event.location,
           }));
         if (query.eventType)
           items = items.filter((event) => event.eventType === query.eventType);
@@ -2394,9 +2396,14 @@ export class AlertCenterRuntime {
       const occurrence = this.getOccurrence(id);
       // Core occurrences use their canonical alerts.* path; legacy ones use
       // notifications.*. Never substitute a request-supplied path or core ID.
-      return occurrence
-        ? mayWritePath(this.app, request, occurrence.path)
-        : undefined;
+      if (!occurrence) return undefined;
+      if (!mayWritePath(this.app, request, occurrence.path)) return false;
+      // The legacy Notifications API checks the collection, not the individual
+      // path. Its in-process methods have no request to authorize, so enforce
+      // that same guard here as well as our existing per-occurrence ACL.
+      return occurrence.notificationId && !occurrence.coreAlert
+        ? mayWritePath(this.app, request, "notifications")
+        : true;
     };
     registerRoutes(
       compatible,

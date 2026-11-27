@@ -43,7 +43,7 @@ if (ancestry.status !== 0)
 
 const notes = spawnSync(
   process.execPath,
-  ["scripts/release-notes.mjs", packageJson.version],
+  ["scripts/release-notes.mjs", packageJson.version, "--require-review"],
   { encoding: "utf8" },
 );
 if (notes.status !== 0)

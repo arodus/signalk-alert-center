@@ -80,6 +80,18 @@ pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
+### Stale sensor readings
+
+For sensor paths already displayed in the Alerts table, Alert Center shows **Stale** when Signal K reports a native data timeout. The reading age uses the last valid reading's timestamp, not the time the server detected the timeout. Missing readings without timeout information remain unavailable. A fresh reading from the selected source, including a backup source, restores the live display.
+
+Native stale detection requires Signal K Server 2.38.0 or newer with **Enforce Data Timeouts** enabled in the server settings. Configure timeout durations and source failover in Signal K. Older servers continue handling ordinary alerts and live readings normally.
+
+These indicators do not create alerts, history events, or delivery work. Configure sensor-loss alerts in a separate rules plugin; Alert Center retains and delivers the resulting notifications through its normal alert flow.
+
+The display reads the server's selected sensor value and its sibling `state.timedOut` and `state.lastValue.timestamp` fields. See the [Signal K 2.38.0 enforcer](https://github.com/SignalK/signalk-server/blob/v2.38.0/src/staleness.ts) and [priority filter](https://github.com/SignalK/signalk-server/blob/v2.38.0/src/deltaPriority.ts). The stream triggers coalesced model reads so a final timeout or recovery update is not lost.
+
+Run `npm run test:native-timeouts` for the isolated Signal K 2.38.0 contract test. It creates and removes its own Docker Compose environment and never contacts live notification services or vessel hardware.
+
 ### Core alerts and Alert Rules
 
 Alert Center supports Signal K core alerts alongside legacy notifications when
@@ -118,6 +130,13 @@ choice lasts only for the current page.
 
 ![Alert Center in dark mode with the appearance menu open](./docs/screenshots/alert-center-dark.png)
 
+Legacy notification acknowledgement and silence apply to the current severity.
+An active severity change resets those local actions and records that reset in
+history, matching Signal K 2.38.0's notification lifecycle. Message or location
+changes alone preserve them. Wyoming still honors the notification's supplied
+`method`; Alert Center does not add `sound` when an older server or producer
+omits it. Core alerts continue to follow their own upstream lifecycle.
+
 ### Access and permissions
 
 Reading alerts and history follows Signal K's read-only access settings, including
@@ -128,7 +147,10 @@ anonymous access when the server permits it. With security enabled:
   For example, `notifications.electrical.*` permits electrical alerts without
   granting control of navigation alerts. Core alerts require their separate
   `alerts.*` paths, such as `alerts.electrical.*`. An admin login does not bypass
-  this ACL.
+  this ACL. Server-managed legacy notifications additionally require `put` on
+  the literal `notifications` collection, matching Signal K 2.38.0's
+  Notifications API. Local-only annotations without a notification ID and core
+  alerts do not require that legacy collection grant.
 - **Alert settings, policy resets, forgetting definitions, delivery deletion or
   retry, service tests, and global snooze buttons** require an admin login.
 - Existing Signal K PUT controls for snooze and quiet hours continue to use the
@@ -137,7 +159,8 @@ anonymous access when the server permits it. With security enabled:
 If you use ACLs, grant `put` on the specific paths your crew should control.
 A permission on the literal `notifications` path (used by the server's v2
 Notifications API) does not also match `notifications.electrical.*`; use explicit
-path patterns for Alert Center. Likewise, a literal `alerts` grant or a legacy
+path patterns as well as the collection grant for server-managed legacy alerts.
+Likewise, a literal `alerts` grant or a legacy
 `notifications.*` grant does not authorize core `alerts.*` actions. Without
 configured ACLs, readwrite users retain acknowledge/silence access. With server security disabled, actions remain
 available through Signal K's permissive security strategy. An unexpectedly
@@ -244,11 +267,14 @@ standard message with full lifecycle details.
 | `{name}` / `{path}`                  | Alert definition name / full notification path                                                                               |
 | `{severity}`                         | Highest severity in the delivery snapshot                                                                                    |
 | `{state}`                            | `active`, `cleared`, or `removed` for an unconfirmed core removal                                                            |
+| `{location}`                         | Physical location aboard the vessel, when supplied by the notification; otherwise empty.                                     |
 | `{localTime}` / `{clearedLocalTime}` | Occurrence start / confirmed clear time, in the Signal K server timezone (24-hour clock). Clear time is empty until cleared. |
 
 Queued deliveries use the service's template at send time. Include `{state}` if
 recipients need to distinguish raises and clears. PagerDuty uses the text as its
 trigger summary. Wyoming has its own spoken alert template.
+
+Notification locations are shown in alert details and history and included in standard outgoing messages. Changing only a location does not schedule another delivery; each delivery keeps the location captured when it was queued. Existing databases upgrade transactionally to schema 6; historical delivery locations that were not recorded remain unknown. Back up the database before upgrading; reverting to an earlier version requires restoring that backup.
 
 ### Pushover
 
@@ -283,7 +309,12 @@ in each active row. Notification-service details are available in the alert draw
 Sensor updates use Signal K stream subscriptions without creating alert history
 or delivery work; missing values and disconnected streams display a dash.
 
-Generated zone descriptions replace `value` with the live reading in the overview,
+Signal K 2.38 generated zone descriptions are matched against structured thresholds,
+converted to display units, and shown with the captured reading in history and
+deliveries. These snapshots remain readable after thresholds are edited or removed.
+Removing thresholds clears their current badges but retains learned history and policy.
+
+Legacy generated zone descriptions replace `value` with the live reading in the overview,
 for example `0 °C ≤ 7 °C < 10 °C`. Details, history, and outgoing notifications use
 the reading captured when the notification was received. Each delivery cycle
 retains its own sample across retries and restarts. Original Signal K messages and
@@ -444,15 +475,16 @@ local state-recheck interval remain configurable in Alert Center.
 ## Notification paths to leave out
 
 Under **Storage & advanced → Notification paths to leave out**, enter one
-pattern per line. By default, Alert Center ignores per-target collision alarms
-and routine waypoint arrival notifications:
+pattern per line. By default, Alert Center ignores per-target collision alarms,
+routine waypoint arrival notifications, and security access requests:
 
 ```json
 {
   "ignoredPaths": [
     "navigation.closestApproach.*",
     "navigation.course.arrivalCircleEntered",
-    "navigation.course.perpendicularPassed"
+    "navigation.course.perpendicularPassed",
+    "security.accessRequest.*"
   ]
 }
 ```
@@ -462,7 +494,7 @@ Patterns match the whole notification path, with or without the leading
 one or more characters, including dots between nested path segments. For example,
 the collision pattern matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
 and `navigation.closestApproach.radar:bridge:1`. An exact path matches only itself.
-The two course paths are exact matches; other course notifications remain tracked.
+The access-request pattern matches every child of `notifications.security.accessRequest`, including nested paths. The two course paths are exact matches; other course notifications remain tracked.
 Remove either course entry to track and deliver that notification, or clear the
 list (or set `ignoredPaths: []`) to track all notification paths.
 

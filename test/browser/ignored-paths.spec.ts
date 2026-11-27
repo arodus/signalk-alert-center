@@ -43,6 +43,7 @@ test("edits ignored paths, saves patterns, and allows an explicit empty list", a
         "navigation.closestApproach.*",
         "navigation.course.arrivalCircleEntered",
         "navigation.course.perpendicularPassed",
+        "security.accessRequest.*",
       ].join("\n"),
     );
     await paths.screenshot({

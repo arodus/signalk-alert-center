@@ -232,6 +232,9 @@ module.exports = function fixturePlugin(app) {
               state: body.state ?? "alarm",
               method: body.method ?? ["visual", "sound"],
               message: body.message ?? "Fixture alert",
+              ...(body.location !== undefined
+                ? { location: body.location }
+                : {}),
               ...(body.id ? { id: body.id } : {}),
             },
             body.source,
@@ -241,8 +244,20 @@ module.exports = function fixturePlugin(app) {
       writes.post("/reading", (request, response) => {
         const body = request.body ?? {};
         response.json(
-          publish(body.path ?? ZONE_PATH, body.value, "fixture.sensor"),
+          publish(
+            body.path ?? ZONE_PATH,
+            body.value,
+            body.source ?? "fixture.sensor",
+          ),
         );
+      });
+      writes.post("/zones", (request, response) => {
+        const { path, zones, displayName, units } = request.body;
+        app.handleMessage("signalk-test-fixture", {
+          context: "vessels.self",
+          updates: [{ meta: [{ path, value: { zones, displayName, units } }] }],
+        });
+        response.json({ updated: true });
       });
       writes.post("/unit-metadata", (request, response) => {
         app.handleMessage("signalk-test-fixture", {
