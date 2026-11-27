@@ -58,7 +58,7 @@ try {
     "signalk",
     "node",
     "-e",
-    `const fs=require('node:fs'); const p='/home/node/.signalk/settings.json'; const settings=JSON.parse(fs.readFileSync(p)); Object.assign(settings,{enforceDataTimeouts:true,defaultTimeout:1,staleCheckIntervalMs:100}); fs.writeFileSync(p,JSON.stringify(settings));`,
+    `const fs=require('node:fs'); const path=require('node:path'); const p=path.join(process.env.SIGNALK_NODE_CONFIG_DIR ?? path.join(require('node:os').homedir(),'.signalk'),'settings.json'); const settings=JSON.parse(fs.readFileSync(p)); Object.assign(settings,{enforceDataTimeouts:true,defaultTimeout:1,staleCheckIntervalMs:100}); fs.writeFileSync(p,JSON.stringify(settings));`,
   );
   compose("restart", "signalk");
   await until(

@@ -1588,14 +1588,19 @@ $("#quick-delivery").addEventListener("click", async (event) => {
   }
 });
 
-async function openPolicy(id) {
+async function openPolicy(id, createdDefinition) {
   try {
     state.notifiers = pageItems(await api("/notifiers"));
   } catch (error) {
     showError(error);
     return;
   }
-  const definition = state.definitions.find((item) => item.id === id);
+  // A background list refresh can still contain the pre-create snapshot.
+  // The create response is authoritative and lets the editor open immediately.
+  const definition =
+    createdDefinition?.id === id
+      ? createdDefinition
+      : state.definitions.find((item) => item.id === id);
   if (!definition) return;
   const policy = definition.policy ?? {};
   $("#policy-title").textContent = definition.name ?? definition.pathPattern;

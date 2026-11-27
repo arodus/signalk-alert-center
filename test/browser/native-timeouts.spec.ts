@@ -84,3 +84,59 @@ test("creates a native timeout rule with prerequisite guidance and shows stale l
     `${plugin}/definitions/${encodeURIComponent(definition.id)}`,
   );
 });
+
+test("opens new rule delivery settings while a pre-create list refresh is in flight", async ({
+  page,
+  request,
+}) => {
+  const name = `Refresh race ${test.info().project.name}`;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started: () => void = () => {};
+  const inFlight = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let first = true;
+  let id: string | undefined;
+  try {
+    await page.goto("/signalk-alert-center/");
+    await expect(page.locator("#updated")).toContainText("Updated");
+    await page.route(
+      "**/plugins/signalk-alert-center/definitions?*",
+      async (route) => {
+        if (!first) return route.continue();
+        first = false;
+        // Capture the old server response before creation, then hold delivery.
+        const response = await route.fetch();
+        started();
+        await gate;
+        await route.fulfill({ response });
+      },
+    );
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await inFlight;
+    await page.getByRole("button", { name: "Add data timeout rule" }).click();
+    await page.getByLabel("Name", { exact: true }).fill(name);
+    await page
+      .getByLabel("Signal K sensor path")
+      .fill("environment.nativeTimeout.refreshRace");
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/native-timeout-rules") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Save rule", exact: true }).click();
+    id = (await (await saved).json()).id;
+    // The list response stays blocked: only the successful creation response
+    // can supply this new rule to the policy editor.
+    await expect(page.locator("#policy-dialog")).toBeVisible();
+    await expect(page.locator("#policy-title")).toHaveText(name);
+    await expect(page.locator("#policy-definition-id")).toHaveValue(id!);
+  } finally {
+    release();
+    if (id)
+      await request.delete(`${plugin}/definitions/${encodeURIComponent(id)}`);
+  }
+});

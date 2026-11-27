@@ -43,7 +43,7 @@
       dialog.close();
       form.reset();
       await load();
-      await openPolicy(definition.id);
+      await openPolicy(definition.id, definition);
     } catch (error) {
       result.textContent = error.message;
     } finally {
