@@ -25,14 +25,24 @@ features or breaking configuration, API, compatibility, or database changes.
 Prereleases use `-alpha.N`, `-beta.N`, or `-rc.N` and publish to the npm `next`
 distribution tag. Stable versions publish to `latest`.
 
-Every release pull request must:
+Only release PRs edit `CHANGELOG.md`. To prepare one:
 
-- update `version` in `package.json` and `package-lock.json`;
-- move relevant entries from `Unreleased` into
-  `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`;
-- describe user-visible behavior, configuration and API changes, database
-  migrations, compatibility, known limitations, and rollback constraints;
-- pass all required CI checks from a clean checkout.
+1. Fetch `origin/main` and tags, and start the release branch from current
+   `origin/main`. Update the version in `package.json` and `package-lock.json`.
+2. With GitHub CLI authenticated, run `npm run release:notes`. It drafts the
+   dated section from merged PRs between the previous changelog version's tag
+   and the release branch's common commit with `origin/main`. GitHub groups
+   entries by PR label and includes PR links. The command preserves existing
+   unreleased text. It does not create a tag, publish a release or bump versions.
+3. Read the linked PRs that affect storage, configuration or compatibility.
+   Replace the review marker under **Upgrade and rollback** with instructions
+   for the entire release: required actions and backups, what the previous
+   version can read, when a restore is required, and what was actually tested.
+   If no action is needed, say so after review. Flag untested downgrade paths.
+4. Review the generated list for accuracy and overlap with any legacy
+   unreleased entries. If the release base changes, refresh the draft from
+   the updated base changelog and reapply reviewed wording. Commit the reviewed
+   changelog with the version bump. Publishing uses this exact release section.
 
 Run the fast release checks locally with:
 

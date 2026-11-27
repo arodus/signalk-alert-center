@@ -275,9 +275,11 @@ Prefer deterministic fake clocks and mocked transports/network state.
 - Document architecture, supported Signal K versions, installation, notifier and
   switch setup, offline queue behavior, power ownership, example configuration,
   troubleshooting and sending a test alert in the README.
-- Every notable user-visible change needs a concise `CHANGELOG.md` entry under
-  `[Unreleased]` in the same PR. Include configuration, compatibility, upgrades
-  and any action users must take. Verify the entry before completion or merge.
-  Explain strictly internal or documentation-only exceptions in the PR description.
-- Bump versions and create dated changelog sections only for requested releases.
-  Move the relevant unreleased entries into the release section.
+- Give every user-visible change a descriptive Conventional Commit PR title.
+  Link relevant issues in the PR description (e.g. `Closes #123`).
+- PRs affecting storage, configuration or compatibility must document upgrade
+  steps, downgrade support, backup/restore requirements and what was tested.
+  Explicitly identify untested downgrade paths.
+- Only release PRs edit `CHANGELOG.md` or bump the version. Follow
+  [the release guide](docs/RELEASING.md) to generate the change list from merged
+  PRs and write a reviewed **Upgrade and rollback** section for the whole release.
