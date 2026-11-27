@@ -737,7 +737,12 @@ const coursePaths = [
   "notifications.navigation.course.arrivalCircleEntered",
   "notifications.navigation.course.perpendicularPassed",
 ];
-const defaultIgnoredPaths = [collisionPath, ...coursePaths];
+const defaultIgnoredPaths = [
+  collisionPath,
+  ...coursePaths,
+  "notifications.security.accessRequest.a",
+  "notifications.security.accessRequest.client.request-id",
+];
 const otherCoursePath = "notifications.navigation.course.offCourse";
 const customIgnoredPath = "notifications.test.ignored.radar.bridge.1";
 const allowedPath = "notifications.test.allowed.voltage";
