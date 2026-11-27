@@ -1610,6 +1610,10 @@ async function openPolicy(id, createdDefinition) {
   toggleWakeDelay();
   elements.policyResult.textContent = "";
   const remove = $("#policy-remove");
+  remove.hidden = false;
+  $("#policy-remove-confirmation").hidden = true;
+  $("#policy-remove-question").textContent =
+    `Remove “${definition.name ?? definition.pathPattern}” and its stored history?`;
   const hasActive = state.activeDefinitionIds.has(id);
   remove.disabled = hasActive || definition.catalogOnly === true;
   remove.title = hasActive
@@ -1659,14 +1663,8 @@ async function openPolicy(id, createdDefinition) {
 }
 async function removeStoredAlert() {
   const id = $("#policy-definition-id").value;
-  const definition = state.definitions.find((item) => item.id === id);
-  if (
-    !definition ||
-    !window.confirm(
-      `Remove “${definition.name}” from stored alerts?\n\nThis permanently deletes its settings and complete history. If Signal K still defines or publishes it, the alert will be discovered again using the current global defaults.`,
-    )
-  )
-    return;
+  $("#policy-remove-confirmation").hidden = true;
+  $("#policy-remove").hidden = false;
   $("#policy-remove").disabled = true;
   try {
     await api(`/definitions/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -1869,7 +1867,17 @@ $("#policy-close").addEventListener("click", () =>
 $("#policy-cancel").addEventListener("click", () =>
   elements.policyDialog.close(),
 );
-$("#policy-remove").addEventListener("click", removeStoredAlert);
+$("#policy-remove").addEventListener("click", () => {
+  $("#policy-remove").hidden = true;
+  $("#policy-remove-confirmation").hidden = false;
+  $("#policy-remove-cancel").focus();
+});
+$("#policy-remove-cancel").addEventListener("click", () => {
+  $("#policy-remove-confirmation").hidden = true;
+  $("#policy-remove").hidden = false;
+  $("#policy-remove").focus();
+});
+$("#policy-remove-confirm").addEventListener("click", removeStoredAlert);
 $("#policy-reset").addEventListener("click", resetPolicy);
 initializePolicyOverrideControls();
 for (const [view, button] of [
