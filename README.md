@@ -283,7 +283,12 @@ in each active row. Notification-service details are available in the alert draw
 Sensor updates use Signal K stream subscriptions without creating alert history
 or delivery work; missing values and disconnected streams display a dash.
 
-Generated zone descriptions replace `value` with the live reading in the overview,
+Signal K 2.38 generated zone descriptions are matched against structured thresholds,
+converted to display units, and shown with the captured reading in history and
+deliveries. These snapshots remain readable after thresholds are edited or removed.
+Removing thresholds clears their current badges but retains learned history and policy.
+
+Legacy generated zone descriptions replace `value` with the live reading in the overview,
 for example `0 °C ≤ 7 °C < 10 °C`. Details, history, and outgoing notifications use
 the reading captured when the notification was received. Each delivery cycle
 retains its own sample across retries and restarts. Original Signal K messages and

@@ -80,6 +80,11 @@ describe("outgoing message units", () => {
       expected: "0 °C ≤ 10 °C < 100 °C",
     },
     {
+      rule: false,
+      message: "Fridge between 273.15 and 373.15",
+      expected: "Fridge between 0 °C and 100 °C (reading 10 °C)",
+    },
+    {
       rule: true,
       message: "273.15 < value < 373.15",
       expected: "273.15 < value < 373.15",
@@ -150,6 +155,9 @@ describe("outgoing message units", () => {
             coreAlert,
             messageSample: {
               message,
+              generatedZone: message.startsWith("Fridge between")
+                ? { name: "Fridge", lower: 273.15, upper: 373.15 }
+                : undefined,
               value: 283.15,
               units: "K",
               capturedAt: now.toISOString(),

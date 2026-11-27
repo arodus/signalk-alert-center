@@ -1052,6 +1052,17 @@ export function getAlertCenterOpenApi() {
             "Reading captured at notification receipt. The original Signal K message and payload are unchanged. Absent for historical records without a captured reading.",
           required: ["message", "capturedAt"],
           properties: {
+            generatedZone: {
+              type: "object",
+              required: ["name"],
+              properties: {
+                name: { type: "string" },
+                lower: { type: "number" },
+                upper: { type: "number" },
+              },
+              description:
+                "Structured bounds and name captured for a generated zone message, retained after zone edits.",
+            },
             message: { type: "string" },
             value: { type: "number" },
             units: { type: "string" },

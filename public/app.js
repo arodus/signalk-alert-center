@@ -420,8 +420,14 @@ function displayedMessage(item, live = false, message = item?.message) {
   );
   const value = live ? liveValues.values.get(path)?.value : sample?.value;
   const units = live ? metadata.units : (sample?.units ?? metadata.units);
-  const formatted = convertAlertMessage(message, { ...metadata, units }, value);
-  return live && isZoneMessage(message)
+  const messageMetadata = {
+    ...metadata,
+    units,
+    path,
+    generatedZone: sample?.generatedZone,
+  };
+  const formatted = convertAlertMessage(message, messageMetadata, value);
+  return live && isZoneMessage(message, messageMetadata)
     ? `${formatted} · ${Number.isFinite(value) ? "Live" : "Live value unavailable"}`
     : formatted;
 }

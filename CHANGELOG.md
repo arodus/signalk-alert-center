@@ -5,6 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Format Signal K 2.38 zone messages in display units and preserve captured readings in history and deliveries, including after thresholds change. Removed thresholds no longer remain in the Alerts table; stored history and policy are retained.
+
 ## [0.10.0] - 2026-11-23
 
 ### Features
