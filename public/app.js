@@ -473,7 +473,13 @@ function renderLiveValues() {
     const occurrence = state.occurrences.find(
       (item) => item.id === summary.dataset.summaryOccurrence,
     );
-    if (occurrence && isZoneMessage(occurrence.message)) {
+    if (
+      occurrence &&
+      isZoneMessage(occurrence.message, {
+        ...definition.metadata,
+        generatedZone: occurrence.messageSample?.generatedZone,
+      })
+    ) {
       summary.textContent = [
         displayedMessage(occurrence, Boolean(row.dataset.occurrenceId)),
         definition.ruleStatus,

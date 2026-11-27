@@ -51,6 +51,12 @@ test("formats structured generated zone messages in the overview and retained hi
   await expect(row).toContainText(
     "Cabin temperature between 0 °C and 10 °C (reading 5 °C)",
   );
+  await request.post(`${fixture}/reading`, {
+    data: { path: sensor, value: 280.15 },
+  });
+  await expect(row).toContainText(
+    "Cabin temperature between 0 °C and 10 °C (reading 7 °C)",
+  );
   await row.click();
   await expect(page.locator("#drawer-body > p").first()).toContainText(
     "Cabin temperature between 0 °C and 10 °C (reading 5 °C)",
