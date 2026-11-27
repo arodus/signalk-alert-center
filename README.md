@@ -80,6 +80,20 @@ pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
+### Native data timeout rules
+
+Choose **Add data timeout rule** in the Alerts view (administrator access required), then enter a name, exact self-vessel sensor path, and severity. Configure notification services using the existing alert settings. Rules are stored with Alert Center's definitions, including before they first fire. Path and severity are fixed for a rule; remove an inactive rule using **Remove stored alert** and create a replacement to change them. Removing a rule also removes its stored history and policy.
+
+These rules require **Signal K Server 2.38.0 or newer** with **Data timeouts** enabled in the server settings (`enforceDataTimeouts`). Native enforcement is disabled by default. Configure `meta.timeout`, default timeouts, and source failover in Signal K; Alert Center does not run a second timeout clock or change these settings. A disabled or unavailable prerequisite is shown in the rule dialog and plugin diagnostics when rules exist. Older servers continue handling ordinary alerts normally, but cannot trigger native timeout rules.
+
+A rule consumes the server's selected sensor leaf: `value: null` with sibling `state.timedOut: true` raises an occurrence. `state.lastValue.timestamp` records the last valid reading; the synthetic timeout timestamp remains the event time. A valid selected-source reading clears the occurrence, including recovery by a backup source. Timeout updates from a losing source cannot override valid selected data. Unmarked nulls, missing data after restart, and disabling native enforcement do not fabricate recovery; an already active occurrence stays active until valid data returns.
+
+The Alerts table shows **Stale** and the last valid reading's age for timed-out data. Timeout occurrences, captured source details, and delivery work use the same durable lifecycle as other alerts. These are local Alert Center occurrences, so acknowledgement and silence are local annotations, not commands to the sensor or server timeout engine.
+
+Implementation references: [Signal K 2.38.0 enforcer](https://github.com/SignalK/signalk-server/blob/v2.38.0/src/staleness.ts) and [priority filter](https://github.com/SignalK/signalk-server/blob/v2.38.0/src/deltaPriority.ts). The subscription follows [Alert Rules' preferred-source convention](https://github.com/hatlabs/signalk-alert-rules/blob/b9d4c451a17bbe1c756c721bc8ea5d9261805f7f/src/engine/signals.ts). Unlike that plugin's duration-based `timedOut` detector, these rules do not infer a timeout for a sensor never seen after boot. They consume confirmed native events only. The prerequisite check reads the optional server `config.settings.enforceDataTimeouts` field, also used by Alert Rules; it is not a public plugin API and an unavailable field is reported explicitly.
+
+Run `npm run test:native-timeouts` for the isolated Signal K 2.38.0 contract test. It creates and removes its own Docker Compose environment and never contacts live notification services or vessel hardware.
+
 ### Core alerts and Alert Rules
 
 Alert Center supports Signal K core alerts alongside legacy notifications when

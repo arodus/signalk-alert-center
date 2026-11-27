@@ -1,4 +1,8 @@
 import {
+  isNativeTimeoutRule,
+  NativeTimeoutRule,
+} from "../signalk/native-timeouts";
+import {
   isRuleDescriptor,
   RuleDescriptor,
   ruleDefinitionId,
@@ -170,6 +174,8 @@ export type OccurrenceWriteAuthorization = (
 ) => MaybePromise<boolean | undefined>;
 
 export interface AlertCenterDependencies {
+  nativeTimeouts?: () => unknown;
+  createNativeTimeoutRule?: (rule: NativeTimeoutRule) => unknown;
   defaultPolicy?: () => unknown;
   canChangeOccurrence: OccurrenceWriteAuthorization;
   snooze?: () => SnoozeState | undefined;
@@ -645,6 +651,41 @@ export function registerAlertCenterRoutes(
   dependencies: AlertCenterDependencies,
 ): void {
   const repo = () => repository(dependencies.repository);
+  if (dependencies.nativeTimeouts && dependencies.createNativeTimeoutRule) {
+    addRoute(
+      router,
+      "get",
+      "/native-timeout-rules",
+      "readonly",
+      wrap((_req, res) => {
+        repo();
+        res.json(dependencies.nativeTimeouts!());
+      }),
+    );
+    addRoute(
+      router,
+      "post",
+      "/native-timeout-rules",
+      "admin",
+      wrap((req, res) => {
+        repo();
+        if (!isNativeTimeoutRule(req.body))
+          throw new ApiError(
+            400,
+            "INVALID_BODY",
+            "Provide a unique slug, name, exact sensor path and non-normal severity",
+          );
+        const result = dependencies.createNativeTimeoutRule!(req.body);
+        if (result === "exists")
+          throw new ApiError(
+            409,
+            "RULE_EXISTS",
+            "A native timeout rule with this slug already exists",
+          );
+        res.status(201).json(result);
+      }),
+    );
+  }
   if (dependencies.defaultPolicy)
     addRoute(
       router,

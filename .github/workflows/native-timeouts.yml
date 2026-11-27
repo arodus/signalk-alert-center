@@ -1,0 +1,26 @@
+name: Native timeout compatibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-timeouts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:native-timeouts
+      - name: Clean up isolated test environment
+        if: always()
+        run: docker compose -p alert-center-native-timeouts -f docker-compose.acceptance.yml down -v --remove-orphans

@@ -1,3 +1,13 @@
+import {
+  definitionTimeoutRule,
+  NativeTimeoutRule,
+  nativeTimeoutDefinition,
+  nativeTimeoutStatus,
+  NATIVE_TIMEOUT_SOURCE,
+  readNativeTimeout,
+  nativeTimeoutDeltaEntries,
+  nativeTimeoutFingerprint,
+} from "./signalk/native-timeouts";
 import { ruleDefinition } from "./signalk/alert-rules";
 import {
   CoreAlert,
@@ -162,6 +172,8 @@ export class AlertCenterRuntime {
   private internet?: InternetAvailabilityMonitor;
   private policy?: AlertPolicyResolver;
   private unsubscribe?: () => void;
+  private nativeTimeoutUnsubscribes: Array<() => void> = [];
+  private nativeTimeoutFingerprints = new Map<string, string>();
   private coreStartupSnapshot?: CoreAlert[];
   private activationTimer?: ReturnType<typeof setTimeout>;
   private deliveryTimer?: ReturnType<typeof setTimeout>;
@@ -302,6 +314,9 @@ export class AlertCenterRuntime {
         : undefined,
     ].filter((reason): reason is string => Boolean(reason));
     const degradedReasons = [
+      this.timeoutRules().length && !nativeTimeoutStatus(this.app).enabled
+        ? nativeTimeoutStatus(this.app).message
+        : undefined,
       this.reconciliationState.state === "running"
         ? "Startup reconciliation is still running"
         : undefined,
@@ -333,6 +348,7 @@ export class AlertCenterRuntime {
         : { state: "healthy" as const, reasons: [] as string[] };
     const snooze = this.snoozeStatus();
     return {
+      nativeTimeouts: nativeTimeoutStatus(this.app),
       alertSources: coreAlertsApi(this.app)
         ? ["notifications", "alerts"]
         : ["notifications"],
@@ -1011,7 +1027,7 @@ export class AlertCenterRuntime {
     }, delay);
   }
 
-  private enqueueNotifications(entries: SignalKNotificationInput[]): void {
+  private enqueueNotifications(entries: SignalKNotificationInput[]): boolean {
     let rejected = 0;
     for (const entry of entries) {
       if (this.isIgnoredPath(entry.path)) continue;
@@ -1036,6 +1052,7 @@ export class AlertCenterRuntime {
       );
     }
     if (!this.reconcilingStartup) this.scheduleIngestionDrain();
+    return rejected === 0;
   }
 
   private scheduleIngestionDrain(): void {
@@ -1086,6 +1103,86 @@ export class AlertCenterRuntime {
     return this.db().listDefinitions({
       hideDormantZones: !serverManagesNotifications(this.app),
     });
+  }
+
+  private timeoutRules(): NativeTimeoutRule[] {
+    return (
+      this.database?.listDefinitions().flatMap((definition) => {
+        const rule = definitionTimeoutRule(definition);
+        return rule ? [rule] : [];
+      }) ?? []
+    );
+  }
+
+  private reconcileNativeTimeouts(): void {
+    if (!this.database || this.stopping) return;
+    for (const rule of this.timeoutRules()) {
+      // A missing model after restart does not prove that data recovered.
+      // Protect our durable occurrences from the legacy notification sweep.
+      this.startupSeenSourceKeys?.add(
+        notificationSourceKey(
+          nativeTimeoutDefinition(rule).pathPattern,
+          NATIVE_TIMEOUT_SOURCE,
+        ),
+      );
+      if (!nativeTimeoutStatus(this.app).enabled) continue;
+      const entry = readNativeTimeout(this.app, rule);
+      if (entry) this.enqueueNativeTimeout(entry);
+    }
+  }
+
+  private enqueueNativeTimeout(entry: SignalKNotificationInput): void {
+    const fingerprint = nativeTimeoutFingerprint(entry);
+    if (this.nativeTimeoutFingerprints.get(entry.path) === fingerprint) return;
+    if (this.enqueueNotifications([entry]))
+      this.nativeTimeoutFingerprints.set(entry.path, fingerprint);
+  }
+
+  private subscribeNativeTimeouts(): void {
+    this.nativeTimeoutUnsubscribes.splice(0).forEach((stop) => stop());
+    const paths = [...new Set(this.timeoutRules().map((rule) => rule.path))];
+    if (!paths.length) return;
+    const generation = this.runtimeGeneration;
+    this.app.subscriptionmanager.subscribe(
+      {
+        context: "vessels.self" as Context,
+        sourcePolicy: "preferred",
+        subscribe: paths.map((path) => ({
+          path: path as Path,
+          policy: "instant" as const,
+          minPeriod: 0,
+        })),
+      },
+      this.nativeTimeoutUnsubscribes,
+      (error: unknown) =>
+        this.reportAsyncError("Native timeout subscription failed", error),
+      (delta: unknown) => {
+        if (
+          this.stopping ||
+          generation !== this.runtimeGeneration ||
+          !nativeTimeoutStatus(this.app).enabled
+        )
+          return;
+        // The preferred bus already filters losing-source timeouts. Preserve
+        // every accepted transition before a later reading can replace the
+        // selected model leaf, including timeout/recovery in the same turn.
+        for (const entry of nativeTimeoutDeltaEntries(
+          delta,
+          this.timeoutRules(),
+        ))
+          this.enqueueNativeTimeout(entry);
+      },
+    );
+  }
+
+  private createNativeTimeoutRule(rule: NativeTimeoutRule): unknown {
+    const definition = nativeTimeoutDefinition(rule);
+    if (this.getDefinition(definition.id)) return "exists";
+    this.db().upsertDefinition(definition);
+    this.subscribeNativeTimeouts();
+    this.reconcileNativeTimeouts();
+    this.emitChange("native_timeout_rule");
+    return this.getDefinition(definition.id);
   }
 
   private seedDefinitions(): void {
@@ -1342,6 +1439,7 @@ export class AlertCenterRuntime {
     if (!this.database || generation !== this.runtimeGeneration) return;
     const startedAt = Date.now();
     this.seedDefinitions();
+    this.reconcileNativeTimeouts();
     const coreApi = coreAlertsApi(this.app);
     if (coreApi) {
       // list() is authoritative: the model retains terminal snapshots at alerts.*.
@@ -1830,7 +1928,9 @@ export class AlertCenterRuntime {
       deleteDefinition: (id: string) => {
         const result = this.db().deleteDefinition(id);
         if (result === "deleted") {
+          this.nativeTimeoutFingerprints.delete(id.replace(/^path:/, ""));
           this.normalSources.delete(id);
+          this.subscribeNativeTimeouts();
           this.scheduleNextWake();
           this.scheduleNextActivation();
           this.scheduleNextDelivery();
@@ -2007,6 +2107,7 @@ export class AlertCenterRuntime {
       if (snapshot) this.navigationState = snapshot;
     }
     this.serviceHealthFingerprints.clear();
+    this.nativeTimeoutFingerprints.clear();
     this.database = new AlertDatabase(this.databasePath(options));
     this.suppression = new SuppressionStore(this.database);
     if (this.database.migrationApplied)
@@ -2323,6 +2424,7 @@ export class AlertCenterRuntime {
       handler,
     );
     this.unsubscribe = () => unsubscribes.forEach((stop) => stop());
+    this.subscribeNativeTimeouts();
     this.coreStartupSnapshot = coreAlertsApi(this.app)
       ?.list()
       .filter(
@@ -2419,6 +2521,11 @@ export class AlertCenterRuntime {
       () => this.summary(),
     );
     registerAlertCenterRoutes(compatible, {
+      nativeTimeouts: () => ({
+        ...nativeTimeoutStatus(this.app),
+        rules: this.timeoutRules(),
+      }),
+      createNativeTimeoutRule: (rule) => this.createNativeTimeoutRule(rule),
       defaultPolicy: () => this.policies().defaultPolicy(),
       canChangeOccurrence,
       repository: () => (this.database ? repository : undefined),
@@ -2548,6 +2655,8 @@ export class AlertCenterRuntime {
     this.reconcilingStartup = false;
     this.ingestionQueue.clear();
     this.normalSources.clear();
+    this.nativeTimeoutUnsubscribes.splice(0).forEach((stop) => stop());
+    this.nativeTimeoutFingerprints.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.clearServiceHealthNotifications();

@@ -5,6 +5,11 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Features
+
+- Add data timeout rules using Signal K Server 2.38.0's native timeout detection and selected-source failover. Enable native data timeouts in the server first; Alert Center reports when this prerequisite is disabled. Rules and occurrences survive restart, clear on valid data recovery, and use the existing per-alert delivery settings.
+- Show timed-out readings as **Stale** in the Alerts table, with age measured from the last valid reading rather than the timeout event. Missing readings remain unavailable.
+
 ## [0.10.0] - 2026-11-23
 
 ### Features

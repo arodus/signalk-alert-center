@@ -478,7 +478,9 @@ h2 {
 .form-field input,
 .form-field select,
 .policy-setting > input,
-.policy-setting > select {
+.policy-setting > select,
+#native-timeout-form input,
+#native-timeout-form select {
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 8px 10px;
@@ -1624,4 +1626,12 @@ dialog input[type="checkbox"] {
 html:not([data-access="admin"]) [data-required-access="admin"],
 html[data-access="readonly"] [data-required-access="readwrite"] {
   display: none !important;
+}
+
+#native-timeout-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+#native-timeout-form {
+  display: grid;
+  gap: 0.75rem;
 }

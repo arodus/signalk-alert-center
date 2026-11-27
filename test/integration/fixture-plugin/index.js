@@ -241,7 +241,11 @@ module.exports = function fixturePlugin(app) {
       writes.post("/reading", (request, response) => {
         const body = request.body ?? {};
         response.json(
-          publish(body.path ?? ZONE_PATH, body.value, "fixture.sensor"),
+          publish(
+            body.path ?? ZONE_PATH,
+            body.value,
+            body.source ?? "fixture.sensor",
+          ),
         );
       });
       writes.post("/unit-metadata", (request, response) => {

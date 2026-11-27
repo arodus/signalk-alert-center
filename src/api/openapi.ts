@@ -58,6 +58,37 @@ export function getAlertCenterOpenApi() {
     openapi: "3.0.3",
     info: { title: "Signal K Alert Center", version: "1.0.0" },
     paths: {
+      "/native-timeout-rules": {
+        get: {
+          summary:
+            "List durable native data timeout rules and the server prerequisite",
+          responses: {
+            "200": response("Rules and native timeout availability", {
+              $ref: "#/components/schemas/NativeTimeoutRules",
+            }),
+            ...errors,
+          },
+        },
+        post: {
+          summary: "Create a native data timeout rule",
+          description:
+            adminWriteDescription +
+            " Rules are immutable; existing delivery policy endpoints configure delivery. No local timeout clock is created. Remove inactive definitions using the definitions endpoint.",
+          requestBody: {
+            required: true,
+            content: json({ $ref: "#/components/schemas/NativeTimeoutRule" }),
+          },
+          responses: {
+            "201": response("Created definition", {
+              $ref: "#/components/schemas/Definition",
+            }),
+            "409": response("Rule slug already exists", {
+              $ref: "#/components/schemas/Error",
+            }),
+            ...errors,
+          },
+        },
+      },
       "/policy-defaults": {
         get: {
           summary:
@@ -616,6 +647,45 @@ export function getAlertCenterOpenApi() {
     },
     components: {
       schemas: {
+        NativeTimeoutRule: {
+          type: "object",
+          additionalProperties: false,
+          required: ["slug", "name", "path", "severity"],
+          properties: {
+            slug: {
+              type: "string",
+              maxLength: 64,
+              pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            },
+            name: { type: "string", minLength: 1, maxLength: 200 },
+            path: {
+              type: "string",
+              maxLength: 255,
+              description:
+                "Exact self-vessel sensor path, without notifications. or alerts.; wildcards and prototype segments are rejected.",
+            },
+            severity: {
+              type: "string",
+              enum: ["alert", "warn", "alarm", "emergency"],
+            },
+          },
+        },
+        NativeTimeoutRules: {
+          type: "object",
+          required: ["enabled", "message", "rules"],
+          properties: {
+            enabled: {
+              type: "boolean",
+              description:
+                "True when the server config confirms native timeout enforcement is enabled.",
+            },
+            message: { type: "string" },
+            rules: {
+              type: "array",
+              items: { $ref: "#/components/schemas/NativeTimeoutRule" },
+            },
+          },
+        },
         QuietHoursStatus: {
           type: "object",
           required: ["enabled", "active"],
@@ -737,6 +807,14 @@ export function getAlertCenterOpenApi() {
             snooze: { $ref: "#/components/schemas/Snooze" },
             quietHours: {
               $ref: "#/components/schemas/QuietHoursControl",
+            },
+            nativeTimeouts: {
+              type: "object",
+              required: ["enabled", "message"],
+              properties: {
+                enabled: { type: "boolean" },
+                message: { type: "string" },
+              },
             },
             alertSources: {
               type: "array",

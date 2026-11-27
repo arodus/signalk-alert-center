@@ -249,6 +249,17 @@
             </p>
           </div>
         </div>
+        <div class="drawer-actions" data-required-access="admin">
+          <button id="native-timeout-add" class="button" type="button">
+            Add data timeout rule
+          </button>
+        </div>
+        <p
+          id="native-timeout-status"
+          class="field-help"
+          role="status"
+          hidden
+        ></p>
         <p id="rule-catalog-status" class="field-help" role="status" hidden></p>
         <p id="list-summary" class="field-help" role="status"></p>
         <p id="action-result" class="field-help" role="status"></p>
@@ -828,9 +839,56 @@
         </section>
       </form>
     </dialog>
+    <dialog id="native-timeout-dialog" aria-labelledby="native-timeout-title">
+      <form id="native-timeout-form">
+        <h2 id="native-timeout-title">Data timeout rule</h2>
+        <p
+          id="native-timeout-prerequisite"
+          class="field-help"
+          role="status"
+        ></p>
+        <label for="native-timeout-name">Name</label>
+        <input
+          id="native-timeout-name"
+          name="name"
+          maxlength="200"
+          required
+          placeholder="Depth sensor unavailable"
+        />
+        <label for="native-timeout-path">Signal K sensor path</label>
+        <input
+          id="native-timeout-path"
+          name="path"
+          maxlength="255"
+          required
+          placeholder="environment.depth.belowKeel"
+        />
+        <label for="native-timeout-severity">Severity</label>
+        <select id="native-timeout-severity" name="severity">
+          <option value="alert">Alert</option>
+          <option value="warn">Warning</option>
+          <option value="alarm" selected>Alarm</option>
+          <option value="emergency">Emergency</option>
+        </select>
+        <p class="field-help">
+          Uses the server’s timeout settings and selected data source. Clears
+          when valid data returns. Configure delivery services in the alert’s
+          settings after saving. To change the sensor or severity, remove the
+          inactive rule and create a replacement.
+        </p>
+        <p id="native-timeout-result" role="status"></p>
+        <div class="drawer-actions">
+          <button class="button button-primary" type="submit">Save rule</button>
+          <button id="native-timeout-close" class="button" type="button">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </dialog>
     <script src="./units.js" defer></script>
     <script src="./live-values.js" defer></script>
     <script src="./alert-rules.js" defer></script>
     <script src="./app.js" defer></script>
+    <script src="./native-timeouts.js" defer></script>
   </body>
 </html>

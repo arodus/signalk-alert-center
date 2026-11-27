@@ -418,19 +418,34 @@ function displayedMessage(item, live = false, message = item?.message) {
     /^notifications\./,
     "",
   );
-  const value = live ? liveValues.values.get(path)?.value : sample?.value;
+  const reading = live ? liveValues.values.get(path) : undefined;
+  const value =
+    live && !reading?.timedOut && !reading?.unavailable
+      ? reading?.value
+      : live
+        ? undefined
+        : sample?.value;
   const units = live ? metadata.units : (sample?.units ?? metadata.units);
   const formatted = convertAlertMessage(message, { ...metadata, units }, value);
   return live && isZoneMessage(message)
-    ? `${formatted} · ${Number.isFinite(value) ? "Live" : "Live value unavailable"}`
+    ? `${formatted} · ${reading?.timedOut ? "Stale" : Number.isFinite(value) ? "Live" : "Live value unavailable"}`
     : formatted;
 }
 
+function sensorPath(definition) {
+  return (
+    definition.metadata?.nativeTimeout?.path ??
+    definition.pathPattern.replace(/^notifications\./, "")
+  );
+}
 function liveValueText(definition) {
   if (definition.sourceType === "rule") return "—";
-  const path = definition.pathPattern.replace(/^notifications\./, "");
+  const path = sensorPath(definition);
   const reading = liveValues.values.get(path);
   if (!reading) return "—";
+  if (reading.timedOut) return "Stale";
+  if (reading.unavailable) return "Unavailable";
+  if (!Number.isFinite(reading.value)) return String(reading.value);
   const metadata =
     displayMetadata.get(definition.pathPattern)?.metadata ??
     definition.metadata;
@@ -439,9 +454,7 @@ function liveValueText(definition) {
 }
 function liveAgeText(definition) {
   if (definition.sourceType === "rule") return "—";
-  const reading = liveValues.values.get(
-    definition.pathPattern.replace(/^notifications\./, ""),
-  );
+  const reading = liveValues.values.get(sensorPath(definition));
   const at = Date.parse(reading?.timestamp);
   if (!Number.isFinite(at)) return "—";
   const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
@@ -499,7 +512,7 @@ async function loadDisplayUnits(definition) {
     definition.metadata = { ...definition.metadata, ...cached.metadata };
     return;
   }
-  const path = definition.pathPattern.replace(/^notifications\./, "");
+  const path = sensorPath(definition);
   try {
     const response = await fetch(
       `/signalk/v1/api/vessels/self/${path.split(".").map(encodeURIComponent).join("/")}/meta`,
@@ -623,6 +636,7 @@ function renderDefinitions() {
           definition.name,
           definition.pathPattern,
           definition.metadata?.rule?.slug,
+          definition.metadata?.nativeTimeout?.path,
         ].some((value) => searchText(value).includes(search)) ||
         state.occurrences.some(
           (occurrence) =>
@@ -647,7 +661,7 @@ function renderDefinitions() {
         alertName(left.definition).localeCompare(alertName(right.definition)),
     );
   $("#list-summary").textContent =
-    `${visible.length} shown · ${state.definitions.filter((item) => item.sourceType === "rule").length} rules · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
+    `${visible.length} shown · ${state.definitions.filter((item) => item.sourceType === "rule" || item.metadata?.nativeTimeout).length} rules · ${state.definitions.filter((item) => definitionZones(item).length > 0).length} configured zone paths · active first, then zones, then inactive`;
   elements.definitions.innerHTML = visible.length
     ? `<table class="data-table alert-table">
             <thead><tr><th>Alert</th><th>Value</th><th>Age</th><th>Last triggered</th><th>State</th><th data-required-access="readwrite"><span class="visually-hidden">Actions</span></th></tr></thead>
@@ -658,6 +672,9 @@ function renderDefinitions() {
             const alertSummary = [
               displayedMessage(latest, active),
               item.ruleStatus,
+              item.metadata?.nativeTimeout
+                ? `Data timeout · ${item.metadata.nativeTimeout.path}`
+                : "",
               active && item.sourceType === "rule" ? latest.path : "",
               definitionZones(item).length
                 ? `Configured zone · ${definitionZones(item).length} thresholds`
@@ -1027,6 +1044,22 @@ async function loadMetadataInBackground() {
   }
 }
 let ruleCatalogRequest = 0;
+async function loadNativeTimeoutStatus() {
+  const banner = $("#native-timeout-status");
+  if (!state.definitions.some((item) => item.metadata?.nativeTimeout)) {
+    banner.hidden = true;
+    return;
+  }
+  try {
+    state.nativeTimeoutStatus = await api("/native-timeout-rules");
+    banner.textContent = state.nativeTimeoutStatus.message;
+    banner.hidden = state.nativeTimeoutStatus.enabled;
+  } catch (error) {
+    banner.textContent = `Native timeout status could not be checked: ${error.message}`;
+    banner.hidden = false;
+  }
+}
+
 async function loadRuleCatalog() {
   const request = ++ruleCatalogRequest;
   const catalog = await alertRules.catalog();
@@ -1101,10 +1134,11 @@ async function load(preserveLoadedHistory = false) {
             item.sourceType !== "rule" &&
             !item.pathPattern.startsWith("alerts."),
         )
-        .map((item) => item.pathPattern.replace(/^notifications\./, "")),
+        .map(sensorPath),
     ]);
     void loadMetadataInBackground().catch(showError);
     void loadRuleCatalog().catch(showError);
+    void loadNativeTimeoutStatus().catch(showError);
   } catch (error) {
     showError(error);
   } finally {
@@ -1271,6 +1305,9 @@ function bindRecentOccurrenceLinks() {
     );
 }
 function ruleDetails(definition) {
+  const native = definition?.metadata?.nativeTimeout;
+  if (native)
+    return `<p class="field-help">Native data timeout · ${escapeHtml(native.path)} · ${escapeHtml(native.severity)}. Uses Signal K’s selected source and timeout configuration.</p>${state.nativeTimeoutStatus?.enabled === false ? `<p class="field-help">${escapeHtml(state.nativeTimeoutStatus.message)}</p>` : ""}`;
   const rule = definition?.metadata?.rule;
   if (!rule) return "";
   const scope = definition.pathPattern.includes("*")
@@ -1326,7 +1363,7 @@ async function openOccurrence(id) {
     state.selectedDefinition = occurrence.definitionId;
     state.eventCursor = undefined;
     elements.drawerTitle.textContent = definition?.name ?? occurrence.path;
-    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${drawerPolicyActions(definition)}</div>`;
+    elements.drawerBody.innerHTML = `<p>${escapeHtml(displayedMessage(occurrence) ?? occurrence.path)}</p>${Number.isFinite(occurrence.messageSample?.value) ? `<p class="cell-detail">Reading captured ${formatDate(occurrence.messageSample.capturedAt)}</p>` : ""}<p class="cell-detail">${escapeHtml(occurrence.path)} · ${escapeHtml(sourceName(occurrence.sourceKey, occurrence.source))}</p><dl class="detail-grid"><div><dt>State</dt><dd>${escapeHtml(occurrenceState(occurrence))}</dd></div>${occurrence.coreAlert ? `<div><dt>Core alert ID</dt><dd>${escapeHtml(occurrence.coreAlert.id)}</dd></div><div><dt>Condition</dt><dd>${occurrence.coreAlert.clearReason === "displaced" ? "Unknown after displacement" : occurrence.coreAlert.latching ? "Momentary event" : occurrence.coreAlert.condition ? "Present" : "Ended"}</dd></div><div><dt>Related paths</dt><dd>${escapeHtml(occurrence.coreAlert.references?.join(", ") || "—")}</dd></div>` : ""}<div><dt>Severity</dt><dd>${escapeHtml(occurrence.maxSeverity)}</dd></div><div><dt>Acknowledged</dt><dd>${formatDate(occurrence.acknowledgedAt)}</dd></div><div><dt>Silenced</dt><dd>${formatDate(occurrence.silencedAt)}</dd></div><div><dt>Notification services</dt><dd>${escapeHtml(definition?.policy?.notifierIds?.join(", ") || "No delivery selected")}</dd></div><div><dt>Started</dt><dd>${formatDate(occurrence.startedAt)}</dd></div><div><dt>Cleared</dt><dd>${formatDate(occurrence.clearedAt)}</dd></div></dl>${definition && definitionZones(definition).length ? `<section class="drawer-zones"><h3>Defined zones</h3><div class="zone-ranges">${zoneBadges(definition)}</div></section>` : ""}${occurrence.sourcePayload?.data?.nativeTimeout ? `<p class="field-help">Sensor: ${escapeHtml(occurrence.sourcePayload.data.path)} · Source: ${escapeHtml(occurrence.sourcePayload.data.source ?? "—")} · Last valid reading: ${formatDate(occurrence.sourcePayload.data.lastValidTimestamp)}</p>` : ""}${ruleDetails(definition)}${recentOccurrencesMarkup(recent, id)}<div class="drawer-actions" data-required-access="readwrite">${occurrenceActions(occurrence)}${drawerPolicyActions(definition)}</div>`;
     elements.drawerResult.textContent = "";
     bindRecentOccurrenceLinks();
     bindOccurrenceActions();

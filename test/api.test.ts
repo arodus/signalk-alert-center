@@ -159,6 +159,13 @@ function fixture(
   };
   registerAlertCenterRoutes(router, {
     canChangeOccurrence,
+    nativeTimeouts: () => ({
+      enabled: false,
+      message: "Enable native timeouts",
+      rules: [],
+    }),
+    createNativeTimeoutRule: (rule) =>
+      rule.slug === "existing" ? "exists" : { id: rule.slug },
     repository: () => repository,
     defaultPolicy: () => ({ provenance: "default", notifierIds: [] }),
     listNotifiers: () => [{ id: "ntfy-main", type: "ntfy" }],
@@ -214,11 +221,49 @@ function fixture(
 }
 
 describe("alert-center routes", () => {
+  it("validates native timeout rules and keeps creation admin-only", async () => {
+    const current = fixture();
+    expect(current.routeAccess.get("GET /native-timeout-rules")).toBe(
+      "readonly",
+    );
+    expect(current.routeAccess.get("POST /native-timeout-rules")).toBe("admin");
+    const body = {
+      slug: "depth",
+      name: "Depth lost",
+      path: "environment.depth.belowKeel",
+      severity: "alarm",
+    };
+    expect(
+      (await current.invoke("POST", "/native-timeout-rules", { body }))
+        .statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await current.invoke("POST", "/native-timeout-rules", {
+          body: { ...body, slug: "existing" },
+        })
+      ).statusCode,
+    ).toBe(409);
+    for (const change of [
+      { path: "environment.*" },
+      { severity: "normal" },
+      { timeoutSeconds: 1 },
+      { name: " " },
+    ])
+      expect(
+        (
+          await current.invoke("POST", "/native-timeout-rules", {
+            body: { ...body, ...change },
+          })
+        ).statusCode,
+      ).toBe(400);
+  });
+
   it("registers reads and mutations with least-privilege Signal K access", () => {
     const { access, routeAccess } = fixture();
     expect(access).toContain("readonly");
     expect(access).toContain("readwrite");
-    expect(access.filter((value) => value === "readonly")).toHaveLength(12);
+    expect(access.filter((value) => value === "readonly")).toHaveLength(13);
     expect(access.filter((value) => value === "readwrite")).toHaveLength(2);
     for (const [route, level] of routeAccess) {
       if (route.startsWith("GET ")) expect(level).toBe("readonly");
