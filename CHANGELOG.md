@@ -5,6 +5,10 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+### Features
+
+- Show timed-out readings as **Stale** in the Alerts table, with age measured from the last valid reading rather than the timeout event. Missing readings remain unavailable. These indicators do not create alerts or deliveries; configure sensor-loss alerts in a separate rules plugin.
+
 ### Fixes
 
 - Removing a stored alert now asks for confirmation inside Alert Center, so it works in AppDock when browser prompts are blocked.

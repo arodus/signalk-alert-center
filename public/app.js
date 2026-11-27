@@ -418,11 +418,17 @@ function displayedMessage(item, live = false, message = item?.message) {
     /^notifications\./,
     "",
   );
-  const value = live ? liveValues.values.get(path)?.value : sample?.value;
+  const reading = live ? liveValues.values.get(path) : undefined;
+  const value =
+    live && !reading?.timedOut && !reading?.unavailable
+      ? reading?.value
+      : live
+        ? undefined
+        : sample?.value;
   const units = live ? metadata.units : (sample?.units ?? metadata.units);
   const formatted = convertAlertMessage(message, { ...metadata, units }, value);
   return live && isZoneMessage(message)
-    ? `${formatted} · ${Number.isFinite(value) ? "Live" : "Live value unavailable"}`
+    ? `${formatted} · ${reading?.timedOut ? "Stale" : Number.isFinite(value) ? "Live" : "Live value unavailable"}`
     : formatted;
 }
 
@@ -431,6 +437,9 @@ function liveValueText(definition) {
   const path = definition.pathPattern.replace(/^notifications\./, "");
   const reading = liveValues.values.get(path);
   if (!reading) return "—";
+  if (reading.timedOut) return "Stale";
+  if (reading.unavailable) return "Unavailable";
+  if (!Number.isFinite(reading.value)) return String(reading.value);
   const metadata =
     displayMetadata.get(definition.pathPattern)?.metadata ??
     definition.metadata;

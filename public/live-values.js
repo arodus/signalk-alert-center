@@ -34,10 +34,9 @@ class AlertLiveValues {
           subscribe: [...this.paths].map((path) => ({
             path,
             policy: "instant",
-            // The server's leading-only debounce can discard the last change
-            // in a burst. Mode changes must always wake a priority-resolved read;
-            // the client still coalesces those reads below.
-            minPeriod: path === "environment.mode" ? 0 : 1000,
+            // Leading-only server debounce can drop the final timeout or
+            // recovery in a burst. Coalesce model reads on the client below.
+            minPeriod: 0,
           })),
         }),
       );
@@ -93,12 +92,19 @@ class AlertLiveValues {
         this.socket?.readyState !== WebSocket.OPEN
       )
         return;
+      const timedOut = node?.value === null && node?.state?.timedOut === true;
+      const value = timedOut ? node.state.lastValue?.value : node?.value;
       this.values.set(
         path,
-        node &&
-          (Number.isFinite(node.value) ||
-            (path === "environment.mode" && typeof node.value === "string"))
-          ? { value: node.value, timestamp: node.timestamp }
+        node
+          ? {
+              value: timedOut ? undefined : value,
+              timedOut,
+              unavailable: value === null || value === undefined,
+              timestamp: timedOut
+                ? node.state.lastValue?.timestamp
+                : node.timestamp,
+            }
           : undefined,
       );
     } catch {

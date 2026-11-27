@@ -80,6 +80,18 @@ pretend the underlying condition has cleared.
 
 ![Alert details with recent occurrences and event history](./docs/screenshots/alert-details.png)
 
+### Stale sensor readings
+
+For sensor paths already displayed in the Alerts table, Alert Center shows **Stale** when Signal K reports a native data timeout. The reading age uses the last valid reading's timestamp, not the time the server detected the timeout. Missing readings without timeout information remain unavailable. A fresh reading from the selected source, including a backup source, restores the live display.
+
+Native stale detection requires Signal K Server 2.38.0 or newer with **Enforce Data Timeouts** enabled in the server settings. Configure timeout durations and source failover in Signal K. Older servers continue handling ordinary alerts and live readings normally.
+
+These indicators do not create alerts, history events, or delivery work. Configure sensor-loss alerts in a separate rules plugin; Alert Center retains and delivers the resulting notifications through its normal alert flow.
+
+The display reads the server's selected sensor value and its sibling `state.timedOut` and `state.lastValue.timestamp` fields. See the [Signal K 2.38.0 enforcer](https://github.com/SignalK/signalk-server/blob/v2.38.0/src/staleness.ts) and [priority filter](https://github.com/SignalK/signalk-server/blob/v2.38.0/src/deltaPriority.ts). The stream triggers coalesced model reads so a final timeout or recovery update is not lost.
+
+Run `npm run test:native-timeouts` for the isolated Signal K 2.38.0 contract test. It creates and removes its own Docker Compose environment and never contacts live notification services or vessel hardware.
+
 ### Core alerts and Alert Rules
 
 Alert Center supports Signal K core alerts alongside legacy notifications when
