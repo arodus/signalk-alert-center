@@ -1,0 +1,33 @@
+name: Issue and PR titles
+on:
+  issues:
+    types: [opened, edited, reopened, labeled, unlabeled]
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: title-labels-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    steps:
+      # Both triggers use trusted repository code. Never check out the PR head here.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const { reconcile } = require('./.github/scripts/title-labels.cjs')
+            await reconcile(github.rest.issues, {
+              ...context.repo,
+              issue_number: context.issue.number
+            })
