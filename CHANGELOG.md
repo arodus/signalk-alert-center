@@ -5,23 +5,35 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-27
+
+### Upgrade and rollback
+
+- **Back up before upgrading:** stop Signal K and take a consistent backup of the configured Alert Center SQLite database and plugin configuration. The automatic, transactional schema-5-to-6 migration preserves alerts, history, policies, and pending deliveries while adding location snapshots. Historical delivery locations that were not captured remain unknown. No database reset is required.
+- **Rollback requires the backup:** version 0.10.0 cannot open a schema-6 database. Stop Signal K, reinstall the previous package, and restore the pre-upgrade database and configuration. Restoring the backup discards history and delivery progress recorded after it was taken. The schema-5 upgrade and restart persistence are tested; a complete downgrade-and-restore installation was not tested.
+- **Notification permissions:** with Signal K ACLs enabled, users who acknowledge or silence server-managed legacy notifications need `put` permission on both the literal `notifications` collection and the individual notification paths they may control. Core-alert permissions and local-only annotations are unchanged.
+- **Ignore defaults:** security access requests are now ignored when no `ignoredPaths` list has been saved. Explicit lists, including an empty list, remain unchanged. Add `security.accessRequest.*` to an existing list if desired. Existing history and queued delivery work are preserved; ignoring a path does not cancel pending work.
+- **Server compatibility:** ordinary notifications remain compatible with Signal K Server 2.31.1. Native stale indicators require Signal K Server 2.38.0 or newer with **Enforce Data Timeouts** enabled. Alert Center does not create timeout alerts; configure sensor-loss alerts in a separate rules plugin.
+
 ### Features
 
-- Show timed-out readings as **Stale** in the Alerts table, with age measured from the last valid reading rather than the timeout event. Missing readings remain unavailable. These indicators do not create alerts or deliveries; configure sensor-loss alerts in a separate rules plugin.
-- Show notification locations in the alert list, details and history, include them in standard remote messages, and support `{location}` in service templates. Location-only updates do not retrigger delivery. Schema 6 preserves event and delivery locations across restarts; back up the database before upgrading, and restore the backup if reverting to an earlier version.
+- Show notification locations in the Alerts table, detail drawer, history, and standard remote messages. Service and Wyoming speech templates support `{location}`. Events and deliveries keep their captured location across restarts and retries; location-only updates do not retrigger delivery. [#136](https://github.com/arodus/signalk-alert-center/pull/136)
+- Show timed-out readings as **Stale**, with age measured from the last valid reading rather than the timeout event. Missing readings remain unavailable, and valid selected-source recovery restores the live display. These indicators create no alerts, history events, or deliveries. [#138](https://github.com/arodus/signalk-alert-center/pull/138)
 
 ### Fixes
 
-- Removing a stored alert now asks for confirmation inside Alert Center, so it works in AppDock when browser prompts are blocked.
-- Require the Signal K Notifications API's collection permission before
-  acknowledging or silencing a server-managed legacy notification. Existing
-  per-alert path permissions still apply. With ACLs enabled, grant crew `put` on
-  both `notifications` and the individual notification paths they may control.
-- Reset a legacy notification's local acknowledgement and silence when its
-  active severity changes, including decreases, while retaining its history.
-  Message and location changes keep those actions in effect. Pending remote
-  acknowledgements of the old state no longer acknowledge the new state.
-- Format Signal K 2.38 zone messages in display units and preserve captured readings in history and deliveries, including after thresholds change. Removed thresholds no longer remain in the Alerts table; stored history and policy are retained.
+- Confirm stored-alert removal inside Alert Center so it also works in AppDock when browser prompts are blocked. [#133](https://github.com/arodus/signalk-alert-center/pull/133)
+- Enforce both notification collection and per-alert path permissions before acknowledging or silencing server-managed legacy notifications. Denied requests leave stored alert state unchanged. [#134](https://github.com/arodus/signalk-alert-center/pull/134)
+- Reset local acknowledgement and silence when an active legacy notification changes severity, including decreases, while preserving history. Message and location changes retain those actions, and pending remote acknowledgements of the old state cannot acknowledge the new state. [#135](https://github.com/arodus/signalk-alert-center/pull/135)
+- Format Signal K 2.38 zone messages in display units and retain captured readings in history and deliveries after thresholds change. Removed thresholds disappear from the Alerts table while stored history and policy remain. [#137](https://github.com/arodus/signalk-alert-center/pull/137)
+- Ignore `notifications.security.accessRequest.*` by default, including nested access-request paths, while continuing to track other security notifications. [#141](https://github.com/arodus/signalk-alert-center/pull/141)
+
+### Maintenance
+
+- Validate issue and PR titles and apply type labels automatically. [#139](https://github.com/arodus/signalk-alert-center/pull/139)
+- Prepare release notes from merged PRs and require a reviewed upgrade-and-rollback section before publishing. [#140](https://github.com/arodus/signalk-alert-center/pull/140)
+
+[Full changelog](https://github.com/arodus/signalk-alert-center/compare/v0.10.0...v0.11.0)
 
 ## [0.10.0] - 2026-11-23
 
