@@ -50,7 +50,10 @@ it("restores an annotated remote tag flattened by checkout and rejects unsafe ta
       join(work, "package.json"),
       JSON.stringify({ version: "0.1.0" }),
     );
-    writeFileSync(join(work, "CHANGELOG.md"), "## [0.1.0]\n\nTest release.\n");
+    writeFileSync(
+      join(work, "CHANGELOG.md"),
+      "## [0.1.0]\n\n### Upgrade and rollback\n\nTest release.\n",
+    );
     git(work, "add", ".");
     git(work, "commit", "-m", "Release fixture");
     git(work, "remote", "add", "origin", remote);
