@@ -2,6 +2,7 @@ export const DEFAULT_IGNORED_PATHS = [
   "navigation.closestApproach.*",
   "navigation.course.arrivalCircleEntered",
   "navigation.course.perpendicularPassed",
+  "security.accessRequest.*",
 ];
 
 /** Compile literal, whole-path patterns once per runtime start. Only * is special. */

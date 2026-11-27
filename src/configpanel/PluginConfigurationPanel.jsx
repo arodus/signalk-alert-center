@@ -28,6 +28,7 @@ const defaults = {
     "navigation.closestApproach.*",
     "navigation.course.arrivalCircleEntered",
     "navigation.course.perpendicularPassed",
+    "security.accessRequest.*",
   ],
   storage: { path: "alert-center.sqlite" },
   snooze: { onlyWhenAnchoredOrMoored: false },

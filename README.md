@@ -475,15 +475,16 @@ local state-recheck interval remain configurable in Alert Center.
 ## Notification paths to leave out
 
 Under **Storage & advanced → Notification paths to leave out**, enter one
-pattern per line. By default, Alert Center ignores per-target collision alarms
-and routine waypoint arrival notifications:
+pattern per line. By default, Alert Center ignores per-target collision alarms,
+routine waypoint arrival notifications, and security access requests:
 
 ```json
 {
   "ignoredPaths": [
     "navigation.closestApproach.*",
     "navigation.course.arrivalCircleEntered",
-    "navigation.course.perpendicularPassed"
+    "navigation.course.perpendicularPassed",
+    "security.accessRequest.*"
   ]
 }
 ```
@@ -493,7 +494,7 @@ Patterns match the whole notification path, with or without the leading
 one or more characters, including dots between nested path segments. For example,
 the collision pattern matches both `navigation.closestApproach.urn:mrn:imo:mmsi:244954000`
 and `navigation.closestApproach.radar:bridge:1`. An exact path matches only itself.
-The two course paths are exact matches; other course notifications remain tracked.
+The access-request pattern matches every child of `notifications.security.accessRequest`, including nested paths. The two course paths are exact matches; other course notifications remain tracked.
 Remove either course entry to track and deliver that notification, or clear the
 list (or set `ignoredPaths: []`) to track all notification paths.
 

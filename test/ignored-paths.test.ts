@@ -15,6 +15,10 @@ const coursePaths = [
   "notifications.navigation.course.arrivalCircleEntered",
   "notifications.navigation.course.perpendicularPassed",
 ];
+const accessRequests = [
+  "notifications.security.accessRequest.a",
+  "notifications.security.accessRequest.client.request-id",
+];
 const battery = "notifications.electrical.batteries.house.voltage";
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -66,11 +70,33 @@ describe("ignored notification paths", () => {
     expect(ignored("notifications.navigation.course.offCourse")).toBe(false);
   });
 
-  it("defaults to ignoring collision and exact waypoint paths and rejects malformed configuration", () => {
+  it("ignores access-request descendants by default while preserving other security alerts and explicit lists", () => {
+    for (const path of accessRequests) {
+      expect(ignoredPathMatcher()(path)).toBe(true);
+      expect(ignoredPathMatcher()(path.replace(/^notifications\./, ""))).toBe(
+        true,
+      );
+      expect(ignoredPathMatcher([])(path)).toBe(false);
+      expect(ignoredPathMatcher(["navigation.closestApproach.*"])(path)).toBe(
+        false,
+      );
+    }
+    for (const path of [
+      "notifications.security.accessRequest",
+      "notifications.security.accessRequest.",
+      "notifications.security.accessRequests.client",
+      "notifications.security.intrusion.cabin",
+      "notifications.other.security.accessRequest.client",
+    ])
+      expect(ignoredPathMatcher()(path)).toBe(false);
+  });
+
+  it("defaults to ignoring collision, waypoint and access-request paths and rejects malformed configuration", () => {
     expect(pluginConfigSchema.properties.ignoredPaths.default).toEqual([
       "navigation.closestApproach.*",
       "navigation.course.arrivalCircleEntered",
       "navigation.course.perpendicularPassed",
+      "security.accessRequest.*",
     ]);
     for (const config of [
       {},
@@ -94,7 +120,7 @@ describe("ignored notification paths", () => {
     }
   });
 
-  it.each([collision, ...coursePaths])(
+  it.each([collision, ...coursePaths, ...accessRequests])(
     "filters %s live updates and snapshots, preserving stored work across restart",
     async (ignoredPath) => {
       const directory = mkdtempSync(join(tmpdir(), "ignored-paths-"));
