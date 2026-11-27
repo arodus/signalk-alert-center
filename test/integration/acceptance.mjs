@@ -58,7 +58,7 @@ assert.equal(captured.length, 2);
 assert.deepEqual(captured[0].json, { attempt: 1 });
 assert.equal(captured[0].headers["x-fixture"], "one");
 
-await json(`${signalkUrl}/signalk`);
+const serverDiscovery = await json(`${signalkUrl}/signalk`);
 const eventController = new AbortController();
 const eventResponse = await fetch(
   `${signalkUrl}/plugins/signalk-alert-center/events`,
@@ -852,7 +852,7 @@ try {
 
 // Native notification methods changed in 2.38.0. Keep the older-server lane,
 // while exercising the real manager (not a fabricated delta) on newer servers.
-const serverDiscovery = await json(`${signalkUrl}/signalk`);
+
 const [serverMajor, serverMinor] = String(
   serverDiscovery.server?.version ?? "0.0",
 )
@@ -939,4 +939,111 @@ if (serverMajor > 2 || (serverMajor === 2 && serverMinor >= 38)) {
   );
 }
 
+// These boundaries and generated messages intentionally differ before 2.38.
+const [major, minor] = serverDiscovery.server.version.split(".").map(Number);
+if (major > 2 || (major === 2 && minor >= 38)) {
+  const sensor = "environment.inside.zoneAcceptance.temperature";
+  const path = `notifications.${sensor}`;
+  const api = `${signalkUrl}/plugins/signalk-alert-center`;
+  const fixture = `${signalkUrl}/plugins/signalk-test-fixture`;
+  const post = (route, body) =>
+    json(`${fixture}/${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const occurrences = () =>
+    json(`${api}/occurrences?path=${encodeURIComponent(path)}`);
+  await post("reading", { path: sensor, value: 20 });
+  await post("zones", {
+    path: sensor,
+    displayName: "Acceptance sensor",
+    units: "K",
+    zones: [
+      { lower: 0, upper: 10, state: "warn" },
+      { lower: 10, upper: 10, state: "alarm" },
+    ],
+  });
+  await post("reading", { path: sensor, value: 10 });
+  const atBoundary = await eventually(
+    occurrences,
+    (page) =>
+      page.items.some(
+        (item) =>
+          item.path === path &&
+          item.state === "active" &&
+          item.currentSeverity === "alarm",
+      ),
+    "single-value zone wins at touching boundary",
+  );
+  const occurrence = atBoundary.items.find(
+    (item) => item.path === path && item.state === "active",
+  );
+  await eventually(
+    () =>
+      json(`${api}/definitions/${encodeURIComponent(occurrence.definitionId)}`),
+    (item) => item.metadata?.zones?.length === 2,
+    "zone thresholds were discovered before removal",
+  );
+  assert.equal(occurrence.message, "Acceptance sensor at 10");
+  assert.equal(occurrence.messageSample?.value, 10);
+  assert.deepEqual(occurrence.messageSample?.generatedZone, {
+    name: "Acceptance sensor",
+    lower: 10,
+    upper: 10,
+  });
+  await post("zones", {
+    path: sensor,
+    displayName: "Acceptance sensor",
+    units: "K",
+    zones: null,
+  });
+  await eventually(
+    occurrences,
+    (page) =>
+      page.items.some(
+        (item) => item.id === occurrence.id && item.state === "cleared",
+      ),
+    "zone removal clears occurrence",
+  );
+  await post("reading", { path: sensor, value: 20 });
+  await post("reading", { path: sensor, value: 10 });
+  await new Promise((resolve) => setTimeout(resolve, 1250));
+  assert.equal(
+    (await occurrences()).items.some(
+      (item) => item.path === path && item.state === "active",
+    ),
+    false,
+  );
+  await eventually(
+    () => json(`${api}/definitions?limit=100`),
+    (page) =>
+      page.items.some(
+        (item) =>
+          item.id === occurrence.definitionId &&
+          item.metadata?.zones?.length === 0,
+      ),
+    "removed thresholds leave history but not current badges",
+  );
+  await post("zones", {
+    path: sensor,
+    displayName: "Acceptance sensor",
+    units: "K",
+    zones: [{ lower: 0, upper: 10, state: "warn" }],
+  });
+  await post("reading", { path: sensor, value: 20 });
+  await post("reading", { path: sensor, value: 10 });
+  await eventually(
+    occurrences,
+    (page) =>
+      page.items.some(
+        (item) =>
+          item.path === path &&
+          item.state === "active" &&
+          item.currentSeverity === "warn",
+      ),
+    "otherwise unmatched upper boundary belongs to zone",
+  );
+  await post("zones", { path: sensor, zones: null });
+}
 console.log("Docker acceptance smoke test passed");

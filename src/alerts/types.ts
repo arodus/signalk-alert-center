@@ -1,3 +1,4 @@
+import type { GeneratedZone } from "../../public/units";
 import type { CoreAlert } from "../signalk/core-alerts";
 /** Reading captured at notification receipt; raw Signal K message stays intact. */
 export interface MessageSample {
@@ -5,6 +6,7 @@ export interface MessageSample {
   value?: number;
   units?: string;
   capturedAt: string;
+  generatedZone?: GeneratedZone;
 }
 
 export const severities = [

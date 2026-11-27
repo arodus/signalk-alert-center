@@ -171,6 +171,18 @@ export class AlertPolicyResolver {
   }
 
   seedDefinitions(zones: ConfiguredZonePath[]): void {
+    const paths = new Set(zones.map((zone) => `notifications.${zone.path}`));
+    // Removing thresholds must not erase the learned identity, policy or history.
+    for (const definition of this.database.listDefinitions()) {
+      if (definition.sourceType !== "zone" || paths.has(definition.pathPattern))
+        continue;
+      const metadata = definition.metadata as ConfiguredZonePath | undefined;
+      if (metadata?.zones?.length)
+        this.database.upsertDefinition({
+          ...definition,
+          metadata: { ...metadata, zones: [] },
+        });
+    }
     zones.forEach((zone) => {
       const path = `notifications.${zone.path}`;
       this.database.upsertDefinition({

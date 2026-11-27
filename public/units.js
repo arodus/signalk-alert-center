@@ -74,12 +74,39 @@ function displayZone(zone, metadata = {}) {
 }
 
 const zoneNumber = "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?";
-function isZoneMessage(message) {
+// Recognize current server defaults from structured thresholds, never arbitrary prose.
+// A receipt snapshot keeps this match valid after zones are edited or removed.
+function generatedZoneMessage(message, metadata = {}) {
+  const candidates = metadata.generatedZone
+    ? [metadata.generatedZone]
+    : (Array.isArray(metadata.zones) ? metadata.zones : [])
+        .filter((zone) => zone && typeof zone === "object" && !zone.message)
+        .map((zone) => ({
+          ...zone,
+          name: metadata.displayName || metadata.path,
+        }));
+  return candidates.find(({ name, lower, upper }) => {
+    if (typeof name !== "string" || !name) return false;
+    const expected =
+      lower === undefined && upper === undefined
+        ? name
+        : lower === undefined
+          ? `${name} at or below ${upper}`
+          : upper === undefined
+            ? `${name} at or above ${lower}`
+            : lower === upper
+              ? `${name} at ${lower}`
+              : `${name} between ${lower} and ${upper}`;
+    return message === expected;
+  });
+}
+function isZoneMessage(message, metadata = {}) {
   return (
-    typeof message === "string" &&
-    new RegExp(
-      `^(undefined|${zoneNumber}) < value < (undefined|${zoneNumber})$`,
-    ).test(message)
+    (typeof message === "string" &&
+      new RegExp(
+        `^(undefined|${zoneNumber}) < value < (undefined|${zoneNumber})$`,
+      ).test(message)) ||
+    Boolean(generatedZoneMessage(message, metadata))
   );
 }
 
@@ -88,6 +115,25 @@ function convertAlertMessage(message, metadata = {}, value) {
   const format = (number) => String(Number(number.toFixed(3)));
   const quantity = (number, units) =>
     `${format(number)}${units ? ` ${units}` : ""}`;
+  const generated = generatedZoneMessage(message, metadata);
+  if (generated) {
+    const { zone, units } = displayZone(generated, metadata);
+    const { lower, upper } = zone;
+    const range =
+      lower === undefined && upper === undefined
+        ? ""
+        : lower === undefined
+          ? ` at or below ${quantity(upper, units)}`
+          : upper === undefined
+            ? ` at or above ${quantity(lower, units)}`
+            : lower === upper
+              ? ` at ${quantity(lower, units)}`
+              : ` between ${quantity(lower, units)} and ${quantity(upper, units)}`;
+    const reading = Number.isFinite(value)
+      ? displayZone({ lower: value }, metadata)
+      : undefined;
+    return `${generated.name}${range}${reading ? ` (reading ${quantity(reading.zone.lower, reading.units)})` : ""}`;
+  }
   if (isZoneMessage(message)) {
     const [low, , , , high] = message.split(" ");
     const lower = low === "undefined" ? undefined : Number(low);
@@ -130,4 +176,5 @@ if (typeof module !== "undefined" && module.exports)
     displayZone,
     convertAlertMessage,
     isZoneMessage,
+    generatedZoneMessage,
   };

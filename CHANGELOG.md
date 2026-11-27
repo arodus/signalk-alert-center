@@ -21,6 +21,7 @@ Versioning while it remains pre-1.0.
   active severity changes, including decreases, while retaining its history.
   Message and location changes keep those actions in effect. Pending remote
   acknowledgements of the old state no longer acknowledge the new state.
+- Format Signal K 2.38 zone messages in display units and preserve captured readings in history and deliveries, including after thresholds change. Removed thresholds no longer remain in the Alerts table; stored history and policy are retained.
 
 ## [0.10.0] - 2026-11-23
 

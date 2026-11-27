@@ -426,8 +426,14 @@ function displayedMessage(item, live = false, message = item?.message) {
         ? undefined
         : sample?.value;
   const units = live ? metadata.units : (sample?.units ?? metadata.units);
-  const formatted = convertAlertMessage(message, { ...metadata, units }, value);
-  return live && isZoneMessage(message)
+  const messageMetadata = {
+    ...metadata,
+    units,
+    path,
+    generatedZone: sample?.generatedZone,
+  };
+  const formatted = convertAlertMessage(message, messageMetadata, value);
+  return live && isZoneMessage(message, messageMetadata)
     ? `${formatted} · ${reading?.timedOut ? "Stale" : Number.isFinite(value) ? "Live" : "Live value unavailable"}`
     : formatted;
 }
@@ -476,7 +482,13 @@ function renderLiveValues() {
     const occurrence = state.occurrences.find(
       (item) => item.id === summary.dataset.summaryOccurrence,
     );
-    if (occurrence && isZoneMessage(occurrence.message)) {
+    if (
+      occurrence &&
+      isZoneMessage(occurrence.message, {
+        ...definition.metadata,
+        generatedZone: occurrence.messageSample?.generatedZone,
+      })
+    ) {
       summary.textContent = [
         displayedMessage(occurrence, Boolean(row.dataset.occurrenceId)),
         definition.ruleStatus,

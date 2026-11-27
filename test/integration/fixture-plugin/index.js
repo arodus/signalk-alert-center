@@ -251,6 +251,14 @@ module.exports = function fixturePlugin(app) {
           ),
         );
       });
+      writes.post("/zones", (request, response) => {
+        const { path, zones, displayName, units } = request.body;
+        app.handleMessage("signalk-test-fixture", {
+          context: "vessels.self",
+          updates: [{ meta: [{ path, value: { zones, displayName, units } }] }],
+        });
+        response.json({ updated: true });
+      });
       writes.post("/unit-metadata", (request, response) => {
         app.handleMessage("signalk-test-fixture", {
           context: "vessels.self",
