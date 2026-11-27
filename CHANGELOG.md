@@ -16,6 +16,10 @@ Versioning while it remains pre-1.0.
   acknowledging or silencing a server-managed legacy notification. Existing
   per-alert path permissions still apply. With ACLs enabled, grant crew `put` on
   both `notifications` and the individual notification paths they may control.
+- Reset a legacy notification's local acknowledgement and silence when its
+  active severity changes, including decreases, while retaining its history.
+  Message and location changes keep those actions in effect. Pending remote
+  acknowledgements of the old state no longer acknowledge the new state.
 
 ## [0.10.0] - 2026-11-23
 

@@ -130,6 +130,13 @@ choice lasts only for the current page.
 
 ![Alert Center in dark mode with the appearance menu open](./docs/screenshots/alert-center-dark.png)
 
+Legacy notification acknowledgement and silence apply to the current severity.
+An active severity change resets those local actions and records that reset in
+history, matching Signal K 2.38.0's notification lifecycle. Message or location
+changes alone preserve them. Wyoming still honors the notification's supplied
+`method`; Alert Center does not add `sound` when an older server or producer
+omits it. Core alerts continue to follow their own upstream lifecycle.
+
 ### Access and permissions
 
 Reading alerts and history follows Signal K's read-only access settings, including
