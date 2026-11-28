@@ -5,10 +5,19 @@ Versioning while it remains pre-1.0.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-28
+
+### Upgrade and rollback
+
+Upgrading from 0.11.0 requires no configuration changes, database migration, or special backup. Both versions use schema 6. Existing alert history stays intact. The history fix prevents redundant rows on new updates and does not reclaim space already used.
+
+To roll back, reinstall 0.11.0. Signal K retains the event-driven defaults for quiet-hours and snooze paths after a downgrade. Explicit user metadata takes precedence. A package downgrade was not tested. For upgrades from earlier versions, see the 0.11.0 migration and backup instructions below.
+
 ### Fixes
 
-- Refresh configured zones when Signal K publishes zone metadata after startup, avoiding a wait of up to five minutes or a plugin restart.
-- Repeated unchanged notifications now refresh their last-seen time without adding a history entry. Existing history is retained.
+- Repeated notifications refresh the last-seen time and latest reading without adding a history row for each value change. [#147](https://github.com/arodus/signalk-alert-center/pull/147)
+- Quiet-hours and snooze controls retain their values when Signal K enforces data timeouts. [#144](https://github.com/arodus/signalk-alert-center/pull/144)
+- Zones added or changed after startup appear in the Alerts list within about a second. [#143](https://github.com/arodus/signalk-alert-center/pull/143)
 
 ## [0.11.0] - 2026-11-27
 
