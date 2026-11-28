@@ -8,6 +8,7 @@ Versioning while it remains pre-1.0.
 ### Fixes
 
 - Refresh configured zones when Signal K publishes zone metadata after startup, avoiding a wait of up to five minutes or a plugin restart.
+- Repeated unchanged notifications now refresh their last-seen time without adding a history entry. Existing history is retained.
 
 ## [0.11.0] - 2026-11-27
 

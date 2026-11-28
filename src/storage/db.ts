@@ -5,6 +5,7 @@ import {
 } from "../signalk/core-alerts";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import {
   AlertDefinitionRecord,
   AlertEventRecord,
@@ -111,6 +112,20 @@ const date = (value: unknown): Date | undefined =>
   value ? new Date(String(value)) : undefined;
 const json = (value: unknown): unknown | undefined =>
   value === null || value === undefined ? undefined : JSON.parse(String(value));
+
+function notificationMethods(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object" || !("method" in payload))
+    return [];
+  return Array.isArray(payload.method)
+    ? [
+        ...new Set(
+          payload.method.filter(
+            (item): item is string => typeof item === "string",
+          ),
+        ),
+      ].sort()
+    : [];
+}
 
 function ensureColumn(
   database: DatabaseSync,
@@ -1137,9 +1152,8 @@ export class AlertDatabase {
         // A null removal has no replacement value; retain the last known place.
         const location =
           alert.sourcePayload === null ? previousLocation : alert.location;
-        const previousMessage = active.message
-          ? String(active.message)
-          : undefined;
+        const previousMessage =
+          active.message == null ? undefined : String(active.message);
         const maxSeverity =
           severityRank(active.max_severity as AlertRecord["maxSeverity"]) >
           severityRank(alert.severity)
@@ -1278,7 +1292,12 @@ export class AlertDatabase {
           !clearing &&
           previousSeverity === alert.severity &&
           previousMessage === alert.message &&
-          previousLocation === location
+          previousLocation === location &&
+          active.source_payload_json !== payload &&
+          !isDeepStrictEqual(
+            notificationMethods(json(active.source_payload_json)),
+            notificationMethods(alert.sourcePayload),
+          )
         )
           this.addEvent(id, "updated", now, alert.sourcePayload);
         if (suppression) this.addEvent(id, "suppressed_before_activation", now);

@@ -61,7 +61,9 @@ describe("occurrence storage", () => {
       ["ntfy"],
     );
     expect(db.listDeliveries()[0].alertSnapshot?.messageSample).toBeUndefined();
-    expect(db.listAlertEvents().at(-1)?.messageSample).toEqual(sample);
+    expect(db.listAlertEvents().map((event) => event.eventType)).toEqual([
+      "raised",
+    ]);
     // A startup replay has no new sample; it must preserve the durable reading.
     db.ingest(active({ message }), ["ntfy"]);
     expect(db.getAlert(before!.id).messageSample).toEqual(sample);
@@ -75,7 +77,7 @@ describe("occurrence storage", () => {
     });
   });
 
-  it("keeps each receipt sample in history and delivery snapshots after subsequent updates and clear", () => {
+  it("keeps the raised sample in history and delivery snapshots during value updates", () => {
     const db = database();
     const message = "273.15 < value < 300";
     const first = {
@@ -109,7 +111,7 @@ describe("occurrence storage", () => {
     expect(db.listDeliveries()[0].alertSnapshot?.messageSample).toEqual(first);
     expect(
       db.listAlertEvents(occurrence!.id).map((event) => event.messageSample),
-    ).toEqual([first, second, undefined]);
+    ).toEqual([first, undefined]);
     const raised = db
       .queryAlertHistory()
       .items.find((event) => event.eventType === "raised");
@@ -624,22 +626,41 @@ describe("occurrence storage", () => {
     expect(db.listDeliveries()).toEqual([]);
   });
 
-  it("records repeated unchanged Signal K updates in alert history", () => {
+  it("refreshes the occurrence timestamps without logging unchanged repeats", () => {
     const db = database();
-    const raised = db.ingest(
-      active({ sourcePayload: { state: "alarm", message: "Anchor dragging" } }),
-      [],
-      new Date("2026-01-01T00:00:00Z"),
+    const first = new Date("2026-01-01T00:00:00Z");
+    const last = new Date("2026-01-01T00:01:00Z");
+    const message = "Anchor dragging";
+    const sample = { message, value: 12, units: "m" };
+    const occurrence = db.ingest(
+      active({
+        sourceTimestamp: first,
+        sourcePayload: { state: "alarm", message },
+        messageSample: { ...sample, capturedAt: first.toISOString() },
+      }),
+      ["ntfy"],
+      first,
     )!;
     db.ingest(
-      active({ sourcePayload: { state: "alarm", message: "Anchor dragging" } }),
-      [],
-      new Date("2026-01-01T00:01:00Z"),
+      active({
+        sourceTimestamp: last,
+        sourcePayload: { message, state: "alarm", value: 13 },
+        messageSample: { ...sample, value: 13, capturedAt: last.toISOString() },
+      }),
+      ["ntfy"],
+      last,
     );
 
+    expect(db.getAlert(occurrence.id)).toMatchObject({
+      firstSeenAt: first,
+      lastSeenAt: last,
+      sourceTimestamp: last,
+      messageSample: { ...sample, value: 13, capturedAt: last.toISOString() },
+    });
     expect(
-      db.listAlertEvents(raised.id).map((event) => event.eventType),
-    ).toEqual(["raised", "updated"]);
+      db.listAlertEvents(occurrence.id).map((event) => event.eventType),
+    ).toEqual(["raised"]);
+    expect(db.listDeliveries()).toHaveLength(1);
   });
 
   it("resets all stored data and re-initializes the schema", () => {
