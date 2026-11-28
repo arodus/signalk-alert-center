@@ -230,6 +230,10 @@ excluded from the badge. The alert list loads independently, with preferred unit
 filled in as background metadata requests complete. Detailed diagnostics load when
 the System diagnostics section is expanded.
 
+Zone metadata added or changed after startup refreshes the Alerts list automatically.
+Updates arriving within one second of the first change are combined into one scan.
+The five-minute discovery scan remains a fallback; a plugin restart is not needed.
+
 When Signal K’s `settings.notifications.manageNotifications` is explicitly `false`,
 Alert Center skips metadata zone discovery and hides stored zones with no retained
 occurrences.
