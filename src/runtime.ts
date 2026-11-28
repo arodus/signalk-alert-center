@@ -14,6 +14,7 @@ import { mayWritePath } from "./signalk/permissions";
 import { QuietHoursClock } from "./suppression/quiet-hours";
 import { SuppressionStore, SuppressionReason } from "./suppression/store";
 import { publishSnooze, registerSnoozePuts } from "./signalk/snooze";
+import { registerControlMetadata } from "./signalk/control-metadata";
 import {
   publishQuietHoursControl,
   registerQuietHoursPut,
@@ -2269,6 +2270,12 @@ export class AlertCenterRuntime {
         () => this.suppression!.getQuietHoursControl(),
         (enabled, source) => this.setQuietHoursEnabled(enabled, source),
       );
+    void registerControlMetadata(this.app).catch((error: unknown) =>
+      this.reportAsyncError(
+        "Could not register Alert Center control metadata",
+        error,
+      ),
+    );
     publishSnooze(this.app, this.suppression.getSnooze());
     publishQuietHoursControl(this.app, this.suppression.getQuietHoursControl());
     this.scheduleNextWake();
